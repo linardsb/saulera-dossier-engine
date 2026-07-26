@@ -1,0 +1,92 @@
+{
+  "candidate_ref": "C-4471",
+  "role_title": "Senior Community Staff Nurse — Ashdown Park Community Healthcare",
+  "headline": "Four years of autonomous district nursing on a rural caseload, which is the specific thing your last two hires were missing.",
+  "evidence": [
+    {
+      "requirement": "NMC registration, no restrictions",
+      "text": "Registered, current, and unrestricted, with revalidation completed this year.",
+      "source_quote": "NMC registered nurse (adult), registration current, no conditions or restrictions.",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "Three years post-registration, at least one in a community or district nursing setting",
+      "text": "Five years post-registration, four of them in district nursing — comfortably past the threshold on the part that matters.",
+      "source_quote": "five years post-registration experience, four of them in\ndistrict nursing",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "Comfortable lone working with a rural caseload; full UK licence and own car",
+      "text": "Has held a rural caseload of 20 to 30 housebound patients, visiting alone, and drives it daily.",
+      "source_quote": "Held an autonomous caseload of 20 to 30 housebound patients across a rural patch,\n  visiting alone.",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "Independent wound assessment and management, including compression bandaging",
+      "text": "Assesses and manages wounds independently, including compression bandaging for venous leg ulcers.",
+      "source_quote": "Carried out independent wound assessments and applied compression bandaging for venous\n  leg ulcers",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "End-of-life care and syringe driver management",
+      "text": "Runs syringe drivers on an end-of-life pathway and is signed off to verify expected death.",
+      "source_quote": "Managed syringe drivers for patients on an end-of-life pathway",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "Desirable — SystmOne, mentorship, V300",
+      "text": "Uses SystmOne daily, has precepted two newly qualified nurses, and has said they want to start the V300.",
+      "source_quote": "Used SystmOne daily for caseload management and clinical notes.",
+      "source_type": "cv"
+    }
+  ],
+  "process_fit": [
+    {
+      "text": "Your Clinical Services Manager has told us what the first stage is really testing, and this candidate's whole record is the answer to it.",
+      "source_quote": "clinical skill is the easy part and\nwhat they cannot train is comfort with autonomy",
+      "source_type": "client_note"
+    },
+    {
+      "text": "The question about the last independent call has a real answer here rather than a hypothetical one: four years of solo visits, with the nearest colleague a phone call away.",
+      "source_quote": "They ask about the last time you made a\ncall on your own with nobody to check it with.",
+      "source_type": "client_note"
+    },
+    {
+      "text": "The second-stage scenario tests escalation judgement, not clinical knowledge — and this candidate has been the person deciding whether to escalate, not the person with a ward team to escalate to.",
+      "source_quote": "They are testing\nescalation and documentation, not clinical knowledge.",
+      "source_type": "client_note"
+    },
+    {
+      "text": "On the documentation point governance cares about: daily SystmOne use across a full caseload, plus a formal verification-of-expected-death competency, which is about as paper-trailed as community practice gets.",
+      "source_quote": "Anything that shows careful record-keeping lands well.",
+      "source_type": "client_note"
+    }
+  ],
+  "gaps": [
+    {
+      "text": "IV therapy is on their record, but from a surgical unit rather than in the community. Delivering it in someone's front room is a different job and we have no evidence they have done it there.",
+      "source_quote": "Cannulation and IV antibiotic administration.",
+      "source_type": "cv"
+    },
+    {
+      "text": "They are currently a Band 5 and this is a Band 6 equivalent post. The community experience is there; the formal step up is not.",
+      "source_quote": "District Nurse (Band 5)",
+      "source_type": "cv"
+    },
+    {
+      "text": "The V300 is an expression of interest, not an enrolment. We have not seen a course place or a start date.",
+      "source_quote": "Has expressed interest in starting the V300 non-medical prescribing course.",
+      "source_type": "cv"
+    },
+    {
+      "text": "We have no evidence either way on how they handle a family disagreeing with a DNACPR decision, which was one of your recent second-stage scenarios.",
+      "source_quote": "",
+      "source_type": "unverified"
+    }
+  ],
+  "open_questions": [
+    "Confirm whether they have delivered IV therapy in a community setting, not just on the ward — this is the one essential where the CV is thin.",
+    "Ask directly about a DNACPR disagreement before second stage; it has come up on your panel and the CV says nothing about it.",
+    "Check their notice period. You have moved to offer within a week of second stage before, and we should know now whether they can meet that."
+  ]
+}

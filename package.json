@@ -1,0 +1,10 @@
+{
+  "name": "saulera-dossier-engine",
+  "private": true,
+  "type": "module",
+  "description": "Generated, evidence-anchored candidate submission packs for small recruitment agencies",
+  "scripts": {
+    "spike": "node spike/local.js",
+    "spike:tamper": "node spike/local.js --tamper"
+  }
+}
