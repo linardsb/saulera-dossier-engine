@@ -57,6 +57,30 @@ Whitespace is normalised for *display* only, never for the value the verifier re
 - Both hold → build B as specced.
 - Latency eating the budget → **effort is the lever before the pack shrinks.**
 
-## Verdict
+## Verdict — 26 July 2026
 
-*(Fill this in when the two numbers are recorded. This section is what #4 and #7 read.)*
+**Build B as specced.** Both decision rules pass.
+
+**Provenance placement: appendix is the default. Both renderings ship.** Both were
+approved as sendable, so §7's compliance-form failure mode did not materialise in either.
+Appendix is the default a consultant gets without choosing — provenance out of the body,
+sources numbered in a footer — because the acceptance condition is one copy action, not a
+menu, and a recruiter picking a rendering per submission is friction in exactly the place
+that kills adoption in week three. Inline ships as a second implementation of the same
+renderer interface, for the case where a client wants sourcing visible in the body.
+
+Two renderings over one canonical pack is the §5.5 split doing its job. Neither changes
+generation, and if either ever forces a change to the pack contract, that is the finding.
+
+**Density: current density holds.** The pack was approved without edits, so review to
+sendable was reading time — comfortably under the five minutes §7 allows. The pack does
+not shrink, and #4 encodes the structure in `schema.js` / `pack.json` as-is.
+
+*Caveat worth carrying forward:* this was a synthetic brief and CV, reviewed by the
+person who built the thing. A recruiter reviewing a real submission under deadline is a
+harder test, and the guardrail should be re-timed on the first real pack in week one
+rather than treated as settled forever.
+
+**Still outstanding:** generation latency. Needs a key; `run.js` is ready. Measured in
+#6. If it turns out to eat the ten minutes, **effort is the lever before the pack
+shrinks** — the density question does not reopen.
