@@ -85,6 +85,23 @@ export function cleanName(raw) {
 }
 
 /**
+ * The agency's own name, which unlike a client's may legitimately be empty — the migration
+ * seeds the row that way.
+ *
+ * The length rule is the same rule, and it throws rather than truncating. Truncating silently
+ * stored the first 120 characters of a longer name while `cleanName` called the identical
+ * situation `too_long`, which is two validation vocabularies for one concept and leaves the
+ * agency looking at a name it did not type.
+ */
+export function cleanAgencyName(raw) {
+  const name = String(raw ?? "").trim();
+  if (name.length > NAME_MAX) {
+    throw new StoreError("too_long", 400, `name: longer than ${NAME_MAX} characters`);
+  }
+  return name;
+}
+
+/**
  * The note, untouched.
  *
  * It does not trim, collapse or normalise anything. This is markdown the agency wrote, and
@@ -194,7 +211,15 @@ export async function getAgency(db) {
     .prepare("SELECT id, name, send_format, renderer, updated_at FROM agency WHERE id = 1")
     .first();
   if (!agency) {
-    throw new StoreError("not_configured", 503, "agency: no row — has the migration run?");
+    // Not `not_configured`: that code means the DB binding did not resolve, which is a
+    // different fault with a different fix (bind it in the dashboard, versus run the
+    // migration). One code for both sent DEPLOY.md's triage table to the wrong remedy half
+    // the time.
+    throw new StoreError(
+      "not_migrated",
+      503,
+      "agency: no row — the migration has not run against this database",
+    );
   }
   return agency;
 }
@@ -204,7 +229,7 @@ export async function updateAgency(db, patch = {}) {
   const values = [];
   if (Object.hasOwn(patch, "name")) {
     columns.push("name = ?");
-    values.push(String(patch.name ?? "").trim().slice(0, NAME_MAX));
+    values.push(cleanAgencyName(patch.name));
   }
   if (Object.hasOwn(patch, "send_format")) {
     columns.push("send_format = ?");
@@ -232,14 +257,44 @@ export async function updateAgency(db, patch = {}) {
 // the epic's primary metric, and #5 names it as the first thing that gets silently descoped.
 
 /**
+ * Does this client exist? Deliberately narrower than `getClient`.
+ *
+ * The events path needs a boolean and nothing else. `getClient` selects the whole row, so
+ * recording one pack dragged up to NOTE_MAX characters of the note — business-context personal
+ * data naming hiring managers — across the wire, on the one path AC4 says must never touch it.
+ */
+async function requireClient(db, id) {
+  const found = await db
+    .prepare("SELECT id FROM clients WHERE id = ?")
+    .bind(String(id ?? ""))
+    .first("id");
+  if (!found) throw new StoreError("not_found", 404, `no client with id ${id}`);
+  return found;
+}
+
+/**
  * One generation event. The timestamp is the database's, not the caller's — a caller who can
  * set the time can rewrite the metric.
  */
 export async function recordEvent(db, { clientId, durationMs } = {}) {
-  await getClient(db, clientId); // an event for an unknown client is a bug, not a row
-  if (!Number.isInteger(durationMs) || durationMs < 0) {
-    throw new StoreError("missing_fields", 400, "duration_ms: must be a non-negative integer");
+  // The duration before the client, so a request that gets both wrong names both faults. The
+  // other order reported not_found and hid the malformed field entirely.
+  //
+  // The upper bound is not decoration: Number.isInteger(1e21) is true, SQLite's INTEGER
+  // affinity stores it as a real, and one such row makes SUM(duration_ms) permanently
+  // 1.79e308 — one bad event poisoning the metric this ticket exists to create.
+  if (
+    !Number.isInteger(durationMs) ||
+    durationMs < 0 ||
+    durationMs > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new StoreError(
+      "missing_fields",
+      400,
+      "duration_ms: must be a non-negative integer no larger than Number.MAX_SAFE_INTEGER",
+    );
   }
+  await requireClient(db, clientId); // an event for an unknown client is a bug, not a row
   await db
     .prepare("INSERT INTO events (client_id, duration_ms) VALUES (?, ?)")
     .bind(String(clientId), durationMs)

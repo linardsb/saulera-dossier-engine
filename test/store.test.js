@@ -21,6 +21,7 @@ import {
   NOTE_MAX,
   SEND_FORMATS,
   StoreError,
+  cleanAgencyName,
   cleanName,
   cleanNote,
   cleanRenderer,
@@ -197,12 +198,17 @@ test("recordEvent binds the client and the duration and nothing else", async () 
   assert.doesNotMatch(insert.sql, /created_at/i);
 });
 
-test("no events SQL mentions a name, a candidate, a cv or a note", async () => {
-  const db = fakeD1([CLIENT, null]);
+test("no SQL on the whole event path mentions a name, a candidate, a cv or a note", async () => {
+  const db = fakeD1([{ id: CLIENT.id }, null]);
   await recordEvent(db, { clientId: CLIENT.id, durationMs: 1 });
   await eventCounts(db);
 
-  for (const call of db.calls.filter((c) => /events/i.test(c.sql))) {
+  // EVERY call, not the ones whose SQL happens to say "events". The filter here used to be
+  // /events/i.test(c.sql), which excluded recordEvent's own existence check by construction —
+  // and that check was `SELECT id, name, note, … FROM clients`. The assertion's name was true
+  // of the statements it looked at and false of the path it claimed to cover.
+  assert.ok(db.calls.length >= 3, "the event path should have issued the calls being checked");
+  for (const call of db.calls) {
     assert.doesNotMatch(
       call.sql,
       /\bname\b|candidate|\bcv\b|\bnote\b|\bpack_|role|brief/i,
@@ -211,18 +217,37 @@ test("no events SQL mentions a name, a candidate, a cv or a note", async () => {
   }
 });
 
+test("the event path reads the client's id and never its note", async () => {
+  const db = fakeD1([{ id: CLIENT.id }, null]);
+  await recordEvent(db, { clientId: CLIENT.id, durationMs: 1 });
+
+  const select = db.calls.find((c) => /^SELECT/i.test(c.sql));
+  assert.match(select.sql, /^SELECT id FROM clients/i, "an existence check needs the id alone");
+});
+
 test("recordEvent refuses an unknown client and a nonsense duration", async () => {
   assert.equal(
     await codeOf(() => recordEvent(fakeD1([null]), { clientId: "nope", durationMs: 1 })),
     "not_found",
   );
-  for (const durationMs of [-1, 1.5, "8200", null, undefined, NaN]) {
+  // 1e21 passes Number.isInteger, lands as a real in an INTEGER column, and makes
+  // SUM(duration_ms) permanently 1.79e308 — one row poisoning the epic's primary metric.
+  for (const durationMs of [-1, 1.5, "8200", null, undefined, NaN, 1e21, Number.MAX_VALUE]) {
     assert.equal(
-      await codeOf(() => recordEvent(fakeD1([CLIENT, null]), { clientId: CLIENT.id, durationMs })),
+      await codeOf(() => recordEvent(fakeD1([{ id: CLIENT.id }, null]), { clientId: CLIENT.id, durationMs })),
       "missing_fields",
       `duration_ms ${durationMs} should be rejected`,
     );
   }
+});
+
+test("a malformed duration is named even when the client is also wrong", async () => {
+  // Checking the client first reported not_found and hid the malformed field, so a caller
+  // fixing one fault at a time never learned about the second.
+  assert.equal(
+    await codeOf(() => recordEvent(fakeD1([null]), { clientId: "nope", durationMs: -1 })),
+    "missing_fields",
+  );
 });
 
 test("eventCounts totals the per-client rows", async () => {
@@ -239,7 +264,9 @@ test("eventCounts on an empty table is zero, not null", async () => {
 // ── the agency row ─────────────────────────────────────────────────────────────────────
 
 test("a missing agency row is a broken deployment, not something to insert", async () => {
-  assert.equal(await codeOf(() => getAgency(fakeD1([null]))), "not_configured");
+  // not_migrated, not not_configured: a missing binding and an unmigrated database are
+  // different faults with different remedies, and DEPLOY.md's triage table maps them apart.
+  assert.equal(await codeOf(() => getAgency(fakeD1([null]))), "not_migrated");
   const db = fakeD1([null]);
   await codeOf(() => getAgency(db));
   assert.ok(
@@ -263,6 +290,19 @@ test("updateAgency validates the renderer and the send format before writing", a
   const update = db.calls.find((c) => /^UPDATE agency/i.test(c.sql));
   assert.match(update.sql, /renderer = \?/);
   assert.equal(update.args[0], "inline");
+});
+
+test("an over-long agency name is an error, not a silent truncation", async () => {
+  // One validation vocabulary. This used to .slice(0, NAME_MAX) while cleanName called the
+  // identical situation too_long, so the agency got back a name it never typed.
+  assert.equal(cleanAgencyName(""), "", "the migration seeds this row with an empty name");
+  assert.equal(cleanAgencyName("  Sussex Care Partners  "), "Sussex Care Partners");
+  assert.equal(cleanAgencyName("a".repeat(NAME_MAX)), "a".repeat(NAME_MAX));
+  assert.equal(await codeOf(() => cleanAgencyName("a".repeat(NAME_MAX + 1))), "too_long");
+  assert.equal(
+    await codeOf(() => updateAgency(fakeD1([AGENCY]), { name: "a".repeat(NAME_MAX + 1) })),
+    "too_long",
+  );
 });
 
 test("the agency row carries no branding column (Decision 6)", async () => {

@@ -30,6 +30,17 @@ export function fakeD1(queued = []) {
         // bind() returns the statement so calls chain, exactly as D1 does. Model it or every
         // store call throws on `.first of undefined`.
         bind(...args) {
+          // The one thing a recording fake can still check about a real database: that the
+          // arguments and the placeholders agree. Without this the fake accepted any number of
+          // binds, so a statement that had gained a `?` — or lost one — passed every test here
+          // and failed only in production.
+          const placeholders = (sql.match(/\?/g) ?? []).length;
+          if (args.length !== placeholders) {
+            throw new Error(
+              `bind() got ${args.length} argument(s) for a statement with ${placeholders} ` +
+                `placeholder(s). D1 rejects that at runtime: ${sql}`,
+            );
+          }
           call.args = args;
           return statement;
         },
