@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Generated, evidence-anchored candidate submission packs for small recruitment agencies",
   "scripts": {
+    "test": "node --test test/",
     "spike": "node spike/local.js",
     "spike:tamper": "node spike/local.js --tamper"
   }
