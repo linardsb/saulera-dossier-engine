@@ -12,11 +12,12 @@ process. **That note is the product. The generation is the cheap part.**
 Live at **https://saulera-dossier-engine.pages.dev** — a Cloudflare Pages site serving
 `public/`. Still no secrets and no build step.
 
-The Pages Functions and the D1 schema for the client knowledge store are **written and merged
-but not yet serving**: production's database has no tables, because `npm run db:remote` has
-deliberately not been run. Until it is, every `/api/*` route answers `503 not_migrated` and
-`/clients` — a static file, so it renders — shows the deployment-fault message and no clients.
-See `DEPLOY.md` §5, which is the runbook for finishing it.
+The Pages Functions and the D1 schema for the client knowledge store are **written and their
+database is live, but not yet serving production**: #5 is still an open PR, so `main` carries
+no `functions/`. Both D1 databases are created, bound and migrated — production verified by
+`d1 execute dossier-engine --remote`, which returns `agency`, `clients` and `events` with the
+seed agency row and zero clients. The store starts serving the moment #5 merges. See
+`DEPLOY.md` §5.
 
 `src/` — the pack contract, the provenance verifier, both renderers and the store — is library
 code, driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
@@ -29,8 +30,8 @@ creates both. Verified: both hostnames answer `302` to `cloudflareaccess.com`.
 **The client knowledge store is built** (27 Jul 2026, #5). Three tables in D1, four `/api/*`
 routes over them, and a screen at **`/clients`** where the agency adds a client and edits its
 note. The non-personal event counter ships with it, so the epic's primary metric is a number
-rather than a memory. **It goes live the moment the production migration runs** — one command,
-`npm run db:remote`, and until then the routes answer `503 not_migrated`.
+rather than a memory. Its D1 databases are created, bound and migrated on both environments;
+**it goes live when #5 merges**, because that is what puts `functions/` on `main`.
 
 Not built: generation (#6), the recruiter screen (#8). See **#1** for the epic, the dependency
 graph and the date gates. `DEPLOY.md` is the runbook for the deployment.

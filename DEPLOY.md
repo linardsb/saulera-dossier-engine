@@ -201,16 +201,31 @@ seconds before treating a `200` as real.
 
 ---
 
-## 5. D1 — the client knowledge store · ⚠️ PARTIAL 27 Jul 2026 (#5)
+## 5. D1 — the client knowledge store · ✅ DONE 27 Jul 2026 (#5)
 
-**Done:** both databases created, the `DB` binding set on production and preview, the preview
-database migrated.
-**Not done:** `npm run db:remote`. **Production's database has no tables** — verified by
-`d1 execute dossier-engine --remote`, which returns `_cf_KV` and nothing else.
+Both databases created, the `DB` binding set on production and preview, **and both databases
+migrated**. Verified the way this file means `✅ DONE` — by asking the database, not by having
+run the command:
 
-Everywhere else in this file `✅ DONE <date>` means verified-done. This section is not, and
-until the migration runs every `/api/*` route on production answers `503 not_migrated` and
-`/clients` shows the deployment-fault message. **Run the migration before you rely on §5.**
+```
+d1 execute dossier-engine --remote "SELECT name FROM sqlite_master WHERE type='table'"
+  -> agency · clients · events · d1_migrations · _cf_KV · sqlite_sequence
+d1 execute dossier-engine --remote "SELECT id, send_format, renderer FROM agency"
+  -> 1 · email_body · appendix          ← the seed row the migration inserts
+d1 execute dossier-engine --remote "SELECT COUNT(*) FROM clients"
+  -> 0
+```
+
+`d1_migrations` is wrangler's own bookkeeping table and `_cf_KV` is Cloudflare's. Neither is
+ours, which is why `test/schema.test.js` parses `migrations/*.sql` rather than `sqlite_master`.
+
+**This section was `⚠️ PARTIAL` between 27 Jul and this migration**, because `npm run db:remote`
+had deliberately not been run. It is recorded here rather than deleted: a doc that quietly
+flips to DONE teaches nobody why the distinction mattered.
+
+**The store is not serving production yet, and that is not §5's doing** — #5 is still an open
+PR, so `main` carries no `functions/`. The database is ready for the merge; nothing more is
+owed here.
 
 Two databases and one binding name. **Per agency**, because the notes are that agency's own
 data: they name real hiring managers and panel members.
@@ -275,7 +290,7 @@ the dashboard.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `503 {"error":"not_configured"}` from any `/api/*` | the `DB` binding did not resolve | re-run `scripts/setup-d1.py` and read its confirming GET; if it reports the binding present and the deployment still answers 503, bind it in the dashboard under Settings → Bindings and redeploy |
-| `503 {"error":"not_migrated"}` from any `/api/*` | the binding resolved, but that database has no tables | `npm run db:remote` for production, `npm run db:preview` for previews. **This is the current state of production** — see the header of this section |
+| `503 {"error":"not_migrated"}` from any `/api/*` | the binding resolved, but that database has no tables | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations, and both have been run |
 | `200` returning the `index.html` shell instead of JSON | `functions/` was not picked up | confirm it is at the repo root and the project root directory is `/`; the build log should say `Found Functions directory at /functions` |
 | the build fails with a module error | a Function could not bundle its `../../src/` imports | move the shared modules to `functions/_lib/` and re-point the imports; the tests can import from anywhere |
 | `500 {"error":"internal"}` on a route that used to work | the migration did not run against this environment's database | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations |
