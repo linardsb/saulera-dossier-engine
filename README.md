@@ -9,21 +9,25 @@ process. **That note is the product. The generation is the cheap part.**
 
 ## Status
 
-Live at **https://saulera-dossier-engine.pages.dev** — a static Cloudflare Pages site
-serving `public/`. That is the whole deployment: two files, no Functions, no secrets, no
-build step.
+Live at **https://saulera-dossier-engine.pages.dev** — a Cloudflare Pages site serving
+`public/`, with Pages Functions over a D1 database for the client knowledge store. Still no
+secrets and no build step.
 
-`src/` — the pack contract, the provenance verifier and both renderers — is library code,
-driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
+`src/` — the pack contract, the provenance verifier, both renderers and the store — is library
+code, driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
 
 **Behind Cloudflare Access** (27 Jul 2026, #12). Production and every preview hostname
 require an email one-time PIN; only `linardsberzins@gmail.com` is admitted. Two Access
 applications, because a wildcard does not cover the apex — `scripts/setup-access.py`
 creates both. Verified: both hostnames answer `302` to `cloudflareaccess.com`.
 
-Not built: generation (#6), the client knowledge store (#5), the recruiter screen (#8).
-See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the
-runbook for the deployment.
+**The client knowledge store is live** (27 Jul 2026, #5). Three tables in D1, four `/api/*`
+routes over them, and a screen at **`/clients`** where the agency adds a client and edits its
+note. The non-personal event counter ships with it, so the epic's primary metric is a number
+rather than a memory.
+
+Not built: generation (#6), the recruiter screen (#8). See **#1** for the epic, the dependency
+graph and the date gates. `DEPLOY.md` is the runbook for the deployment.
 
 ## Where the specs live
 
@@ -42,14 +46,49 @@ Recorded here so they don't get re-litigated per ticket. The architecture doc is
 source for everything decided before the build; this covers what was decided during it.
 
 **Model access: Claude Code on the subscription. No API key, no server.** (27 Jul 2026.)
-Packs are generated in Claude Code using `src/`, by hand, and sent. Cloudflare Pages serves
-`public/` as a static site and nothing else — there is no Function, no `ANTHROPIC_API_KEY`,
-and nothing to deploy but two files.
+Packs are generated in Claude Code using `src/`, by hand, and sent. **Nothing in this
+deployment calls a model.** There is no `ANTHROPIC_API_KEY` and no runtime SDK, and that has
+not changed since #5 added Functions for storage — see the entry below, which restates the
+same boundary rather than relaxing it.
 
 A Pages Function *cannot* use the subscription: subscription auth is a short-lived OAuth
 token in a local credential file that the CLI refreshes, and a Function has no filesystem and
 no process to refresh it. So a model call from Pages means a per-token API key. That trade is
 only worth making once an agency is self-serving — which is #6, and is not an MVP problem.
+
+**Storage: Cloudflare D1, not KV.** (27 Jul 2026, #5.) Both handle a few packs a week from a
+two-to-ten-person agency, so throughput does not decide it. Two things do. First, *"there is no
+candidate table"* is the strongest sentence this product says out loud, and it is said to a
+clinical staffing client — with D1 there is one reviewable file, `migrations/0001_init.sql`,
+that can be pointed at and tested, where a KV namespace has no schema to show. `test/schema.test.js`
+parses that file and fails the suite on a fourth table or a fifth `events` column. Second, the
+editor needs read-after-write: KV is eventually consistent, and an agency saving a note,
+reloading and seeing its old text would land that weakness on the exact surface that *is* the
+product. The counter settles what is left — `SELECT client_id, COUNT(*) … GROUP BY client_id`
+against a key-space scan. D1 is on the Workers free plan: 10 databases, 500 MB each, 5 GB per
+account.
+
+**Pages Functions return, for storage only.** (27 Jul 2026, #5.) **The model-access boundary
+below is unchanged**: there is still no model call from this deployment, no
+`ANTHROPIC_API_KEY`, and no runtime SDK. What the amendment above forbids is a *model call*
+from Pages, and its reasoning is about a credential a V8 isolate cannot refresh. A D1 binding
+is not a secret and needs no filesystem, so it does not touch that argument. Without a
+server-side store there is nowhere for the note to live and no way for the agency rather than
+saulera to edit it, which is the whole point of the ticket.
+
+The binding is configured **per deployment** through the Pages API by `scripts/setup-d1.py`,
+not in `wrangler.toml`. A `database_id` is per-agency config and `wrangler.toml` is engine —
+tracked upstream and pulled by every agency — so an id in it forks an engine file per agency
+and conflicts on every pull. Production and preview get different databases: a preview deploy
+writing real client notes is not acceptable, and the notes name real hiring managers.
+
+**`--text-muted` was darkened from `#8c8c8c` to `#6b6b6b`.** (27 Jul 2026, #5.) Not a
+preference. The old value measures 3.08:1 on `--surface` and fails the 4.5:1 body-text
+contrast floor, and row meta and the note scaffold both sit on `--surface`. The new value is
+4.89:1 there and 5.33:1 on `--background`. This is an engine-side token, so every agency
+inherits the fix. Two related facts worth knowing before using the palette: `--accent` is
+3.00:1 on white, so it is a fill and never a text colour, and a button label on it must be
+`--text-primary` (5.62:1) rather than white (3.00:1).
 
 **Provenance placement: appendix by default; both renderings ship.** (26 Jul 2026, spike
 #2.) Body reads as prose, sources numbered in a footer. Inline sourcing ships as a second
@@ -88,13 +127,21 @@ back up.
 **Engine — tracked upstream, shared by every agency:**
 
 - `src/` — the pack contract and schema (`pack.js`), the prompt (`prompt.js`), the
-  provenance verifier (`provenance.js`), and both renderers (`render/`)
-- `public/` — including `tokens.css`, the default token layer
+  provenance verifier (`provenance.js`), both renderers (`render/`), the client knowledge
+  store (`store.js`) and the HTTP helpers its endpoints share (`http.js`)
+- `functions/api/` — the thin adapters over the store. Storage only; no model call
+- `migrations/` — the schema, one reviewable file
+- `public/` — including `tokens.css`, the default token layer, and `app.css`, the components
+  built from it
+- `scripts/setup-d1.py` and `scripts/dev.py` — binding the databases and the local dev loop
 - `wrangler.toml` — the Pages project name and compatibility date
 
 **Config — per agency, never merged upstream:**
 
 - the client knowledge notes (the product's compounding asset, and the agency's own data)
+- **the two D1 databases and their `DB` bindings** — one for production, one for preview. That
+  agency's notes live in that agency's own database, and nothing about it is in this repo:
+  `scripts/setup-d1.py` resolves the ids by name and binds them per deployment
 - branding, expressed as overrides of the custom properties in `public/tokens.css` — a
   variable swap, never a fork
 - the renderer choice, inline or appendix (settled by the spike as an agency-level
