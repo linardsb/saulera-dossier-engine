@@ -9,8 +9,21 @@ process. **That note is the product. The generation is the cheap part.**
 
 ## Status
 
-Scaffolding only. The build starts at #3; see **#1** for the epic, the dependency graph and
-the date gates. Nothing here is deployed yet.
+The deploy shell is live. A Cloudflare Pages project serves `public/` at
+`saulera-dossier-engine.pages.dev`, and `functions/api/health.js` answers with whether the
+model key is bound server-side. As of 27 Jul 2026 the secret is not set, so it answers
+`503 not_configured` — that is the correct answer, not a bug. `src/` — the pack contract,
+the provenance verifier and both renderers — is library code with no route wired to it yet.
+
+> ⚠️ **Cloudflare Access is deliberately not set up** (27 Jul 2026). Production and every
+> preview hostname are **public to anyone with the URL**. That is tolerable only while the
+> surface is a `noindex` placeholder plus a health check that makes no model call — it must
+> be closed before #6, which adds a route that spends Anthropic credits. `DEPLOY.md` opens
+> with the full reasoning and is also the restore runbook.
+
+Not built: generation (#6), the client knowledge store (#5), the recruiter screen (#8).
+See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the
+runbook for the deployment.
 
 ## Where the specs live
 
@@ -53,4 +66,37 @@ spike was synthetic and self-reviewed.
 - **Nothing unsourced reaches a client.** Claims carry a verbatim source quote, checked
   literally against the input. Anything that fails renders as visibly unverified.
 - **One deployment per agency.** Engine tracked upstream, config per client. Not multi-tenant
-  SaaS.
+  SaaS. Spelled out in **Engine and config** below.
+
+## Engine and config
+
+The line between the two is what makes one deployment per agency cheap rather than a fork
+per agency. Everything on the engine side is written once here and picked up by every
+agency on a pull. Everything on the config side is that agency's own and is never merged
+back up.
+
+**Engine — tracked upstream, shared by every agency:**
+
+- `src/` — the pack contract and schema (`pack.js`), the prompt (`prompt.js`), the
+  provenance verifier (`provenance.js`), and both renderers (`render/`)
+- `functions/` — the server boundary; every model call goes through it, so the key and the
+  data posture are decided in one place
+- `public/` — including `tokens.css`, the default token layer
+- `wrangler.toml` — `nodejs_compat` and the compatibility date are engine facts, not
+  dashboard state
+
+**Config — per agency, never merged upstream:**
+
+- the client knowledge notes (the product's compounding asset, and the agency's own data)
+- branding, expressed as overrides of the custom properties in `public/tokens.css` — a
+  variable swap, never a fork
+- the renderer choice, inline or appendix (settled by the spike as an agency-level
+  decision, not a per-pack one)
+- the Cloudflare Pages project, the Access policy and the emails it lets in
+- `ANTHROPIC_API_KEY`, as an encrypted Pages variable
+
+**The mechanic.** One Cloudflare Pages project per agency. Each agency's deployment tracks
+this repo as upstream and pulls engine improvements; nothing gets re-patched across N
+forks. That is deliberately not multi-tenant SaaS — bespoke-per-agency is the commercial
+shape, and one deployment per agency is its technical form. It is also why a later platform
+migration would be one engine migration plus a redeploy per agency, not a rewrite each.
