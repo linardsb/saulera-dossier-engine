@@ -7,5 +7,8 @@
     "test": "node --test test/",
     "spike": "node spike/local.js",
     "spike:tamper": "node spike/local.js --tamper"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0"
   }
 }

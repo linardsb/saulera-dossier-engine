@@ -1,0 +1,14 @@
+# Engine config, not agency config — nodejs_compat is what lets @anthropic-ai/sdk run on
+# Pages, so it belongs in the repo where every agency deployment picks it up on a pull.
+#
+# Once this file exists these fields go read-only in the dashboard; that is the intent.
+# Secrets are unaffected — ANTHROPIC_API_KEY stays a dashboard-encrypted variable.
+#
+# `name` must match the Pages project exactly or the build fails.
+
+name = "saulera-dossier-engine"
+pages_build_output_dir = "./public"
+
+# ≥ 2024-09-23 or nodejs_compat resolves to the weaker v1 polyfill set.
+compatibility_date = "2026-07-27"
+compatibility_flags = ["nodejs_compat"]
