@@ -16,14 +16,18 @@ const SERVICE = "saulera-dossier-engine";
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  if (!env.ANTHROPIC_API_KEY) {
-    return json({ error: "not_configured" }, 503);
-  }
-
+  // The body is checked before the key, so a malformed request answers 400 whatever the
+  // deployment's configuration state is. The other order made DEPLOY.md's bad-body checklist
+  // step answer 503 until the secret was set — a config answer to a client error, and
+  // indistinguishable from a routing fault at the moment you are trying to prove routing.
   try {
     await request.json();
   } catch {
     return json({ error: "bad_json" }, 400);
+  }
+
+  if (!env.ANTHROPIC_API_KEY) {
+    return json({ error: "not_configured" }, 503);
   }
 
   // Constructed and discarded, so the generation route's dependency is proven to bundle and

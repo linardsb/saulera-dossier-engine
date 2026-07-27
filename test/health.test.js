@@ -33,6 +33,15 @@ test("a malformed body is rejected", async () => {
   assert.deepEqual(await res.json(), { error: "bad_json" });
 });
 
+test("a malformed body answers 400 even with no key bound", async () => {
+  // DEPLOY.md's post-deploy checklist runs this step before the secret exists. Checking the
+  // body first is what lets it mean "the Function is routed and parsing" rather than
+  // re-reporting the missing secret.
+  const res = await post("not json", {});
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "bad_json" });
+});
+
 test("a fully wired deployment reports ok with the sdk constructed", async () => {
   const res = await post("{}", { ANTHROPIC_API_KEY: KEY });
   assert.equal(res.status, 200);
