@@ -1,7 +1,9 @@
 # Deploy — saulera dossier engine on Cloudflare Pages
 
-Static `public/` only — no Functions, no build step, no framework, no secrets. Push to
-`main` → Cloudflare Pages deploys.
+Static `public/` only — no Functions, no build step, no framework, no secrets.
+
+**Push does not currently deploy** — see **Deploying** at the bottom. `git push` then
+`./scripts/deploy.py`.
 
 Packs are generated in Claude Code on the subscription, not by this deployment. See **Model
 access** under Decisions in `README.md`.
