@@ -201,7 +201,16 @@ seconds before treating a `200` as real.
 
 ---
 
-## 5. D1 — the client knowledge store · ✅ DONE 27 Jul 2026 (#5)
+## 5. D1 — the client knowledge store · ⚠️ PARTIAL 27 Jul 2026 (#5)
+
+**Done:** both databases created, the `DB` binding set on production and preview, the preview
+database migrated.
+**Not done:** `npm run db:remote`. **Production's database has no tables** — verified by
+`d1 execute dossier-engine --remote`, which returns `_cf_KV` and nothing else.
+
+Everywhere else in this file `✅ DONE <date>` means verified-done. This section is not, and
+until the migration runs every `/api/*` route on production answers `503 not_migrated` and
+`/clients` shows the deployment-fault message. **Run the migration before you rely on §5.**
 
 Two databases and one binding name. **Per agency**, because the notes are that agency's own
 data: they name real hiring managers and panel members.
@@ -211,8 +220,15 @@ data: they name real hiring managers and panel members.
 ```bash
 export PATH="$HOME/.nvm/versions/node/v24.11.0/bin:$PATH"   # wrangler needs Node >= 22
 
-npx wrangler@4.114.0 d1 create dossier-<agency>
-npx wrangler@4.114.0 d1 create dossier-<agency>-preview
+# The one per-agency value on this page. Both scripts below read it, and both default to
+# `dossier-engine`, which is saulera's own deployment — so for saulera, skip this line. Set it
+# and nothing in the repo needs editing: `setup-d1.py` and `dev.py` are engine files, shared by
+# every agency, and a name edited into them is the per-agency fork Decision 3 exists to prevent.
+# (Set DOSSIER_D1_NAME_PREVIEW too if the preview database is not "<name>-preview".)
+export DOSSIER_D1_NAME=dossier-<agency>
+
+npx wrangler@4.114.0 d1 create "$DOSSIER_D1_NAME"
+npx wrangler@4.114.0 d1 create "$DOSSIER_D1_NAME-preview"
 
 python3 scripts/setup-d1.py <project>    # binds DB on both environments, idempotently
 npm run db:remote                        # migrate production's database
@@ -259,6 +275,7 @@ the dashboard.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `503 {"error":"not_configured"}` from any `/api/*` | the `DB` binding did not resolve | re-run `scripts/setup-d1.py` and read its confirming GET; if it reports the binding present and the deployment still answers 503, bind it in the dashboard under Settings → Bindings and redeploy |
+| `503 {"error":"not_migrated"}` from any `/api/*` | the binding resolved, but that database has no tables | `npm run db:remote` for production, `npm run db:preview` for previews. **This is the current state of production** — see the header of this section |
 | `200` returning the `index.html` shell instead of JSON | `functions/` was not picked up | confirm it is at the repo root and the project root directory is `/`; the build log should say `Found Functions directory at /functions` |
 | the build fails with a module error | a Function could not bundle its `../../src/` imports | move the shared modules to `functions/_lib/` and re-point the imports; the tests can import from anywhere |
 | `500 {"error":"internal"}` on a route that used to work | the migration did not run against this environment's database | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations |
@@ -306,7 +323,7 @@ done
 Access — re-verify after any change to the applications or the policy:
 
 - [ ] `https://<project>.pages.dev/` in a private window → Access login page
-- [ ] Allowed email → PIN arrives (check Spam/Promotions) → placeholder page renders
+- [ ] Allowed email → PIN arrives (check Spam/Promotions) → the site renders
 - [ ] A preview hostname also shows the login page
 - [ ] Zero Trust → Applications shows exactly two for this project, both Allow / one-time PIN
 

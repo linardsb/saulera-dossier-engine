@@ -10,8 +10,12 @@ process. **That note is the product. The generation is the cheap part.**
 ## Status
 
 Live at **https://saulera-dossier-engine.pages.dev** — a Cloudflare Pages site serving
-`public/`, with Pages Functions over a D1 database for the client knowledge store. Still no
-secrets and no build step.
+`public/`. Still no secrets and no build step.
+
+The Pages Functions and the D1 schema for the client knowledge store are **written and merged
+but not yet serving**: production's database has no tables, because `npm run db:remote` has
+deliberately not been run. Until it is, `/clients` and every `/api/*` route answer `503`. See
+`DEPLOY.md` §5, which is the runbook for finishing it.
 
 `src/` — the pack contract, the provenance verifier, both renderers and the store — is library
 code, driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
@@ -21,10 +25,11 @@ require an email one-time PIN; only `linardsberzins@gmail.com` is admitted. Two 
 applications, because a wildcard does not cover the apex — `scripts/setup-access.py`
 creates both. Verified: both hostnames answer `302` to `cloudflareaccess.com`.
 
-**The client knowledge store is live** (27 Jul 2026, #5). Three tables in D1, four `/api/*`
+**The client knowledge store is built** (27 Jul 2026, #5). Three tables in D1, four `/api/*`
 routes over them, and a screen at **`/clients`** where the agency adds a client and edits its
 note. The non-personal event counter ships with it, so the epic's primary metric is a number
-rather than a memory.
+rather than a memory. **It goes live the moment the production migration runs** — one command,
+`npm run db:remote`, and until then the routes answer `503 not_migrated`.
 
 Not built: generation (#6), the recruiter screen (#8). See **#1** for the epic, the dependency
 graph and the date gates. `DEPLOY.md` is the runbook for the deployment.
@@ -61,7 +66,9 @@ two-to-ten-person agency, so throughput does not decide it. Two things do. First
 candidate table"* is the strongest sentence this product says out loud, and it is said to a
 clinical staffing client — with D1 there is one reviewable file, `migrations/0001_init.sql`,
 that can be pointed at and tested, where a KV namespace has no schema to show. `test/schema.test.js`
-parses that file and fails the suite on a fourth table or a fifth `events` column. Second, the
+parses every file in `migrations/` — not just the first, because a later migration is how a
+schema actually widens — and fails the suite on a fourth table, a fifth `events` column, any
+`ALTER TABLE`, or a `CREATE TABLE` written in a form its parser cannot read. Second, the
 editor needs read-after-write: KV is eventually consistent, and an agency saving a note,
 reloading and seeing its old text would land that weakness on the exact surface that *is* the
 product. The counter settles what is left — `SELECT client_id, COUNT(*) … GROUP BY client_id`
@@ -69,7 +76,7 @@ against a key-space scan. D1 is on the Workers free plan: 10 databases, 500 MB e
 account.
 
 **Pages Functions return, for storage only.** (27 Jul 2026, #5.) **The model-access boundary
-below is unchanged**: there is still no model call from this deployment, no
+above is unchanged**: there is still no model call from this deployment, no
 `ANTHROPIC_API_KEY`, and no runtime SDK. What the amendment above forbids is a *model call*
 from Pages, and its reasoning is about a credential a V8 isolate cannot refresh. A D1 binding
 is not a secret and needs no filesystem, so it does not touch that argument. Without a
