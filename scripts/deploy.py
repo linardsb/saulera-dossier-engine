@@ -116,9 +116,19 @@ def main():
             print(f"  {name}: {status}")
             if status != "success":
                 sys.exit(f"✗ build {status} at stage '{name}' — see the Pages dashboard for logs")
-            # The deployment's own url, not the project's: a branch build lands on a preview
-            # hostname and printing the production one would send you to check the wrong site.
-            print(f"✓ live: {d.get('url') or f'https://{project}.pages.dev/'}")
+            # On a branch build, the deployment's own url: it lands on a preview hostname, and
+            # printing the production one would send you to check the wrong site.
+            #
+            # On main, the apex. `d.get('url')` is a per-deployment hash hostname for
+            # production builds too, so printing it unconditionally changed what the
+            # no-argument invocation returns — at exactly the step where the runbook asks you
+            # to curl the apex. Access covers hash hostnames, so this was confusion, not
+            # exposure; the docstring above still promises the no-argument path is unchanged,
+            # and this is what keeps that true.
+            if branch == "main":
+                print(f"✓ live: https://{project}.pages.dev/")
+            else:
+                print(f"✓ live: {d.get('url') or f'https://{project}.pages.dev/'}")
             return
         time.sleep(5)
     sys.exit("✗ timed out after 5 minutes — check the Pages dashboard")

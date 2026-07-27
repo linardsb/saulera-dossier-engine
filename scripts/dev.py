@@ -38,10 +38,13 @@ WRANGLER = "wrangler@4.114.0"
 NVM_ROOT = os.path.expanduser("~/.nvm/versions/node")
 
 # environment -> (D1 database name, binding used in the generated config).
-# Per-agency values: rename both databases for a second deployment.
+# Per-agency values, read from the environment: this file is engine, shared by every agency,
+# and editing it to onboard a second one is the per-agency fork Decision 3 forbids. Same two
+# variables as scripts/setup-d1.py, deliberately.
+D1_NAME = os.environ.get("DOSSIER_D1_NAME", "dossier-engine")
 DATABASES = {
-    "preview": ("dossier-engine-preview", "DB"),
-    "production": ("dossier-engine", "DB_PRODUCTION"),
+    "preview": (os.environ.get("DOSSIER_D1_NAME_PREVIEW", f"{D1_NAME}-preview"), "DB"),
+    "production": (D1_NAME, "DB_PRODUCTION"),
 }
 # `pages dev` serves the preview database. Production is only ever migrated, never served here.
 LOCAL_ENV = "preview"
@@ -106,7 +109,10 @@ def write_config(uuids):
         f'binding = "{binding}"\n'
         f'database_name = "{name}"\n'
         f'database_id = "{uuids[environment]}"\n'
-        f'migrations_dir = "{os.path.join(ROOT, "migrations")}"\n'
+        # json.dumps, not an f-string: a checkout path containing a quote or a backslash
+        # produces a wrangler parse error that names the generated file rather than the cause.
+        # TOML basic strings and JSON strings escape the same way.
+        f"migrations_dir = {json.dumps(os.path.join(ROOT, 'migrations'))}\n"
         for environment, (name, binding) in DATABASES.items()
     )
     os.makedirs(os.path.dirname(CONFIG), exist_ok=True)

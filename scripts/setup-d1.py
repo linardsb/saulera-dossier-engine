@@ -42,10 +42,14 @@ DEFAULT_PROJECT = "saulera-dossier-engine"
 WRANGLER_CONFIG = os.path.expanduser("~/.wrangler/config/default.toml")
 
 BINDING = "DB"
-# environment -> database name. Per-agency values: rename both for a second deployment.
+# environment -> database name. Per-agency values, so they come from the environment and not
+# from an edit to this file: README lists this script as engine, shared by every agency, and
+# Decision 3 exists to stop per-agency values landing in tracked engine files. Editing the
+# defaults below to onboard agency #2 is the fork this whole arrangement is avoiding.
+D1_NAME = os.environ.get("DOSSIER_D1_NAME", "dossier-engine")
 DATABASES = {
-    "production": "dossier-engine",
-    "preview": "dossier-engine-preview",
+    "production": D1_NAME,
+    "preview": os.environ.get("DOSSIER_D1_NAME_PREVIEW", f"{D1_NAME}-preview"),
 }
 
 
