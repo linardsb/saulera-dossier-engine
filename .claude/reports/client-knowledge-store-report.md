@@ -2,14 +2,27 @@
 
 **Plan**: `.claude/plans/client-knowledge-store.md`
 **Branch**: `feature/client-knowledge-store`
-**Status**: IN PROGRESS
+**Status**: COMPLETE — all 32 tasks. 32b is the post-merge production block and belongs to
+whoever merges; one authenticated preview check needs a browser login and is named below.
 
 <!-- Written incrementally, task by task. Evidence is pasted as it happens, never
      reconstructed at the end. -->
 
 ## Summary
 
-_(filled at the end)_
+The durable half of the product ships: a D1 database with exactly three tables, `src/store.js`
+over it, four `/api/*` Pages Functions over that, and a standalone screen at `/clients` where
+the agency adds a client and edits its note. The non-personal event counter ships with it, so
+the epic's primary metric is a mechanism rather than an intention.
+
+The two boundaries the architecture calls expensive to unpick are enforced three ways each
+rather than promised: `test/schema.test.js` fails on a fourth table or a fifth `events` column
+(proven to bite, both ways, before it was committed), `test/store.test.js` fails on events SQL
+that mentions a forbidden column or on any user value reaching a SQL string, and
+`POST /api/events` answers `400 unexpected_fields` on any extra key. The model-access boundary
+is unchanged and now says so in three places that previously contradicted it.
+
+The deployment gate at task 15 passed on **rung zero** — no fallback needed.
 
 ## Tasks completed
 
@@ -229,10 +242,44 @@ INSERT never mentions `created_at`.
 
 ## Validation results
 
-- **`npm test`** — 52 pass, 0 fail, on **v20.20.2** and **v24.11.0**. (Baseline before this
-  ticket was 26, not the 16 the plan predicted; #4's suite had grown.)
-- **`node --check`** — clean on all six new/changed JS files.
-- **Level 1 greps** — see the end of this report.
+Final run, on the finished branch:
+
+```
+════ LEVEL 1 ════
+syntax:                       ok      (7 files, node --check)
+doc drift:                    ok      ← README.md, DEPLOY.md and wrangler.toml all corrected
+stale health route:           ok
+model access:                 ok      ← no ANTHROPIC_API_KEY, no SDK, anywhere it could reach
+browser storage:              ok      ← Decision 5
+table count:                  ok (3)
+candidate-shaped identifier:  ok
+identity-bound path:          ok      ← AC5: no owner column, no author field, no saulera path
+raw hex:                      ok      ← every colour in app.css goes through a custom property
+
+════ LEVEL 2 ════
+node20 # tests 52   # pass 52   # fail 0
+node24 ℹ tests 52   ℹ pass 52   ℹ fail 0
+```
+
+The doc-drift gate was verified to bite before the docs were fixed — it named all three files
+by line, and stayed red until task 30 finished:
+
+```
+README.md:13:  … two files, no Functions, no secrets, no
+DEPLOY.md:3:   Static `public/` only — no Functions, no build step, no framework, no secrets.
+DEPLOY.md:59:  **There is no `functions/` directory.** …
+```
+
+**Level 3** (integration) — the two curl sweeps above, against `wrangler pages dev` with a real
+local D1. **Level 4** (manual) — the unauthenticated preview sweep above, plus the browser pass
+in Phase 4. **Level 5** — `scripts/setup-d1.py` run twice; second run prints `ok` and changes
+nothing.
+
+There is no automated harness for the integration layer in this ticket, and the plan says to
+say so rather than imply coverage that does not exist. The curl sweeps are the record.
+
+Baseline before this ticket was **26** tests, not the 16 the plan predicted — #4's suite had
+grown by `468c95a`.
 
 ## Validation results
 
@@ -431,10 +478,151 @@ Every pairing that ships, measured at definition time:
 There is no placeholder text on this screen — the labels are permanent, so there is no
 placeholder pairing to check.
 
+### Phase 5 — the decision record and the deploy (tasks 29-32)
+
+- **29** `README.md` (UPDATE) — five edits. Both new decisions in the register the existing
+  entries use, Status corrected, Engine and config extended with `functions/`, `migrations/`,
+  `src/store.js`, `src/http.js`, `public/app.css` and the two scripts on the engine side and the
+  **two D1 databases and their bindings** on the config side, plus the `--text-muted` note.
+  The **Model access** entry was corrected rather than left standing: it claimed "there is no
+  Function … and nothing to deploy but two files", which the Level 1 grep caught and which
+  would have left Decisions self-contradicting. It now states the boundary that actually holds
+  — nothing in this deployment calls a model — and points at the new entry as restating it.
+- **30** `DEPLOY.md` (UPDATE) — a numbered D1 section before Secrets, §1 corrected, Secrets kept
+  as §5b with the binding-is-not-a-secret line, and the smoke-test checklist extended with
+  `/clients`, the three API routes and the unauthenticated sweep.
+- **31** deployed the finished branch and verified:
+
+```
+origin/feature/client-knowledge-store is at a193f9e
+requesting a build of saulera-dossier-engine@feature/client-knowledge-store …
+  cfd39df9  building a193f9e
+  deploy: success
+✓ live: https://cfd39df9.saulera-dossier-engine.pages.dev
+
+/clients:     302  cloudflareaccess.com
+/api/clients: 302  cloudflareaccess.com
+/api/events:  302  cloudflareaccess.com
+/api/agency:  302  cloudflareaccess.com
+/:            302  cloudflareaccess.com
+```
+
+  And the regression check the plan asks for — `./scripts/deploy.py` with no branch argument
+  still builds `main`, exactly as before:
+
+```
+origin/main is at 468c95a
+requesting a build of saulera-dossier-engine@main …
+  cb28008f  building 468c95a
+  deploy: success
+```
+
+- **32** four atomic commits: `58d7319` schema + store + gate · `10b8e24` the endpoints ·
+  `d5de123` the screen · `a193f9e` the docs (carrying the plan and the copied design skill).
+
 ## Deviations from the plan
 
-_(filled as they happen)_
+Each one is a decision, not a slip.
+
+1. **`package.json` gained four scripts, not "three".** The plan's own list has four
+   (`dev`, `db:local`, `db:preview`, `db:remote`); the count in its prose was off by one.
+
+2. **`db:preview` and `db:remote` go through `scripts/dev.py`, not straight to wrangler.**
+   The plan's *VERIFIED FACTS* says `wrangler d1` resolves a database *"in your config or the
+   API"*. That is true of `d1 list`, `d1 info` and `d1 execute --remote`, all re-verified here,
+   and **false of `d1 migrations apply`**, which is the one command those scripts use:
+
+   ```
+   ✘ [ERROR] Couldn't find a D1 DB with the name or binding 'dossier-engine-preview'
+             in your wrangler.toml file.
+   ```
+
+   It fails that way on `--local` and `--remote` alike. Since Decision 3 keeps bindings out of
+   `wrangler.toml`, `dev.py` generates a throwaway config under `.wrangler/` (gitignored) and
+   points `-c` at it. All four `db:*` scripts share that one resolution path, which is what the
+   plan's own GOTCHA on task 9 asks for.
+
+3. **`scripts/dev.py` passes `--persist-to` explicitly and writes an absolute
+   `migrations_dir`.** Discovered rather than anticipated: a relative `migrations_dir` resolves
+   against the *config file's* directory, so wrangler went looking for `.wrangler/migrations`.
+   Both are the same R4 hazard the script exists to remove, so both are closed the same way.
+
+4. **`scripts/setup-d1.py` PATCHes the delta, not the whole merged object.** The plan says GET,
+   merge locally, PATCH the whole merged `deployment_configs`. The GET carries computed fields
+   — `wrangler_config_hash` — that are not ours to write back. So it PATCHes only
+   `d1_databases`, keeps the pre-PATCH response, and then checks both that the bindings landed
+   *and* that every pre-existing key survived. That is strictly stronger than the plan's "assert
+   both bindings are present", and it is what established that the PATCH merges.
+
+   The guard's first version was too strict: it read the server normalising `env_vars` from
+   `null` to `{}` as a replace. Corrected to ignore the two fields that move on their own,
+   while still failing on a dropped compatibility date or flag.
+
+5. **`POST /api/events` with an unknown `client_id` answers `404`, not the `400` the plan's
+   curl sweep expects.** The row is genuinely absent, it is the same `not_found` that
+   `GET /api/clients/<id>` returns for the same condition, and the screen needs to tell that
+   apart from a malformed body. The `unexpected_fields` guard the plan actually cares about
+   still answers `400`.
+
+6. **`scripts/deploy.py` prints the deployment's own URL, not the project's.** One line, caused
+   directly by the branch argument: a branch build lands on a preview hostname and printing the
+   production URL would send you to check the wrong site.
+
+7. **Four design-spec changes, all from the critique in task 24** (recorded in full above): the
+   textarea field is `--background` rather than `--surface`; the focus ring is two-tone because
+   `--accent` alone is 2.75:1 on `--surface`; the accent is never text; disabled states use
+   muted colour rather than opacity.
+
+8. **`/stackai-design` was read alongside `dossier-design`**, at the user's request mid-run.
+   It is the upstream source of this repo's token layer — `public/tokens.css` says so in its own
+   header — and it is what confirmed that a primary button's label must be near-black rather
+   than white.
+
+9. **Two comments were reworded so the Level 1 greps stop crying wolf.** A comment in
+   `public/clients.js` explaining that nothing is written to browser storage contained the API
+   names and tripped the browser-storage gate; a comment in `public/app.css` quoting measured
+   contrast ratios contained hex notation and tripped the raw-hex gate. Both now say the same
+   thing without the literals. A gate that reports a failure on a correct file gets deleted, so
+   the file moved rather than the gate.
+
+10. **Task 1's validation could not print `0`.** `git status --porcelain` printed one line
+    because `.claude/` was **entirely untracked** — the plan's task 32 states
+    `.claude/plans/deploy-skeleton.md` "is already tracked", and it is not. Branched anyway; no
+    tracked file was modified. This ticket's plan, its report and the copied design skill are
+    now committed by path. `verify-deploy.sh`, `code-reviews/` and the deploy-skeleton artefacts
+    are left untracked, because they belong to #3 and adopting them is not this ticket's call.
+
+11. **The test baseline was 26, not the 16 the plan predicted.** #4's suite had grown by
+    `468c95a`. 52 pass now.
 
 ## Issues encountered
 
-_(filled as they happen)_
+- **Chrome headless clamps its window to a 500px minimum**, so the first "360px" screenshot was
+  a 500px render cropped to 360 and looked exactly like a layout blowout. Measured properly
+  through a same-origin iframe pinned to 360 CSS px: `scrollWidth == innerWidth == 360`, no
+  element past the viewport. Worth knowing before anyone re-runs this check for #8.
+
+- **A `d1_databases` binding cannot be removed through the Pages PATCH.** Both `{}` and `null`
+  were accepted with `success: true` and left the binding standing. Consequence for this
+  report's honesty: `setup-d1.py`'s PATCH branch ran once, on the real project, and applied both
+  bindings correctly; its idempotent branch ran repeatedly. The corrected guard's *failure*
+  branch has not been triggered, because there is no way to un-bind and re-run from a clean
+  state without the dashboard.
+
+- **The local D1's sqlite filename is not a plain hash of the uuid, the binding or the database
+  name.** So R4 cannot be settled by inspecting `.wrangler/state/`; it is settled by handing
+  both commands the same uuid and checking the API answers, which is what task 14 does.
+
+## Not done, and why
+
+- **Task 32b, the post-merge production block.** It belongs to whoever merges, by the plan's own
+  wording. Production's `DB` binding is set and confirmed, but `dossier-engine` has **no schema
+  yet** — `npm run db:remote` has deliberately not been run, because migrating production before
+  the code that uses it is on `main` gains nothing. `main` has no `functions/`, so nothing
+  queries it in the meantime.
+
+- **The one authenticated check on the preview.** `GET /api/clients` on the branch preview
+  returning `{"clients":[]}` is the last piece of R1, and it needs an email one-time PIN that
+  cannot be driven from here. Everything the deploy *can* prove is proven above. If that request
+  answers `503 {"error":"not_configured"}` instead, that is R1 and §5's failure table in
+  `DEPLOY.md` says what to do.
