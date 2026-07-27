@@ -16,12 +16,22 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const sql = readFileSync(join(root, "migrations/0001_init.sql"), "utf8");
+const migrations = join(root, "migrations");
+
+// EVERY migration, in the order wrangler applies them — not just 0001.
+//
+// This read one hardcoded file, which left the guard blind on the only path by which the
+// boundary would actually move. An applied migration is never edited, so a NEW migration file
+// is how `events` gets a fifth column or a fourth table appears; a `0002_probe.sql` adding a
+// candidates table passed the whole suite. The header of 0001 and README both promise this test
+// fails when a later ticket widens the schema, and against a single file neither was true.
+const files = readdirSync(migrations).filter((f) => f.endsWith(".sql")).sort();
+const sql = files.map((f) => readFileSync(join(migrations, f), "utf8")).join("\n");
 
 // Comments are stripped before anything is matched, because the header comment legitimately
 // contains the words "candidate" and "pack" while explaining why no such table exists.
@@ -70,6 +80,36 @@ function columns(body) {
 
 const parsed = tables(code);
 const byName = new Map(parsed.map((t) => [t.name, columns(t.body)]));
+
+// ── the parser's own blind spots, which are failures and not silence ───────────────────
+//
+// Both assertions below guard the assertions after them. A statement the parser cannot read is
+// ABSENT from `byName`, so it passes "exactly agency, clients and events" instead of failing
+// it — silence that looks identical to compliance.
+
+test("every CREATE TABLE in the migrations is one this test could read", () => {
+  assert.equal(
+    parsed.length,
+    (code.match(/CREATE\s+TABLE/gi) ?? []).length,
+    'a CREATE TABLE the parser could not read is invisible to the assertions below, not a ' +
+      'failure of them. `CREATE TABLE "candidates" (…)` is the proven case; backticks, ' +
+      "brackets, main.candidates, TEMP and AS SELECT are the same class. If you added a table " +
+      "in a form this parser does not handle, teach it that form — do not delete this check.",
+  );
+});
+
+test("the schema is only ever added to by CREATE TABLE, which this test parses", () => {
+  assert.equal(
+    (code.match(/ALTER\s+TABLE/gi) ?? []).length,
+    0,
+    "ALTER TABLE is invisible to a CREATE TABLE parser. `ALTER TABLE events ADD COLUMN " +
+      "candidate_ref TEXT` is exactly the AC4 breach this file exists to catch, and it also " +
+      "evades the Level 1 candidate|resume grep because neither word appears. #6 and #8 are " +
+      "the tickets that will want to widen events — if a column genuinely has to be added, " +
+      "that is a decision to make in the open: rebuild the table in the migration, or change " +
+      "this assertion deliberately and say why in the PR.",
+  );
+});
 
 // ── the tables that exist, and the ones that must not ──────────────────────────────────
 

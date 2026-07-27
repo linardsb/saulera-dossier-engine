@@ -1060,9 +1060,14 @@ grep -nE 'localStorage|sessionStorage|indexedDB|document\.cookie' public/clients
 
 # R5 — the schema still has exactly three tables and no candidate-shaped identifier.
 # [[:space:]] rather than \s: portable across BSD grep on macOS and GNU grep.
-test "$(grep -ci '^CREATE TABLE' migrations/0001_init.sql)" = 3 || echo 'FAIL table count'
-grep -invE '^[[:space:]]*--' migrations/0001_init.sql | grep -inE 'candidate|resume' \
+# migrations/*.sql, not 0001 alone: a NEW migration is how a schema actually widens, and a
+# gate pinned to the first file is blind on the only path the boundary would move along.
+test "$(cat migrations/*.sql | grep -ci '^CREATE TABLE')" = 3 || echo 'FAIL table count'
+grep -invE '^[[:space:]]*--' migrations/*.sql | grep -inE 'candidate|resume' \
   && echo 'FAIL candidate-shaped identifier' || echo 'ok'
+# ALTER TABLE evades both greps above (no forbidden word need appear) and the CREATE TABLE
+# parser in test/schema.test.js. It is the cheapest way to add a column, so it is gated here.
+test "$(cat migrations/*.sql | grep -ci '^ALTER TABLE')" = 0 || echo 'FAIL ALTER TABLE'
 
 # AC5 — there is provably no per-identity or ownership path through the store or the screen,
 # which is what "editable by the agency, not only by saulera" means in code. Deliberately does
