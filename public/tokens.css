@@ -1,0 +1,40 @@
+/* Default token layer. Every colour, size, radius and font in this deployment resolves
+   through one of these custom properties, so an agency's branding is an override of this
+   file — never a fork of the markup that uses it.
+
+   Values are the stackai-design defaults: neutral (white / light grey / near-black) with a
+   single accent, which is what the README's "neutral, not the saulera Sunrise palette"
+   decision asks for. The --font-* families have no .woff2 files behind them yet; they fall
+   back to system-ui until #8 ships the real assets. */
+
+:root {
+  /* colour */
+  --background:   #ffffff;
+  --surface:      #f5f5f5;
+  --text-primary: #1d1d1d;
+  --text-muted:   #8c8c8c;
+  --accent:       #0099ff;
+  --border:       #595959;
+  --success:      #22c55e;
+  --warning:      #c68a0b;
+  --danger:       #78350f;
+
+  /* type — font files deferred to #8; tokens exist now so that is a one-file change */
+  --font-ui:   "Aspekta 500", system-ui, -apple-system, sans-serif;
+  --font-body: "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* provenance status. Whether a claim is sourced is this product's core distinction, so
+     the three states get names here rather than colours invented at the point of building
+     the screen. #8 makes them legible; #3 only reserves them. */
+  --verified:   var(--success);
+  --unverified: var(--warning);
+  --failed:     var(--danger);
+
+  /* 4px grid */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px; --space-12: 48px;
+
+  --radius: 9px;
+  --max-width: 1024px;
+}
