@@ -52,6 +52,12 @@
   --radius: 9px;
   --max-width: 1024px;
 
+  /* Off the 4px grid deliberately: CRAFT.md's hit-area floor is 44px on touch and 24px
+     anywhere, and neither is a spacing decision that should move when the grid does. --space-8
+     is 32px and was standing in for this, which put every button under the floor. */
+  --tap-target: 44px;
+  --tap-target-min: 24px;
+
   /* Motion. One curve, defined once. Ease-out on everything entering or interactive and never
      ease-in, because ease-in delays the first frame — the one the user is watching. */
   --ease-out:   cubic-bezier(0.23, 1, 0.32, 1);

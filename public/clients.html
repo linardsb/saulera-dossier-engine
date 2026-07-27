@@ -35,9 +35,18 @@
                autocomplete="off" required>
         <button class="btn btn-primary" type="submit" id="add-button">Add client</button>
       </form>
+
+      <!-- The rail's own live region. List-load and add-client failures belong here and not in
+           #save-state: that one lives inside #editor-body, which is hidden until a client is
+           selected, and a role="status" inside a hidden subtree is neither visible nor in the
+           accessibility tree. -->
+      <p class="save-state rail-state" id="rail-state" role="status"></p>
     </section>
 
-    <section class="editor" aria-labelledby="editor-head">
+    <!-- aria-label rather than aria-labelledby="editor-head": that h2 is empty until a client
+         resolves, so on load the section had no accessible name at all. The h2 still carries
+         the client's name for the heading outline. -->
+    <section class="editor" aria-label="Client note">
       <p class="editor-empty" id="editor-empty">Pick a client to read or edit its note.</p>
 
       <div id="editor-body" hidden>

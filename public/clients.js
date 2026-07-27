@@ -2,7 +2,7 @@
  *
  * Vanilla, no framework, no build step — the same idiom as the saulera site's site.js.
  *
- * Three behaviours here are decisions rather than implementation details:
+ * Four behaviours here are decisions rather than implementation details:
  *
  * 1. Nothing is written to browser storage of any kind: not local storage, not session storage,
  *    not cookies, not IndexedDB. The note is business-context personal data — it names hiring
@@ -17,6 +17,13 @@
  * 3. A failed save keeps the text on screen and leaves the editor dirty. Losing an agency's
  *    in-progress edits to the product's compounding asset is the real error state, so every
  *    failure path below ends with the text still there and a message that says what to do.
+ *
+ * 4. Every response is checked against the request that asked for it before it is allowed to
+ *    write anything. Two clicks in a row resolve in arrival order, not click order, and this
+ *    screen's whole job is one editable note per client: a response applied under the wrong id
+ *    means the next save overwrites a different client's note, which decision 1 makes
+ *    unrecoverable. So `load` carries `reqId` and `save` carries `savingId`, and both bail
+ *    rather than write when the screen has moved on.
  */
 
 (function () {
@@ -34,11 +41,26 @@
     nameMissing: "Enter a client name.",
     unknownClient: "That client does not exist. Pick one from the list.",
     leaving: "You have unsaved changes to this note.",
+    // The two deployment faults, which are separate problems with separate remedies. They are
+    // the likeliest thing on this screen on the day it is first stood up, and they fire on
+    // first paint before the agency has touched anything — so neither can borrow the save
+    // copy, which would claim a save nobody asked for.
+    notConfigured: "This deployment is not connected to its database. Nothing can be read or " +
+                   "saved yet.",
+    notMigrated: "This deployment's database has no tables yet. Nothing can be read or saved " +
+                 "yet.",
+    // Read-path failures. The save copy promises "your text is still here", which is a lie on
+    // a path where nothing was being saved and there is no text.
+    listFailed: "Could not load the client list. Reload the page.",
+    loadFailed: "Could not open that client. Pick another, or reload the page.",
+    addFailed: "Could not add that client. Try again.",
+    agencySaved: "Saved",
   };
 
   var el = {
     list: document.getElementById("client-list"),
     railEmpty: document.getElementById("rail-empty"),
+    railState: document.getElementById("rail-state"),
     addForm: document.getElementById("add-form"),
     addName: document.getElementById("new-client-name"),
     addButton: document.getElementById("add-button"),
@@ -52,7 +74,7 @@
     sendFormat: document.getElementById("send-format"),
   };
 
-  var state = { selected: null, dirty: false, saving: false };
+  var state = { selected: null, dirty: false, saving: false, adding: false };
 
   /* ── talking to the API ──────────────────────────────────────────────────────────────── */
 
@@ -77,13 +99,23 @@
     });
   }
 
-  function messageFor(err) {
-    if (!err) return COPY.saveFailed;
+  /**
+   * The message for an error, with the caller naming its own fallback.
+   *
+   * The fallback is a parameter rather than a constant because the same store codes surface on
+   * paths that are not saves. A read failing back to "your text is still here" describes a
+   * situation the user is not in.
+   */
+  function messageFor(err, fallback) {
+    var otherwise = fallback || COPY.saveFailed;
+    if (!err) return otherwise;
     if (err.code === "session_expired") return COPY.sessionExpired;
+    if (err.code === "not_configured") return COPY.notConfigured;
+    if (err.code === "not_migrated") return COPY.notMigrated;
     if (err.code === "too_long") return COPY.tooLong;
     if (err.code === "not_found") return COPY.unknownClient;
     if (err.code === "missing_fields") return COPY.nameMissing;
-    return COPY.saveFailed;
+    return otherwise;
   }
 
   /* ── the rail ────────────────────────────────────────────────────────────────────────── */
@@ -97,6 +129,15 @@
   }
 
   function renderList(clients) {
+    // The rail is rebuilt from scratch on every refresh, which destroys the element the
+    // keyboard was on and drops focus to <body>. Remember which row it was and put focus on
+    // its replacement, so a save does not cost a keyboard user their place.
+    var active = document.activeElement;
+    var focusedId = active && active.classList && active.classList.contains("client-row")
+      ? active.dataset.id
+      : null;
+    var refocus = null;
+
     el.list.textContent = "";
     el.railEmpty.hidden = clients.length > 0;
 
@@ -106,6 +147,7 @@
       row.className = "client-row";
       row.dataset.id = client.id;
       if (client.id === state.selected) row.setAttribute("aria-current", "true");
+      if (client.id === focusedId) refocus = row;
 
       var name = document.createElement("span");
       name.className = "client-name";
@@ -130,12 +172,20 @@
       item.appendChild(row);
       el.list.appendChild(item);
     });
+
+    if (refocus) refocus.focus();
   }
 
   function refreshList() {
     return api("/api/clients")
       .then(function (body) { renderList(body.clients); })
-      .catch(function (err) { showSaveState(messageFor(err), true); });
+      // Into the rail's own live region, never the editor's. #save-state sits inside a subtree
+      // that is hidden until a client is selected, so on /clients with no ?client an error
+      // written there is invisible — and a role="status" inside a hidden subtree is not in the
+      // accessibility tree either, so it is not announced. It also belongs to the save
+      // lifecycle: a list failure written into it is what let a successful save report
+      // "Could not save".
+      .catch(function (err) { showRailState(messageFor(err, COPY.listFailed), true); });
   }
 
   /* ── the editor ──────────────────────────────────────────────────────────────────────── */
@@ -144,6 +194,32 @@
     el.saveState.textContent = text;
     el.saveState.classList.toggle("is-error", Boolean(isError));
     el.saveState.classList.add("is-shown");
+  }
+
+  function showRailState(text, isError) {
+    el.railState.textContent = text;
+    el.railState.classList.toggle("is-error", Boolean(isError));
+    el.railState.classList.add("is-shown");
+  }
+
+  /**
+   * Busy without `disabled`.
+   *
+   * Setting `disabled` on the focused button moves focus to <body> in every engine and does not
+   * give it back, so a keyboard user loses their place in the tab order on every save.
+   * aria-disabled says the same thing to assistive technology and keeps the control focusable;
+   * the real guard is the `state.saving` / `state.adding` early return, which was always doing
+   * the work anyway.
+   */
+  function setBusy(button, busy) {
+    if (busy) button.setAttribute("aria-disabled", "true");
+    else button.removeAttribute("aria-disabled");
+  }
+
+  function savedAt() {
+    var now = new Date();
+    return "Saved " + String(now.getHours()).padStart(2, "0") + ":" +
+      String(now.getMinutes()).padStart(2, "0");
   }
 
   function markDirty() {
@@ -159,6 +235,14 @@
     load(id);
   }
 
+  /**
+   * Put a client on screen.
+   *
+   * Navigation only. The unsaved-changes confirm deliberately does not live here: this is also
+   * the step that runs after a client is created, and a confirm on that path would leave a row
+   * in the database that was never shown. The three places a person can leave a dirty note —
+   * a row click, the add form, and Back — each ask for themselves.
+   */
   function load(id) {
     state.selected = id;
     state.dirty = false;
@@ -170,8 +254,13 @@
       return refreshList();
     }
 
+    var reqId = id;
     return api("/api/clients/" + encodeURIComponent(id))
       .then(function (body) {
+        // A later click already owns the screen. Writing this response now would put one
+        // client's name and note under another client's id, and the next save would send that
+        // text to the wrong client.
+        if (state.selected !== reqId) return;
         el.editorEmpty.hidden = true;
         el.editorBody.hidden = false;
         el.editorHead.textContent = body.client.name;
@@ -180,12 +269,13 @@
         return refreshList();
       })
       .catch(function (err) {
+        if (state.selected !== reqId) return;
         // An unknown id in the URL says so and offers the list, rather than rendering an empty
         // editor that looks saveable.
         state.selected = null;
         el.editorBody.hidden = true;
         el.editorEmpty.hidden = false;
-        el.editorEmpty.textContent = messageFor(err);
+        el.editorEmpty.textContent = messageFor(err, COPY.loadFailed);
         return refreshList();
       });
   }
@@ -193,26 +283,37 @@
   function save() {
     if (state.saving || !state.selected) return;
 
+    // Both captured before the request goes out. `savingId` is the client this answer will be
+    // about; `sent` is the exact text the server was given, which is the only text a success
+    // proves was stored.
+    var savingId = state.selected;
+    var sent = el.note.value;
+
     state.saving = true;
-    el.saveButton.disabled = true;
+    setBusy(el.saveButton, true);
     el.saveButton.textContent = COPY.saving;
 
-    api("/api/clients/" + encodeURIComponent(state.selected), {
+    api("/api/clients/" + encodeURIComponent(savingId), {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ note: el.note.value }),
+      body: JSON.stringify({ note: sent }),
     })
       .then(function () {
-        state.dirty = false;
-        var now = new Date();
-        showSaveState(
-          "Saved " + String(now.getHours()).padStart(2, "0") + ":" +
-            String(now.getMinutes()).padStart(2, "0"),
-          false,
-        );
+        // The client changed while this was in flight. This answer says nothing about what is
+        // on screen now: reporting it would claim a save the visible client never had, and the
+        // dirty recomputation below would compare this client's sent text against a different
+        // client's note and warn about edits that do not exist.
+        if (state.selected !== savingId) return;
+
+        // Keystrokes typed during the round trip are real edits that were never sent. Clearing
+        // dirty unconditionally is what let them leave the page with no warning.
+        var stillTyping = el.note.value !== sent;
+        state.dirty = stillTyping;
+        showSaveState(stillTyping ? COPY.unsaved : savedAt(), false);
         return refreshList();
       })
       .catch(function (err) {
+        if (state.selected !== savingId) return;
         // The text stays exactly where it is. Never cleared, never navigated away from, never
         // replaced by an error.
         state.dirty = true;
@@ -220,7 +321,7 @@
       })
       .then(function () {
         state.saving = false;
-        el.saveButton.disabled = false;
+        setBusy(el.saveButton, false);
         el.saveButton.textContent = COPY.saveIdle;
       });
   }
@@ -237,7 +338,7 @@
         el.sendFormat.value = body.agency.send_format;
       })
       .catch(function (err) {
-        el.agencyState.textContent = messageFor(err);
+        el.agencyState.textContent = messageFor(err, COPY.loadFailed);
         el.agencyState.classList.add("is-shown", "is-error");
       });
   }
@@ -251,7 +352,7 @@
       .then(function () {
         el.agencyState.classList.remove("is-error");
         el.agencyState.classList.add("is-shown");
-        el.agencyState.textContent = "Saved";
+        el.agencyState.textContent = COPY.agencySaved;
       })
       .catch(function (err) {
         el.agencyState.classList.add("is-shown", "is-error");
@@ -266,14 +367,22 @@
 
   el.addForm.addEventListener("submit", function (event) {
     event.preventDefault();
+    if (state.adding) return;
+
     var name = el.addName.value.trim();
     if (!name) {
-      showSaveState(COPY.nameMissing, true);
+      showRailState(COPY.nameMissing, true);
       el.addName.focus();
       return;
     }
 
-    el.addButton.disabled = true;
+    // Asked before the POST, not after. Adding a client navigates to it, which replaces the
+    // note on screen — but if the confirm sat on that navigation instead, declining it would
+    // leave a client created in the database and never shown.
+    if (state.dirty && !window.confirm(COPY.leaving)) return;
+
+    state.adding = true;
+    setBusy(el.addButton, true);
     api("/api/clients", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -283,8 +392,11 @@
         el.addName.value = "";
         select(body.client.id);
       })
-      .catch(function (err) { showSaveState(messageFor(err), true); })
-      .then(function () { el.addButton.disabled = false; });
+      .catch(function (err) { showRailState(messageFor(err, COPY.addFailed), true); })
+      .then(function () {
+        state.adding = false;
+        setBusy(el.addButton, false);
+      });
   });
 
   el.saveButton.addEventListener("click", save);
@@ -303,7 +415,19 @@
   });
 
   window.addEventListener("popstate", function () {
-    load(new URL(window.location.href).searchParams.get("client"));
+    var next = new URL(window.location.href).searchParams.get("client");
+    // beforeunload does not fire for same-document history navigation, so Back is the one way
+    // out of a dirty note that nothing else catches.
+    if (next !== state.selected && state.dirty && !window.confirm(COPY.leaving)) {
+      // The address bar has already moved. Push the current client back onto it, so what the
+      // URL says and what the screen shows do not disagree.
+      var url = new URL(window.location.href);
+      if (state.selected) url.searchParams.set("client", state.selected);
+      else url.searchParams.delete("client");
+      window.history.pushState({ client: state.selected }, "", url);
+      return;
+    }
+    load(next);
   });
 
   // CHECKLIST.md mandates this for pasted input. It applies to the note for the same reason:

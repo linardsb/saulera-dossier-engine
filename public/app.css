@@ -90,8 +90,9 @@ a {
   border: 1px solid transparent;
   border-radius: var(--radius);
   cursor: pointer;
-  /* 44px on touch without making the control look oversized on a laptop. */
-  min-height: var(--space-8);
+  /* CRAFT.md's hit-area floor, actually met. This read --space-8 with a comment claiming 44px;
+     --space-8 is 32px and the rendered button was 39px. */
+  min-height: var(--tap-target);
   transition: border-color var(--duration-1) var(--ease-out),
               transform var(--duration-1) var(--ease-out);
 }
@@ -110,15 +111,22 @@ a {
 .btn:active { transform: translateY(1px); }
 
 /* Muted colour rather than opacity: opacity dims the label below its contrast floor, and
-   stackai names opacity-for-disabled as an anti-pattern. */
-.btn[disabled] {
+   stackai names opacity-for-disabled as an anti-pattern.
+
+   aria-disabled is matched alongside `disabled` because the in-flight buttons on this screen
+   use the former: setting `disabled` on the focused button drops focus to <body> and does not
+   give it back, so a keyboard user lost their place on every save. */
+.btn[disabled],
+.btn[aria-disabled="true"] {
   background: var(--surface);
   color: var(--text-muted);
   border-color: var(--border);
   cursor: default;
 }
 
-.btn[disabled]:active { transform: none; }
+.btn[disabled]:active,
+.btn[aria-disabled="true"]:active { transform: none; }
+.btn[aria-disabled="true"]:hover { border-color: var(--border); }
 
 /* ── fields ────────────────────────────────────────────────────────────────────────────── */
 
@@ -255,9 +263,18 @@ a {
 .rail-form { border-top: 1px solid var(--border); padding-top: var(--space-4); }
 .rail-form .btn { width: 100%; margin-top: var(--space-2); }
 
+.rail-state { margin: var(--space-4) 0 0; }
+
 /* ── the editor ────────────────────────────────────────────────────────────────────────── */
 
 .editor-head { margin-bottom: var(--space-4); }
+
+/* A client name is agency-authored, capped at 120 characters, and need contain no spaces at
+   all. Overflowing text does not widen its own border box, so `.editor { min-width: 0 }` above
+   does not catch this and neither does any measurement of element geometry — only the page's
+   scrollWidth shows it. Measured before this rule: a 120-character unbroken name scrolled the
+   page 1,338px at a 360px viewport. */
+.editor-head h2 { overflow-wrap: anywhere; }
 
 .save-row {
   display: flex;
@@ -339,7 +356,14 @@ a {
   font-size: var(--text-body);
 }
 
-.radio-row label { display: flex; align-items: center; gap: var(--space-2); }
+/* min-height, because a bare flex label is the height of its text — about 21px here, under
+   CRAFT.md's 24px floor for any pointer and well under the 44px one for touch. */
+.radio-row label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+}
 
 .agency .select { max-width: 280px; }
 
