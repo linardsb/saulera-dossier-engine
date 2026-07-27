@@ -6,7 +6,11 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "spike": "node spike/local.js",
-    "spike:tamper": "node spike/local.js --tamper"
+    "spike:tamper": "node spike/local.js --tamper",
+    "dev": "python3 scripts/dev.py",
+    "db:local": "python3 scripts/dev.py --migrate-only",
+    "db:preview": "python3 scripts/dev.py --migrate-remote preview",
+    "db:remote": "python3 scripts/dev.py --migrate-remote production"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.115.0"
