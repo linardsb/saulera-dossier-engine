@@ -14,7 +14,13 @@ Until the repo is disconnected and reconnected in
 this is how a push reaches production.
 
 Usage:
-    ./scripts/deploy.py [project-name]
+    ./scripts/deploy.py [project-name] [branch]
+
+`branch` defaults to `main`, so an invocation with no arguments behaves exactly as it always
+did. It exists because a gate that can only build `main` cannot run before the merge: #5's
+deployment gate deploys a feature branch to its preview and checks it there. Without the
+argument the script builds `main` from a feature branch's checkout, and the resulting "the
+Function did not answer" reads as a routing problem rather than as the wrong code.
 
 Auth: reads wrangler's stored OAuth token (`pages:write` is enough — no API token
 needed). Run `npx wrangler login` if it is missing or expired.
@@ -77,24 +83,27 @@ def call(method, path, token, payload=None, form=None):
 
 def main():
     project = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROJECT
+    branch = sys.argv[2] if len(sys.argv) > 2 else "main"
     account = os.environ.get("CF_ACCOUNT_ID", DEFAULT_ACCOUNT)
     token = wrangler_token()
     base = f"/accounts/{account}/pages/projects/{project}"
 
+    # Compared against the branch being built, not always origin/main — otherwise the mismatch
+    # warning stays silent in exactly the case it exists for.
     local = subprocess.run(
-        ["git", "rev-parse", "--short", "origin/main"],
+        ["git", "rev-parse", "--short", f"origin/{branch}"],
         capture_output=True, text=True,
     ).stdout.strip()
     if local:
-        print(f"origin/main is at {local}")
+        print(f"origin/{branch} is at {local}")
 
-    print(f"requesting a build of {project}@main …")
-    dep = call("POST", f"{base}/deployments", token, form={"branch": "main"})
+    print(f"requesting a build of {project}@{branch} …")
+    dep = call("POST", f"{base}/deployments", token, form={"branch": branch})
     dep_id = dep["id"]
     got = (dep.get("deployment_trigger", {}).get("metadata", {}) or {}).get("commit_hash", "")[:7]
     print(f"  {dep_id[:8]}  building {got or '(unknown commit)'}")
     if local and got and not got.startswith(local) and not local.startswith(got):
-        print(f"  ⚠️  building {got}, but origin/main is {local} — push first?")
+        print(f"  ⚠️  building {got}, but origin/{branch} is {local} — push first?")
 
     # Poll to a terminal stage rather than returning on "queued": a build that fails
     # leaves the previous deployment serving, which looks identical to success from
@@ -107,7 +116,19 @@ def main():
             print(f"  {name}: {status}")
             if status != "success":
                 sys.exit(f"✗ build {status} at stage '{name}' — see the Pages dashboard for logs")
-            print(f"✓ live: https://{project}.pages.dev/")
+            # On a branch build, the deployment's own url: it lands on a preview hostname, and
+            # printing the production one would send you to check the wrong site.
+            #
+            # On main, the apex. `d.get('url')` is a per-deployment hash hostname for
+            # production builds too, so printing it unconditionally changed what the
+            # no-argument invocation returns — at exactly the step where the runbook asks you
+            # to curl the apex. Access covers hash hostnames, so this was confusion, not
+            # exposure; the docstring above still promises the no-argument path is unchanged,
+            # and this is what keeps that true.
+            if branch == "main":
+                print(f"✓ live: https://{project}.pages.dev/")
+            else:
+                print(f"✓ live: {d.get('url') or f'https://{project}.pages.dev/'}")
             return
         time.sleep(5)
     sys.exit("✗ timed out after 5 minutes — check the Pages dashboard")

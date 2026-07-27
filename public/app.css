@@ -1,0 +1,374 @@
+/* Component rules for the dossier engine's screens (#5).
+
+   Every colour, size, radius, spacing and duration below resolves through a custom property in
+   tokens.css. There is no raw hex and no one-off type or spacing literal, which is what makes an
+   agency's branding a variable swap rather than a fork of this file.
+
+   #8 absorbs this into the one screen. It is written as a shared component grammar — button,
+   field, card, heading, rail — rather than as one page's stylesheet, so that absorption is a
+   move rather than a rewrite. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: var(--space-8) var(--space-4);
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-note);
+  line-height: 1.5;
+}
+
+main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+/* ── type ──────────────────────────────────────────────────────────────────────────────── */
+
+h1 {
+  font-family: var(--font-ui);
+  font-size: var(--text-h2);
+  line-height: 1.2;
+  margin: 0 0 var(--space-4);
+  text-wrap: balance;
+}
+
+h2 {
+  font-family: var(--font-ui);
+  font-size: var(--text-h3);
+  line-height: 1.2;
+  margin: 0;
+  text-wrap: balance;
+}
+
+p { margin: 0 0 var(--space-4); }
+p:last-child { margin-bottom: 0; }
+
+.muted { color: var(--text-muted); }
+
+code {
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+}
+
+/* --accent measures 3.00:1 on --background, which fails the 4.5:1 body-text floor, so link
+   text is --text-primary and the accent carries the underline instead. */
+a {
+  color: var(--text-primary);
+  text-decoration-color: var(--accent);
+  text-underline-offset: var(--space-1);
+}
+
+/* ── focus, one rule for everything ────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: var(--focus-width) solid var(--accent);
+  outline-offset: var(--focus-inner);
+  /* The hairline that fills the offset gap. Without it the ring's only edge against --surface
+     is 2.75:1 and the indicator is not reliably visible. */
+  box-shadow: 0 0 0 var(--focus-inner) var(--text-primary);
+}
+
+/* ── card ──────────────────────────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+}
+
+/* ── buttons ───────────────────────────────────────────────────────────────────────────── */
+
+.btn {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  /* CRAFT.md's hit-area floor, actually met. This read --space-8 with a comment claiming 44px;
+     --space-8 is 32px and the rendered button was 39px. */
+  min-height: var(--tap-target);
+  transition: border-color var(--duration-1) var(--ease-out),
+              transform var(--duration-1) var(--ease-out);
+}
+
+.btn-primary {
+  /* Near-black on the accent, not white. White on --accent measures 3.00:1 and fails the
+     4.5:1 floor; --text-primary on it is 5.62:1. stackai's own button spec says the same. */
+  background: var(--accent);
+  color: var(--text-primary);
+}
+
+/* Hover draws the border in rather than darkening the fill. Darkening it would take the label
+   from 5.62:1 to about 4.4:1, which is hover REMOVING contrast — the thing CRAFT.md forbids.
+   The border is already there at 1px transparent, so nothing moves. */
+.btn-primary:hover { border-color: var(--text-primary); }
+.btn:active { transform: translateY(1px); }
+
+/* Muted colour rather than opacity: opacity dims the label below its contrast floor, and
+   stackai names opacity-for-disabled as an anti-pattern.
+
+   aria-disabled is matched alongside `disabled` because the in-flight buttons on this screen
+   use the former: setting `disabled` on the focused button drops focus to <body> and does not
+   give it back, so a keyboard user lost their place on every save. */
+.btn[disabled],
+.btn[aria-disabled="true"] {
+  background: var(--surface);
+  color: var(--text-muted);
+  border-color: var(--border);
+  cursor: default;
+}
+
+.btn[disabled]:active,
+.btn[aria-disabled="true"]:active { transform: none; }
+.btn[aria-disabled="true"]:hover { border-color: var(--border); }
+
+/* ── fields ────────────────────────────────────────────────────────────────────────────── */
+
+.field {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  background: var(--background);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.5;
+}
+
+.textarea {
+  font-size: var(--text-note);
+  /* Height comes from the element's own rows attribute rather than a magic min-height, so
+     there is no px literal here and the box stays honest about how much it holds. Resizable
+     vertically because the note grows; horizontally it is pinned to the column. */
+  resize: vertical;
+}
+
+/* ── layout ────────────────────────────────────────────────────────────────────────────── */
+
+.page-head { margin-bottom: var(--space-12); }
+.page-sub  { color: var(--text-muted); margin: 0; }
+
+.workspace {
+  display: grid;
+  gap: var(--space-8);
+  margin-bottom: var(--space-12);
+}
+
+@media (min-width: 860px) {
+  .workspace {
+    grid-template-columns: 280px 1fr;
+    align-items: start;
+  }
+}
+
+/* The editor column holds pasted prose with long unbreakable lines. min-width: 0 keeps a grid
+   item from being sized by its widest child, which is the real Safari and Chrome blowout. */
+.editor { min-width: 0; }
+
+/* ── the client rail ───────────────────────────────────────────────────────────────────── */
+
+.rail {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.rail-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.client-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.client-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
+  cursor: pointer;
+  transition: background-color var(--duration-1) var(--ease-out);
+}
+
+.client-row:hover { background: var(--background); }
+
+/* The selected row is marked by a bar and by weight, never by colour alone. */
+.client-row[aria-current="true"] {
+  background: var(--background);
+  box-shadow: inset var(--space-1) 0 0 var(--accent);
+}
+
+/* Both shadows, restated. The selector above is more specific than the bare :focus-visible
+   rule, so without this the marker bar wins and the focus ring loses its dark hairline —
+   on the one control that sits against --surface, which is the case the hairline exists for. */
+.client-row[aria-current="true"]:focus-visible {
+  box-shadow: inset var(--space-1) 0 0 var(--accent),
+              0 0 0 var(--focus-inner) var(--text-primary);
+}
+
+.client-name {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  color: var(--text-primary);
+  /* A client name is agency-authored and can be long. Clip rather than blow out the rail. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-row[aria-current="true"] .client-name { font-weight: 600; }
+
+.client-meta {
+  display: block;
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+}
+
+.rail-empty {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.rail-form { border-top: 1px solid var(--border); padding-top: var(--space-4); }
+.rail-form .btn { width: 100%; margin-top: var(--space-2); }
+
+.rail-state { margin: var(--space-4) 0 0; }
+
+/* ── the editor ────────────────────────────────────────────────────────────────────────── */
+
+.editor-head { margin-bottom: var(--space-4); }
+
+/* A client name is agency-authored, capped at 120 characters, and need contain no spaces at
+   all. Overflowing text does not widen its own border box, so `.editor { min-width: 0 }` above
+   does not catch this and neither does any measurement of element geometry — only the page's
+   scrollWidth shows it. Measured before this rule: a 120-character unbroken name scrolled the
+   page 1,338px at a 360px viewport. */
+.editor-head h2 { overflow-wrap: anywhere; }
+
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+
+/* The one authored moment: the saved-state line arriving. Opacity only, ease-out, 200ms. */
+.save-state {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--duration-2) var(--ease-out);
+}
+
+.save-state.is-shown { opacity: 1; }
+.save-state.is-error { color: var(--danger); }
+
+.editor-empty { color: var(--text-muted); }
+
+/* ── the note scaffold: the signature element ──────────────────────────────────────────── */
+
+.scaffold { margin-top: var(--space-12); }
+
+.scaffold-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.scaffold-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+/* ── the agency strip ──────────────────────────────────────────────────────────────────── */
+
+/* The one hairline on the page. Whitespace alone cannot say "this is configuration, not
+   content", which is the grouping CRAFT.md allows a rule to encode. */
+.agency {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-6);
+}
+
+.agency-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.agency-controls {
+  display: grid;
+  gap: var(--space-6);
+}
+
+@media (min-width: 860px) {
+  .agency-controls { grid-template-columns: 1fr 1fr; }
+}
+
+/* A fieldset's default chrome is a browser artefact, not a design decision. */
+.radio-group { border: 0; margin: 0; padding: 0; }
+
+.radio-row {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  font-size: var(--text-body);
+}
+
+/* min-height, because a bare flex label is the height of its text — about 21px here, under
+   CRAFT.md's 24px floor for any pointer and well under the 44px one for touch. */
+.radio-row label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+}
+
+.agency .select { max-width: 280px; }
+
+/* ── reduced motion ────────────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

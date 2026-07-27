@@ -6,55 +6,9 @@
 <meta name="robots" content="noindex, nofollow">
 <title>saulera dossier engine</title>
 <link rel="stylesheet" href="/tokens.css">
-<style>
-  *, *::before, *::after { box-sizing: border-box; }
-
-  body {
-    margin: 0;
-    padding: var(--space-8) var(--space-4);
-    background: var(--background);
-    color: var(--text-primary);
-    font-family: var(--font-body);
-    font-size: 16px;
-    line-height: 1.5;
-  }
-
-  main {
-    max-width: var(--max-width);
-    margin: 0 auto;
-  }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: var(--space-6);
-  }
-
-  h1 {
-    font-family: var(--font-ui);
-    font-size: 24px;
-    line-height: 1.2;
-    margin: 0 0 var(--space-4);
-  }
-
-  p { margin: 0 0 var(--space-4); }
-  p:last-child { margin-bottom: 0; }
-
-  .muted { color: var(--text-muted); }
-
-  code {
-    font-family: var(--font-mono);
-    font-size: 14px;
-  }
-
-  a { color: var(--accent); }
-  a:focus-visible { outline: 2px solid var(--accent); outline-offset: var(--space-1); }
-
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-  }
-</style>
+<!-- The shared rules that used to sit inline here now live in app.css, so this page and
+     /clients are one system rather than two (#5). -->
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <main>
@@ -65,10 +19,9 @@
       Access, so if you are reading this you came through the front door.
     </p>
     <p>
-      There is no product surface here yet. The only thing that answers is
-      <code>POST /api/health</code>, which reports whether the model key is bound
-      server-side. The recruiter screen, the generation route and the client note are
-      separate tickets.
+      The client knowledge notes are at <a href="/clients">Client knowledge</a>, where the
+      agency writes down what it knows about how each client hires. The recruiter screen and
+      the generation route are separate tickets.
     </p>
     <p class="muted">
       Every colour, size and radius on this page comes from <code>/tokens.css</code>. An
