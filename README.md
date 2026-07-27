@@ -9,11 +9,12 @@ process. **That note is the product. The generation is the cheap part.**
 
 ## Status
 
-The deploy shell is live. A Cloudflare Pages project serves `public/` at
-`saulera-dossier-engine.pages.dev`, and `functions/api/health.js` answers with whether the
-model key is bound server-side. As of 27 Jul 2026 the secret is not set, so it answers
-`503 not_configured` — that is the correct answer, not a bug. `src/` — the pack contract,
-the provenance verifier and both renderers — is library code with no route wired to it yet.
+Live at **https://saulera-dossier-engine.pages.dev** — a static Cloudflare Pages site
+serving `public/`. That is the whole deployment: two files, no Functions, no secrets, no
+build step.
+
+`src/` — the pack contract, the provenance verifier and both renderers — is library code,
+driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
 
 > ⚠️ **Cloudflare Access is deliberately not set up** (27 Jul 2026). Production and every
 > preview hostname are **public to anyone with the URL**. That is tolerable only while the
@@ -40,6 +41,16 @@ without the doc to hand.
 
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
+
+**Model access: Claude Code on the subscription. No API key, no server.** (27 Jul 2026.)
+Packs are generated in Claude Code using `src/`, by hand, and sent. Cloudflare Pages serves
+`public/` as a static site and nothing else — there is no Function, no `ANTHROPIC_API_KEY`,
+and nothing to deploy but two files.
+
+A Pages Function *cannot* use the subscription: subscription auth is a short-lived OAuth
+token in a local credential file that the CLI refreshes, and a Function has no filesystem and
+no process to refresh it. So a model call from Pages means a per-token API key. That trade is
+only worth making once an agency is self-serving — which is #6, and is not an MVP problem.
 
 **Provenance placement: appendix by default; both renderings ship.** (26 Jul 2026, spike
 #2.) Body reads as prose, sources numbered in a footer. Inline sourcing ships as a second
@@ -79,11 +90,8 @@ back up.
 
 - `src/` — the pack contract and schema (`pack.js`), the prompt (`prompt.js`), the
   provenance verifier (`provenance.js`), and both renderers (`render/`)
-- `functions/` — the server boundary; every model call goes through it, so the key and the
-  data posture are decided in one place
 - `public/` — including `tokens.css`, the default token layer
-- `wrangler.toml` — `nodejs_compat` and the compatibility date are engine facts, not
-  dashboard state
+- `wrangler.toml` — the Pages project name and compatibility date
 
 **Config — per agency, never merged upstream:**
 
@@ -93,7 +101,6 @@ back up.
 - the renderer choice, inline or appendix (settled by the spike as an agency-level
   decision, not a per-pack one)
 - the Cloudflare Pages project, the Access policy and the emails it lets in
-- `ANTHROPIC_API_KEY`, as an encrypted Pages variable
 
 **The mechanic.** One Cloudflare Pages project per agency. Each agency's deployment tracks
 this repo as upstream and pulls engine improvements; nothing gets re-patched across N

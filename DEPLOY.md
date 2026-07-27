@@ -1,7 +1,10 @@
 # Deploy — saulera dossier engine on Cloudflare Pages
 
-Static `public/` plus one Pages Function. No build step, no framework. Push to `main` →
-Cloudflare Pages deploys.
+Static `public/` only — no Functions, no build step, no framework, no secrets. Push to
+`main` → Cloudflare Pages deploys.
+
+Packs are generated in Claude Code on the subscription, not by this deployment. See **Model
+access** under Decisions in `README.md`.
 
 This is written as a checklist because the second agency deployment should not be a memory
 test. The reasons matter as much as the clicks — particularly step 3, which looks like
@@ -13,14 +16,14 @@ something you could simplify and cannot.
 > application exists. `https://saulera-dossier-engine.pages.dev` and every preview hostname
 > serve to anyone who has the URL.
 >
-> **Why that is tolerable today.** The whole surface is a `noindex` placeholder plus
-> `POST /api/health`, and `health.js` makes no model call. The most an anonymous caller
-> learns is whether a key is bound.
+> **Why that is tolerable today.** The whole surface is a `noindex` placeholder. There is no
+> Function, no API, no secret and no model call — an anonymous caller learns nothing.
 >
-> **Why it stops being tolerable at #6.** #6 adds a route that actually calls the model. A
-> public deployment with `ANTHROPIC_API_KEY` bound is then a world-callable endpoint spending
-> the account's Anthropic credits — and once #8 ships the recruiter screen, a public path for
-> pasted CVs, which the "no candidate data store" constraint exists to prevent.
+> **Why it stops being tolerable at #8.** No model call is made from this deployment and no
+> key is ever bound (see step 5), so there are no credits to spend through it — the original
+> "#6 opens a world-callable spending endpoint" reasoning no longer applies. The remaining
+> gate is #8: the recruiter screen is a public path for pasted CVs, which the "no candidate
+> data store" constraint exists to prevent.
 >
 > **So: restore steps 2–4 (or issue an Access service token) before #6 merges.** They are
 > left written out below rather than deleted, because they are that restore runbook. Step 5
@@ -67,9 +70,7 @@ rather than 404ing:
 ```bash
 PROJECT=<project>
 curl -s -o /dev/null -w '%{http_code}\n' "https://$PROJECT.pages.dev/"            # 200
-curl -s -X POST "https://$PROJECT.pages.dev/api/health" \
-  -H 'content-type: application/json' -d '{}' -w '\n%{http_code}\n'               # {"error":"not_configured"} 503
-curl -s -o /dev/null -w '%{http_code}\n' "https://$PROJECT.pages.dev/api/health"  # 200 — see below
+curl -s -o /dev/null -w '%{http_code}\n' "https://$PROJECT.pages.dev/tokens.css"  # 200
 ```
 
 **There is no method guard, and the last line is the proof.** Only `onRequestPost` is
@@ -153,8 +154,6 @@ PREVIEW=<hash>.$PROJECT          # a real preview hostname from Pages → Deploy
 
 curl -s -o /dev/null -w 'prod:    %{http_code}  %{redirect_url}\n' "https://$PROJECT.pages.dev/"
 curl -s -o /dev/null -w 'preview: %{http_code}  %{redirect_url}\n' "https://$PREVIEW.pages.dev/"
-curl -s -o /dev/null -w 'api:     %{http_code}  %{redirect_url}\n' \
-  -X POST "https://$PROJECT.pages.dev/api/health" -H 'content-type: application/json' -d '{}'
 ```
 
 All three must be a **302** whose `redirect_url` contains `cloudflareaccess.com`.
@@ -167,59 +166,16 @@ seconds before treating a `200` as real.
 
 ---
 
-## 5. The secret · safe to do now
+## 5. Secrets · none
 
-Pages project → **Settings** → **Variables and Secrets** → add `ANTHROPIC_API_KEY`.
+**There are no secrets on this deployment.** No Functions, no model call, no
+`ANTHROPIC_API_KEY`. Generation happens in Claude Code on the subscription — a Pages Function
+cannot use subscription auth (short-lived OAuth token in a local credential file; a Function
+has no filesystem and no process to refresh it), and adding a per-token API key is a #6
+decision, not an MVP one.
 
-> The original ordering put this *after* Access, so no unprotected URL ever held a key. With
-> Access deferred that ordering no longer applies here: `health.js` makes no model call, so a
-> bound key cannot be spent through it. **The gate moved to #6** — see the banner at the top.
-
-`wrangler pages secret put ANTHROPIC_API_KEY --project-name=<project>` also works and keeps
-the value off your screen, but it has **no environment flag** — it sets Production only. Use
-the dashboard when you need both.
-
-- Type **Secret**, not plaintext Text. A plaintext variable stays readable in the dashboard
-  afterwards; an encrypted one does not.
-- Add it for **Production and Preview**. Production-only means preview deployments answer
-  `503 not_configured` — defensible, but decide it rather than discover it when a branch
-  needs smoke-testing.
-- **Variables apply from the next deployment.** Setting the secret does not affect the
-  deployment already running. Trigger a redeploy (Deployments → Retry deployment) or push.
-  A `503` immediately after setting the key is this, not a code bug.
-
-`wrangler.toml` does not affect secrets — it is source of truth for `compatibility_date`
-and `compatibility_flags` only, and once it exists those fields go read-only in the
-dashboard. That is intended: `nodejs_compat` is engine config and belongs in the repo.
-
-**While Access is off**, plain curl reaches the real deployment, so the whole check is one
-command and the leak scan is genuinely meaningful:
-
-```bash
-PROJECT=<project>
-curl -s -X POST "https://$PROJECT.pages.dev/api/health" \
-  -H 'content-type: application/json' -d '{}'          # { ok: true, ..., key: true, sdk: true }
-curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://$PROJECT.pages.dev/api/health" \
-  -H 'content-type: application/json' -d 'not json'    # 400
-curl -s -D- "https://$PROJECT.pages.dev/" "https://$PROJECT.pages.dev/tokens.css" | grep -c 'sk-ant'   # 0
-```
-
-**When Access is back on, that last line becomes worthless and must not be trusted** — an
-unauthenticated curl then only ever sees Cloudflare's login page, so the grep returns 0
-whether or not the key leaks. False assurance on the one constraint that has to hold. Post-
-Access the check is authenticated only: log in in a browser, then in the devtools console
-**on that origin**, so the Access cookie is sent:
-
-```js
-await (await fetch('/api/health', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'})).json()
-// { ok: true, service: "saulera-dossier-engine", key: true, sdk: true }
-
-(await fetch('/api/health', {method:'POST', headers:{'content-type':'application/json'}, body:'not json'})).status
-// 400
-```
-
-Then DevTools → Network → reload → check the document, `tokens.css` and the `/api/health`
-response: **no body or header contains `sk-ant`.**
+Kept as a numbered stub so the sections above still line up and nobody goes hunting for a
+missing step.
 
 ---
 
@@ -229,10 +185,6 @@ Applies now:
 
 - [ ] `https://<project>.pages.dev/` renders the placeholder
 - [ ] `tokens.css` loads; card renders on the neutral palette, no off-palette colour
-- [ ] `POST /api/health` → `{ ok: true, key: true, sdk: true }`
-- [ ] `POST /api/health` with a malformed body → `400 bad_json`
-- [ ] No `sk-ant` in any response body or header
-- [ ] Pages → Deployments → newest build log lists `@anthropic-ai/sdk` in an install step
 - [ ] Mobile: 375px width, no horizontal scroll
 
 ⚠️ Applies only once Access is restored (steps 2–4) — **all of these currently fail by
@@ -242,8 +194,6 @@ design**, and every one of them must pass before #6 merges:
 - [ ] Allowed email → PIN arrives (check Spam/Promotions) → placeholder page renders
 - [ ] A preview hostname also shows the login page
 - [ ] Zero Trust → Applications shows exactly two for this project, both Allow / one-time PIN
-- [ ] The two `POST /api/health` rows above re-verified **authenticated**, from the browser
-      console on that origin — not from curl
 
 ---
 
