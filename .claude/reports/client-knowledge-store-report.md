@@ -391,6 +391,25 @@ the real page in a same-origin iframe pinned to exactly 360 CSS px:
 viewport=360 scrollWidth=360 overflow=0     ← and no element's right edge past the viewport
 ```
 
+> **Corrected by the PR #13 review (H6).** The measurement above was honest; the conclusion
+> drawn from it was broader than the evidence. It used the seeded client name "Ashdown Park
+> Community Healthcare", which contains spaces and therefore wraps. The add-client field accepts
+> 120 characters with no whitespace requirement, and `app.css` had no `overflow-wrap` anywhere,
+> so an unbroken name blew the page out:
+>
+> ```
+> name = "A" × 120, before the fix:  viewport=360  scrollWidth=1698  overflow=1338
+> name = "A" × 120, after the fix:   viewport=360  scrollWidth=360   overflow=0
+> ```
+>
+> Worth recording *why* the original probe missed it: **overflowing text does not widen its
+> element's border box**, so every `getBoundingClientRect()` came back inside the viewport while
+> `scrollWidth` blew out. The "no element's right edge past the viewport" clause was measuring
+> the wrong thing, and it is the reason `.editor { min-width: 0 }` did not catch this either.
+> Fixed by `overflow-wrap: anywhere` on the editor heading, and re-measured by
+> `.claude/probes/clients-screen.mjs`, which asserts `scrollWidth <= innerWidth` with the
+> unbroken name.
+
 #### The keyboard path
 
 ```
@@ -605,9 +624,18 @@ Each one is a decision, not a slip.
    apart from a malformed body. The `unexpected_fields` guard the plan actually cares about
    still answers `400`.
 
-6. **`scripts/deploy.py` prints the deployment's own URL, not the project's.** One line, caused
+6. **`scripts/deploy.py` prints the deployment's own URL on a branch build.** One line, caused
    directly by the branch argument: a branch build lands on a preview hostname and printing the
    production URL would send you to check the wrong site.
+
+   > **Narrowed by the PR #13 review (M11), which was right to dispute the original framing.**
+   > As written, the change applied to the **no-argument** path too — `d.get('url')` is a
+   > per-deployment hash hostname for production builds as well — so `./scripts/deploy.py`
+   > printed a hash hostname where the runbook's next step asks you to curl the apex, while the
+   > docstring promised that path "behaves exactly as it always did". Not exposure: the
+   > `*.pages.dev` Access application covers hash hostnames. It now prints the apex when
+   > `branch == "main"` and the deployment's own URL otherwise, which is what the deviation
+   > claimed all along.
 
 7. **Four design-spec changes, all from the critique in task 24** (recorded in full above): the
    textarea field is `--background` rather than `--surface`; the focus ring is two-tone because
@@ -618,6 +646,28 @@ Each one is a decision, not a slip.
    It is the upstream source of this repo's token layer — `public/tokens.css` says so in its own
    header — and it is what confirmed that a primary button's label must be near-black rather
    than white.
+
+9. **Eight visible strings are on the screen that the plan's copy deck does not contain.**
+   Raised by the PR #13 review (L11), which found two of them and correctly called the omission
+   a documentation gap rather than a copy problem. The fix for it is this list, not moving the
+   strings into a `COPY` object. All eight live in `COPY` at the top of `public/clients.js`, in
+   the deck's own register: en-GB, sentence case, no em dashes, no apologies, each naming what
+   to do next.
+
+   | Key | Copy | Why the deck has no row for it |
+   |---|---|---|
+   | `leaving` | You have unsaved changes to this note. | The deck specifies no `window.confirm` text; the plan's CHECKLIST mandates the warning without wording it. |
+   | `agencySaved` | Saved | The agency strip's own saved state. The deck's "Saved 14:32" is the note editor's, and a timestamp on a radio button reads as more than happened. |
+   | `notConfigured` | This deployment is not connected to its database. Nothing can be read or saved yet. | R1's failure. The deck has no 503 copy at all, and the save copy was standing in for it. |
+   | `notMigrated` | This deployment's database has no tables yet. Nothing can be read or saved yet. | The second 503, split out from `not_configured` by the review's L5 because the remedies differ. |
+   | `listFailed` | Could not load the client list. Reload the page. | The deck's only failure copy is save copy. |
+   | `loadFailed` | Could not open that client. Pick another, or reload the page. | As above, for the read path. |
+   | `addFailed` | Could not add that client. Try again. | As above, for the add path. |
+   | `settingFailed` | Could not change that setting. It is still what it was. | As above, for the agency strip, which has no text to promise survived. |
+
+   The five `*Failed` strings and the two 503s exist because of the review's M7: every read path
+   fell back to *"Could not save. Your text is still here. Try again."*, which on first paint
+   describes a save nobody asked for and text that does not exist.
 
 9. **Two comments were reworded so the Level 1 greps stop crying wolf.** A comment in
    `public/clients.js` explaining that nothing is written to browser storage contained the API

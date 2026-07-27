@@ -54,6 +54,7 @@
     listFailed: "Could not load the client list. Reload the page.",
     loadFailed: "Could not open that client. Pick another, or reload the page.",
     addFailed: "Could not add that client. Try again.",
+    settingFailed: "Could not change that setting. It is still what it was.",
     agencySaved: "Saved",
   };
 
@@ -356,7 +357,9 @@
       })
       .catch(function (err) {
         el.agencyState.classList.add("is-shown", "is-error");
-        el.agencyState.textContent = messageFor(err);
+        // Not the save-note fallback: this strip has no text field, so "your text is still
+        // here" describes nothing on it.
+        el.agencyState.textContent = messageFor(err, COPY.settingFailed);
         // Put the controls back to what the deployment actually holds, so the screen never
         // shows a setting that was not stored.
         return loadAgency();

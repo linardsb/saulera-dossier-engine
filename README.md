@@ -14,8 +14,9 @@ Live at **https://saulera-dossier-engine.pages.dev** — a Cloudflare Pages site
 
 The Pages Functions and the D1 schema for the client knowledge store are **written and merged
 but not yet serving**: production's database has no tables, because `npm run db:remote` has
-deliberately not been run. Until it is, `/clients` and every `/api/*` route answer `503`. See
-`DEPLOY.md` §5, which is the runbook for finishing it.
+deliberately not been run. Until it is, every `/api/*` route answers `503 not_migrated` and
+`/clients` — a static file, so it renders — shows the deployment-fault message and no clients.
+See `DEPLOY.md` §5, which is the runbook for finishing it.
 
 `src/` — the pack contract, the provenance verifier, both renderers and the store — is library
 code, driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
