@@ -12,7 +12,7 @@
     "db:preview": "python3 scripts/dev.py --migrate-remote preview",
     "db:remote": "python3 scripts/dev.py --migrate-remote production"
   },
-  "dependencies": {
+  "devDependencies": {
     "@anthropic-ai/sdk": "^0.115.0"
   }
 }

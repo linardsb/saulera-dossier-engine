@@ -1,8 +1,7 @@
-# Pages Functions for the client knowledge store (#5) and, since #6, the one generation
-# endpoint. `POST /api/generate` is the single model-call boundary — architecture §5.6 — and it
-# is the reason ANTHROPIC_API_KEY and a runtime SDK now exist on this deployment. See "Model
-# access" and "Pages Functions" under Decisions in README.md for what that amendment does and
-# does not relax.
+# Pages Functions exist, for storage only (#5). They read and write the client knowledge store
+# in D1. There is still no model call from this deployment, no ANTHROPIC_API_KEY and no runtime
+# SDK — generation runs in Claude Code on the subscription; see "Model access" and "Pages
+# Functions" under Decisions in README.md.
 #
 # The D1 binding is deliberately not here. `DB` is bound per deployment through the Pages API by
 # scripts/setup-d1.py, because a database_id is per-agency *config* and this file is *engine* —
@@ -17,8 +16,3 @@ name = "saulera-dossier-engine"
 pages_build_output_dir = "./public"
 
 compatibility_date = "2026-07-27"
-
-# Required by @anthropic-ai/sdk (#6), which imports Node built-ins. Without it the bundle still
-# builds and the Function still loads — wrangler only warns — and then the FIRST REAL MODEL CALL
-# throws at runtime. That failure mode is why this is a flag and not a comment.
-compatibility_flags = ["nodejs_compat"]
