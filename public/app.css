@@ -219,6 +219,14 @@ a {
   box-shadow: inset var(--space-1) 0 0 var(--accent);
 }
 
+/* Both shadows, restated. The selector above is more specific than the bare :focus-visible
+   rule, so without this the marker bar wins and the focus ring loses its dark hairline —
+   on the one control that sits against --surface, which is the case the hairline exists for. */
+.client-row[aria-current="true"]:focus-visible {
+  box-shadow: inset var(--space-1) 0 0 var(--accent),
+              0 0 0 var(--focus-inner) var(--text-primary);
+}
+
 .client-name {
   display: block;
   font-family: var(--font-ui);

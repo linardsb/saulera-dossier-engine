@@ -517,8 +517,49 @@ requesting a build of saulera-dossier-engine@main …
   deploy: success
 ```
 
-- **32** four atomic commits: `58d7319` schema + store + gate · `10b8e24` the endpoints ·
-  `d5de123` the screen · `a193f9e` the docs (carrying the plan and the copied design skill).
+  **That check created a new production deployment**, of `main` at `468c95a`. Content-identical
+  to what was already serving, so production is unchanged — but a reviewer looking at the Pages
+  dashboard will see a production deployment dated during this feature's validation, and this
+  is why.
+
+- **32** five atomic commits: `58d7319` schema + store + gate · `10b8e24` the endpoints ·
+  `d5de123` the screen · `a193f9e` the docs (carrying the plan and the copied design skill) ·
+  `544e8d7` this report. **The PR is not opened here** — see *Not done, and why*.
+
+#### One defect found in review, after the docs commit
+
+The two-tone focus ring was **not painting its dark hairline on the selected client row**.
+`.client-row[aria-current="true"]` is specificity `(0,2,0)` and the bare `:focus-visible` rule
+is `(0,1,0)`, so the marker bar's `box-shadow` replaced the ring's hairline rather than joining
+it — on the one control that sits against `--surface`, which is precisely the case the hairline
+was added for. The earlier keyboard audit missed it because it probed `#save-button`, where the
+rule is unopposed.
+
+Measured before:
+
+```
+SELECTED row:      box-shadow = rgb(0, 153, 255) 4px 0px 0px 0px inset
+                   dark hairline present = false        ← the ring lost its second line
+unselected row:    dark hairline present = true
+#save-button:      dark hairline present = true
+```
+
+Fixed by restating both shadows on `.client-row[aria-current="true"]:focus-visible`. Measured
+after:
+
+```
+SELECTED row, focused:
+  box-shadow = rgb(0, 153, 255) 4px 0px 0px 0px inset, rgb(29, 29, 29) 0px 0px 0px 1px
+  accent marker bar kept = true
+  dark hairline present  = true
+SELECTED row, not focused:
+  box-shadow = rgb(0, 153, 255) 4px 0px 0px 0px inset   (marker bar only, as designed)
+```
+
+`public/index.html` was also rendered rather than only status-checked, since it was the one
+page changed without being looked at: the card, the muted paragraph, the `code` styling and
+the new `/clients` link all render from `app.css`, with the link in `--text-primary` under an
+accent underline as the contrast finding requires.
 
 ## Deviations from the plan
 
@@ -615,11 +656,26 @@ Each one is a decision, not a slip.
 
 ## Not done, and why
 
+- **The pull request.** Task 32 says "commit **and open the PR**". The commits are done and
+  pushed; the PR is not opened, because `piv-create-pr` is the next step in this loop and it
+  builds the body from this report. Whoever opens it must carry the four things the plan's
+  checklist names: `Closes #5`; the six decisions; **the fallback ladder rung — zero, no
+  fallback needed**; that `scripts/deploy.py` gained an optional branch argument defaulting to
+  `main`; and the AC5 boundary (the capability ships, the agency's own addresses are a
+  per-deployment Access policy change at onboarding, not a code change).
+
 - **Task 32b, the post-merge production block.** It belongs to whoever merges, by the plan's own
   wording. Production's `DB` binding is set and confirmed, but `dossier-engine` has **no schema
   yet** — `npm run db:remote` has deliberately not been run, because migrating production before
-  the code that uses it is on `main` gains nothing. `main` has no `functions/`, so nothing
-  queries it in the meantime.
+  the code that uses it is on `main` gains nothing.
+
+  **The fact that makes that safe is that push does not trigger a build on this project.**
+  `main` has no `functions/`, so nothing queries the empty database, and production only ever
+  changes when somebody runs `deploy.py`. If the GitHub webhook is ever reconnected — which
+  `DEPLOY.md` names as the fix for the broken push notification — then merging this branch
+  would deploy Functions against a schemaless production database and every `/api/*` would
+  answer `500`. **Run `npm run db:remote` before reconnecting that webhook, or before the
+  merge, whichever comes first.**
 
 - **The one authenticated check on the preview.** `GET /api/clients` on the branch preview
   returning `{"clients":[]}` is the last piece of R1, and it needs an email one-time PIN that
