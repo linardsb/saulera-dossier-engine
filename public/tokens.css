@@ -12,7 +12,11 @@
   --background:   #ffffff;
   --surface:      #f5f5f5;
   --text-primary: #1d1d1d;
-  --text-muted:   #8c8c8c;
+  /* Darkened from stackai's #8c8c8c for a contrast MUST, not a preference (#5). #8c8c8c on
+     --surface measures 3.08:1 and row meta and the note scaffold both sit on --surface, so it
+     failed the 4.5:1 body-text floor. #6b6b6b is 4.89:1 on --surface and 5.33:1 on
+     --background. This is engine-side, so #8 inherits the fix. */
+  --text-muted:   #6b6b6b;
   --accent:       #0099ff;
   --border:       #595959;
   --success:      #22c55e;
@@ -23,6 +27,16 @@
   --font-ui:   "Aspekta 500", system-ui, -apple-system, sans-serif;
   --font-body: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Type ramp: a ~1.2 step from a 14px UI base. The note is 16px because it is prose a person
+     writes and rereads, which CRAFT.md asks for on the pack and the note is the same kind of
+     text. Nothing anywhere goes below 12px. */
+  --text-caption: 12px;   /* row meta, scaffold items */
+  --text-body:    14px;   /* UI chrome, labels, buttons */
+  --text-note:    16px;   /* the textarea and any rendered note prose */
+  --text-h4:      17px;
+  --text-h3:      20px;   /* the selected client's name */
+  --text-h2:      24px;   /* page h1, matching index.html's existing 24px */
 
   /* provenance status. Whether a claim is sourced is this product's core distinction, so
      the three states get names here rather than colours invented at the point of building
@@ -37,4 +51,16 @@
 
   --radius: 9px;
   --max-width: 1024px;
+
+  /* Motion. One curve, defined once. Ease-out on everything entering or interactive and never
+     ease-in, because ease-in delays the first frame — the one the user is watching. */
+  --ease-out:   cubic-bezier(0.23, 1, 0.32, 1);
+  --duration-1: 150ms;   /* press and hover response */
+  --duration-2: 200ms;   /* the one authored moment: the saved-state line arriving */
+
+  /* Focus. Two concentric lines rather than one: --accent is 2.75:1 against --surface, which
+     misses the 3:1 a non-text indicator needs, so a --text-primary hairline sits inside the
+     accent ring and guarantees the indicator is visible on any surface in this palette. */
+  --focus-width:  2px;
+  --focus-inner:  1px;
 }

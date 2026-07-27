@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Client knowledge · saulera dossier engine</title>
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main>
+
+  <div class="page-head">
+    <h1>Client knowledge</h1>
+    <p class="page-sub">Notes on how each client hires. Read on every pack.</p>
+  </div>
+
+  <div class="workspace">
+
+    <!-- The client rail. Rows are mostly a readout of how much is written down, because that
+         is what the screen is about. -->
+    <section class="rail" aria-labelledby="rail-head">
+      <h2 class="rail-head" id="rail-head">Clients</h2>
+
+      <p class="rail-empty" id="rail-empty" hidden>
+        No clients yet. Add the first one, then write down what you know about how they hire.
+      </p>
+
+      <ul class="client-list" id="client-list"></ul>
+
+      <form class="rail-form" id="add-form">
+        <label class="field" for="new-client-name">Client name</label>
+        <input class="input" id="new-client-name" name="name" type="text" maxlength="120"
+               autocomplete="off" required>
+        <button class="btn btn-primary" type="submit" id="add-button">Add client</button>
+      </form>
+    </section>
+
+    <section class="editor" aria-labelledby="editor-head">
+      <p class="editor-empty" id="editor-empty">Pick a client to read or edit its note.</p>
+
+      <div id="editor-body" hidden>
+        <div class="editor-head">
+          <h2 id="editor-head"></h2>
+        </div>
+
+        <label class="field" for="note">What we know about how they hire</label>
+        <textarea class="textarea" id="note" name="note" rows="24" spellcheck="true"></textarea>
+
+        <div class="save-row">
+          <button class="btn btn-primary" type="button" id="save-button">Save note</button>
+          <span class="save-state" id="save-state" role="status"></span>
+        </div>
+
+        <!-- The signature element. §5.3's four things, which is the client-knowledge schema
+             architecture §8 says does not exist yet, rendered as prompts rather than fields.
+             Static on purpose: it does not collapse, animate or count anything, and unlike
+             placeholder text it stays visible while writing. -->
+        <div class="scaffold">
+          <h3 class="scaffold-head">What belongs in a note</h3>
+          <ul class="scaffold-list">
+            <li>Their process and stages</li>
+            <li>Who sits on the panel</li>
+            <li>What each stage tests</li>
+            <li>Why candidates were turned down</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <section class="agency" aria-labelledby="agency-head">
+    <h2 class="agency-head" id="agency-head">This deployment</h2>
+
+    <div class="agency-controls">
+      <fieldset class="radio-group">
+        <legend class="field">Sources in packs</legend>
+        <div class="radio-row">
+          <label><input type="radio" name="renderer" value="appendix"> In an appendix</label>
+          <label><input type="radio" name="renderer" value="inline"> Beside each claim</label>
+        </div>
+      </fieldset>
+
+      <div>
+        <label class="field" for="send-format">How packs are sent</label>
+        <select class="select" id="send-format" name="send_format">
+          <option value="email_body">Email body</option>
+          <option value="attachment">Attachment</option>
+          <option value="ats_field">ATS field</option>
+        </select>
+      </div>
+    </div>
+
+    <p class="save-state" id="agency-state" role="status"></p>
+  </section>
+
+</main>
+<script src="/clients.js"></script>
+</body>
+</html>
