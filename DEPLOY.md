@@ -120,6 +120,27 @@ Application 2  ·  *.<project>.pages.dev    → every preview deploy (hashes + b
 On **each** application's policy: action **Allow**, include rule **Emails**, login method
 **One-time PIN**, session duration 24 hours.
 
+**Or skip the clicking:** `scripts/setup-access.sh` creates both applications and attaches
+the policy in one go. It needs a token with **Access: Apps and Policies — Edit** (the
+wrangler OAuth token will not work — it carries `pages:write` and no Access scope):
+
+```bash
+export CF_API_TOKEN=...   # dash → My Profile → API Tokens → Create Token → Custom token
+./scripts/setup-access.sh saulera-dossier-engine linardsberzins@gmail.com
+```
+
+It skips any domain that already has an application, so re-running is safe.
+
+**Who is admitted** (decided 27 Jul 2026, tracked in #12):
+
+```
+linardsberzins@gmail.com
+```
+
+Sole user for now. An agency's own addresses are added to *that agency's* deployment when it
+onboards — the policy and the emails it lets in are Config, not Engine, so they are never
+merged upstream. See **Engine and config** in `README.md`.
+
 **Why two, and not one wildcard.** From the Cloudflare Access docs: *"A wildcard in the
 Subdomain field only matches that specific subdomain level. It does not cover the apex
 domain."* So `*.<project>.pages.dev` covers every preview and explicitly excludes
