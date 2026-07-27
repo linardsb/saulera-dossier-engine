@@ -25,9 +25,9 @@ something you could simplify and cannot.
 > gate is #8: the recruiter screen is a public path for pasted CVs, which the "no candidate
 > data store" constraint exists to prevent.
 >
-> **So: restore steps 2–4 (or issue an Access service token) before #6 merges.** They are
-> left written out below rather than deleted, because they are that restore runbook. Step 5
-> (the secret) is safe to do now — `health.js` cannot spend anything.
+> **So: restore steps 2–4 before #8 ships the recruiter screen.** They are left written out
+> below rather than deleted, because they are that restore runbook. Step 5 is now a no-op —
+> there are no secrets on this deployment.
 
 ---
 
