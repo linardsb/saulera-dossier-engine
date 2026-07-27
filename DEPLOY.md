@@ -231,3 +231,26 @@ provided Cloudflare's GitHub App can see the repo). Steps 2–4 cannot be driven
 `wrangler login` issues — it carries no Zero Trust scope and `/access/apps` returns 403. That
 needs a separate API token with *Access: Apps and Policies: Edit*, which is why these were
 written as dashboard steps.
+
+---
+
+## Deploying
+
+**Push does not trigger a build on this project.** The Pages config is correct and
+Cloudflare can pull the repo on demand; what is broken is the GitHub-side push
+notification. Toggling `deployments_enabled` off and on through the API does not restore it
+(tried 27 Jul 2026), and re-registering needs Cloudflare's GitHub App authorization flow,
+which cannot be driven from a script.
+
+Until the repo is disconnected and reconnected in **Pages → Settings → Builds &
+deployments**, this is how a push reaches production:
+
+```bash
+git push origin main
+./scripts/deploy.py
+```
+
+It uses wrangler's stored OAuth token (`pages:write` — no API token needed), waits for the
+build to reach a terminal stage, and exits non-zero if it fails. That last part matters: a
+failed build leaves the previous deployment serving, which from the outside looks exactly
+like success.
