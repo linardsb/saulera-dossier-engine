@@ -16,11 +16,10 @@ build step.
 `src/` — the pack contract, the provenance verifier and both renderers — is library code,
 driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
 
-> ⚠️ **Cloudflare Access is deliberately not set up** (27 Jul 2026). Production and every
-> preview hostname are **public to anyone with the URL**. That is tolerable only while the
-> surface is a `noindex` placeholder plus a health check that makes no model call — it must
-> be closed before #6, which adds a route that spends Anthropic credits. `DEPLOY.md` opens
-> with the full reasoning and is also the restore runbook.
+**Behind Cloudflare Access** (27 Jul 2026, #12). Production and every preview hostname
+require an email one-time PIN; only `linardsberzins@gmail.com` is admitted. Two Access
+applications, because a wildcard does not cover the apex — `scripts/setup-access.py`
+creates both. Verified: both hostnames answer `302` to `cloudflareaccess.com`.
 
 Not built: generation (#6), the client knowledge store (#5), the recruiter screen (#8).
 See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the

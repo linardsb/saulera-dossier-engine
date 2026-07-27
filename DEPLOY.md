@@ -10,24 +10,22 @@ This is written as a checklist because the second agency deployment should not b
 test. The reasons matter as much as the clicks — particularly step 3, which looks like
 something you could simplify and cannot.
 
-> ## ⚠️ Access is currently OFF — this deployment is public
+> ## ✅ Access is ON — both hostnames require a one-time PIN
 >
-> **Decided 27 July 2026.** Steps **2, 3 and 4** below are **not done**, by choice. No Access
-> application exists. `https://saulera-dossier-engine.pages.dev` and every preview hostname
-> serve to anyone who has the URL.
+> **Done 27 July 2026 (#12).** Two Access applications exist, and both were verified
+> returning `302` to `linardsberzins.cloudflareaccess.com`:
 >
-> **Why that is tolerable today.** The whole surface is a `noindex` placeholder. There is no
-> Function, no API, no secret and no model call — an anonymous caller learns nothing.
+> ```
+> saulera-dossier-engine.pages.dev      → production apex
+> *.saulera-dossier-engine.pages.dev    → every preview deploy
+> ```
 >
-> **Why it stops being tolerable at #8.** No model call is made from this deployment and no
-> key is ever bound (see step 5), so there are no credits to spend through it — the original
-> "#6 opens a world-callable spending endpoint" reasoning no longer applies. The remaining
-> gate is #8: the recruiter screen is a public path for pasted CVs, which the "no candidate
-> data store" constraint exists to prevent.
+> Admitted: `linardsberzins@gmail.com`. Login method: one-time PIN. Session: 24 hours.
 >
-> **So: restore steps 2–4 before #8 ships the recruiter screen.** They are left written out
-> below rather than deleted, because they are that restore runbook. Step 5 is now a no-op —
-> there are no secrets on this deployment.
+> **Created with `scripts/setup-access.py`, not by clicking.** Steps 2–4 below are still the
+> canonical description of *what* the end state must be and why — read them before changing
+> anything — but the script is the faster path and is idempotent. Step 5 is a no-op: there
+> are no secrets on this deployment.
 
 ---
 
@@ -52,20 +50,19 @@ no dependencies. This repo has `@anthropic-ai/sdk`, so `node_modules/` exists at
 time; a root output directory would push dependency source into the published asset set,
 against a Pages cap of 20,000 files. `public/` removes the whole class of problem.
 
-**Why the build command is empty.** Pages installs dependencies itself when it sees a
-`package.json`, and bundles `functions/` with esbuild including npm imports. If a deploy
-log ever shows no install step, set the build command to `npm ci` and redeploy.
+**Why the build command is empty.** There is nothing to build — `public/` is two static
+files. Pages still runs an install step because it sees a `package.json`; that is harmless
+and produces no output in the published asset set.
 
-**`functions/` stays at the repo root**, not inside `public/`. Pages resolves it from the
-project root, separately from the output directory. Moving it under `public/` publishes the
-Function source as a static file and it never runs.
+**There is no `functions/` directory.** This deployment has no Pages Functions at all — see
+**Model access** under Decisions in `README.md`. If one is ever added it belongs at the repo
+root, not inside `public/`: Pages resolves it from the project root, and moving it under
+`public/` publishes the source as a static file where it never runs.
 
 **The project name is load-bearing in one place.** `wrangler.toml`'s `name` must match the
 Pages project exactly or the build fails. Read it off the dashboard rather than assuming.
 
-Smoke test — before the secret is set, the Function should answer and say it is
-unconfigured. That 503 is the correct pre-secret answer and proves the Function is routed
-rather than 404ing:
+Smoke test — both must be `200` (or `302` to Access once step 2–3 are done):
 
 ```bash
 PROJECT=<project>
@@ -73,20 +70,14 @@ curl -s -o /dev/null -w '%{http_code}\n' "https://$PROJECT.pages.dev/"          
 curl -s -o /dev/null -w '%{http_code}\n' "https://$PROJECT.pages.dev/tokens.css"  # 200
 ```
 
-**There is no method guard, and the last line is the proof.** Only `onRequestPost` is
-exported, so Pages does not reject a `GET` — it stops treating the path as a Function and
-falls through to static assets. With no `404.html` in `public/`, the fallback serves
-`index.html` at **200**. (Measured 27 July 2026. The marketing site returns 404 for the
-equivalent request only because it *has* a `404.html`; do not generalise from it.)
-
-The trap: `health` is exactly the path an uptime monitor would `GET`, and a `GET` returns
-`200` with an HTML body — reads as healthy, proves nothing. **`POST` is the only meaningful
-check.** If that matters, add a `public/404.html` (#8 wants one anyway) rather than an
-`onRequestGet`.
+**There is no `404.html` in `public/`.** Any unmatched path therefore falls through to
+`index.html` at **200**, rather than returning 404. Measured 27 July 2026 — the marketing
+site returns 404 for the equivalent request only because it *has* a `404.html`, so do not
+generalise from it. #8 wants a `404.html` anyway; adding one changes this behaviour.
 
 ---
 
-## 2. Access — the preview application · ⚠️ NOT DONE (deferred 27 Jul 2026)
+## 2. Access — the preview application · ✅ DONE 27 Jul 2026
 
 Pages project → **Settings** → **General** → **Enable access policy**.
 
@@ -97,7 +88,7 @@ domain or custom domains." Stopping here leaves production wide open.
 
 ---
 
-## 3. Access — the production application · ⚠️ NOT DONE (deferred 27 Jul 2026)
+## 3. Access — the production application · ✅ DONE 27 Jul 2026
 
 Two applications are required. This is the fiddliest part of the deployment and the part
 most likely to be "simplified" back into an open production URL.
@@ -161,13 +152,14 @@ partial billing. Irrelevant at 2–10 people; worth knowing before you invite a 
 
 ---
 
-## 4. Verify the door actually closes · ⚠️ NOT DONE (deferred 27 Jul 2026)
+## 4. Verify the door actually closes · ✅ DONE 27 Jul 2026
 
-Nothing to verify while steps 2–3 are parked — today all three of these return `200` and
-that is the expected result. This becomes the acceptance test the moment a door exists.
-
-This is that acceptance test, not the dashboard screenshot. An unauthenticated request to
+This is the acceptance test, not the dashboard screenshot. An unauthenticated request to
 **either** hostname must be redirected to Cloudflare Access.
+
+Verified 27 July 2026 — both returned `302` to `linardsberzins.cloudflareaccess.com`. Note
+production lagged the preview by ~30 seconds while the apex application propagated, which
+looks exactly like the step-3 failure below. Re-check before concluding anything.
 
 ```bash
 PROJECT=<project>
@@ -177,10 +169,10 @@ curl -s -o /dev/null -w 'prod:    %{http_code}  %{redirect_url}\n' "https://$PRO
 curl -s -o /dev/null -w 'preview: %{http_code}  %{redirect_url}\n' "https://$PREVIEW.pages.dev/"
 ```
 
-All three must be a **302** whose `redirect_url` contains `cloudflareaccess.com`.
+Both must be a **302** whose `redirect_url` contains `cloudflareaccess.com`.
 
-A `200` on any of the three is a failure. A `200` on production with a `302` on preview is
-the specific failure this whole section exists to prevent — it means step 3 was skipped.
+A `200` on either is a failure. A `200` on production with a `302` on preview is the
+specific failure this whole section exists to prevent — it means step 3 was skipped.
 
 Access applies at the edge and takes a minute or two to propagate. Retry once after 60
 seconds before treating a `200` as real.
@@ -202,14 +194,14 @@ missing step.
 
 ## 6. Smoke-test checklist
 
-Applies now:
+Run these authenticated — Access is on, so an unauthenticated curl only ever sees the login
+page and tells you nothing about the site itself. Log in in a browser first.
 
 - [ ] `https://<project>.pages.dev/` renders the placeholder
 - [ ] `tokens.css` loads; card renders on the neutral palette, no off-palette colour
 - [ ] Mobile: 375px width, no horizontal scroll
 
-⚠️ Applies only once Access is restored (steps 2–4) — **all of these currently fail by
-design**, and every one of them must pass before #6 merges:
+Access — re-verify after any change to the applications or the policy:
 
 - [ ] `https://<project>.pages.dev/` in a private window → Access login page
 - [ ] Allowed email → PIN arrives (check Spam/Promotions) → placeholder page renders
