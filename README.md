@@ -9,14 +9,21 @@ process. **That note is the product. The generation is the cheap part.**
 
 ## Status
 
-The deploy shell exists. A Cloudflare Pages project serves `public/` behind Cloudflare
-Access, and `functions/api/health.js` answers with whether the model key is bound
-server-side. `src/` — the pack contract, the provenance verifier and both renderers — is
-library code with no route wired to it yet.
+The deploy shell is live. A Cloudflare Pages project serves `public/` at
+`saulera-dossier-engine.pages.dev`, and `functions/api/health.js` answers with whether the
+model key is bound server-side. As of 27 Jul 2026 the secret is not set, so it answers
+`503 not_configured` — that is the correct answer, not a bug. `src/` — the pack contract,
+the provenance verifier and both renderers — is library code with no route wired to it yet.
 
-Not deployed: generation (#6), the client knowledge store (#5), the recruiter screen (#8).
+> ⚠️ **Cloudflare Access is deliberately not set up** (27 Jul 2026). Production and every
+> preview hostname are **public to anyone with the URL**. That is tolerable only while the
+> surface is a `noindex` placeholder plus a health check that makes no model call — it must
+> be closed before #6, which adds a route that spends Anthropic credits. `DEPLOY.md` opens
+> with the full reasoning and is also the restore runbook.
+
+Not built: generation (#6), the client knowledge store (#5), the recruiter screen (#8).
 See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the
-runbook for standing the deployment up.
+runbook for the deployment.
 
 ## Where the specs live
 
