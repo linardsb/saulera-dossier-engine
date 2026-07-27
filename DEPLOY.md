@@ -120,13 +120,13 @@ Application 2  ·  *.<project>.pages.dev    → every preview deploy (hashes + b
 On **each** application's policy: action **Allow**, include rule **Emails**, login method
 **One-time PIN**, session duration 24 hours.
 
-**Or skip the clicking:** `scripts/setup-access.sh` creates both applications and attaches
+**Or skip the clicking:** `scripts/setup-access.py` creates both applications and attaches
 the policy in one go. It needs a token with **Access: Apps and Policies — Edit** (the
 wrangler OAuth token will not work — it carries `pages:write` and no Access scope):
 
 ```bash
 export CF_API_TOKEN=...   # dash → My Profile → API Tokens → Create Token → Custom token
-./scripts/setup-access.sh saulera-dossier-engine linardsberzins@gmail.com
+./scripts/setup-access.py saulera-dossier-engine linardsberzins@gmail.com
 ```
 
 It skips any domain that already has an application, so re-running is safe.
