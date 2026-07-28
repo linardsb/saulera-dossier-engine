@@ -125,6 +125,15 @@ test("the provenance three are literal hex, not var() aliases", () => {
   }
 });
 
+test("--border-hairline exists, and --border keeps the 3:1 job it delegates", () => {
+  // The hairline is decorative by contract (tokens.css comment): card edges whose grouping the
+  // surface change already carries. It is deliberately NOT in PAIRINGS — it would fail the 3.0
+  // floor by design — but it must exist as a literal, so an agency swap that deletes it fails
+  // here rather than as an invisible card edge, and --border must stay the token meaningful
+  // boundaries use (its own PAIRINGS entry above enforces the floor).
+  assert.ok(TOKENS.has("border-hairline"), "--border-hairline is not a literal hex in tokens.css");
+});
+
 test("the palette is measurable: every colour token this gate reads is opaque hex", () => {
   // A guard on the guard, in schema.test.js's idiom. A token written as `rgb(...)`, `hsl(...)`
   // or an 8-digit hex is ABSENT from TOKENS, so `token()` throws rather than the pairing

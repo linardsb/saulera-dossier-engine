@@ -5,15 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Submission pack · saulera dossier engine</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+
+<!-- The one piece of chrome both screens share. /clients previously had no route back to /
+     at all; the two screens are one tool, and the bar is what says so. Static aria-current,
+     because each file knows which screen it is. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Dossier engine</span>
+    <nav class="topbar-nav" aria-label="Screens">
+      <a href="/" aria-current="page">Submission pack</a>
+      <a href="/clients">Client knowledge</a>
+    </nav>
+  </div>
+</header>
+
 <main>
 
   <div class="page-head">
     <h1>Submission pack</h1>
-    <p class="page-sub">Pick a client, paste the brief and the CV.</p>
+    <p class="page-sub">Three steps, one visit to Claude, and every claim in the finished pack
+      shows its source.</p>
+    <!-- The whole journey, visible before any of it happens. Acts 2 and 3 stay hidden until
+         reached, so without this map a first-time reader sees one numbered step and a button,
+         and the trip through Claude arrives as a surprise. Same chip grammar as the acts, so
+         the map and the flow read as one thing. -->
+    <ol class="steps" aria-label="How this works">
+      <li><span class="act-num" aria-hidden="true">1</span>Pick a client and paste the brief and the CV</li>
+      <li><span class="act-num" aria-hidden="true">2</span>Take the prompt to Claude and bring back its reply</li>
+      <li><span class="act-num" aria-hidden="true">3</span>Copy the pack once every claim is checked</li>
+    </ol>
   </div>
 
   <div class="workspace">
@@ -25,12 +51,16 @@
       <h2 class="rail-head" id="rail-head">Clients</h2>
 
       <p class="rail-empty" id="rail-empty" hidden>
-        No clients yet. Add the first one on the client knowledge screen, then come back.
+        No clients yet. <a href="/clients">Add the first one</a> on the client knowledge
+        screen, then come back.
       </p>
 
       <ul class="client-list" id="client-list"></ul>
 
-      <p class="rail-link"><a href="/clients">Write client notes</a></p>
+      <!-- Says what the notes are FOR before linking to them. "Write client notes" on its own
+           assumed the reader already knew notes exist and feed the packs. -->
+      <p class="rail-hint">Packs draw on what you have written about each client.
+        <a href="/clients">Add clients and write their notes</a></p>
 
       <!-- The rail's own live region. A role="status" inside a hidden subtree is not in the
            accessibility tree, so each act below owns one too rather than sharing this. -->
@@ -41,14 +71,15 @@
 
       <!-- ── act 1 ────────────────────────────────────────────────────────────────────── -->
       <section class="act" id="act-inputs" aria-labelledby="inputs-head">
-        <h2 class="act-head" id="inputs-head">1. The inputs</h2>
+        <h2 class="act-head" id="inputs-head"><span class="act-num" aria-hidden="true">1</span>The inputs</h2>
 
         <div class="input-pair">
           <div class="input-col">
             <label class="field" for="brief">The client's brief</label>
-            <textarea class="textarea" id="brief" name="brief" rows="14" spellcheck="true"></textarea>
+            <textarea class="textarea" id="brief" name="brief" rows="14" spellcheck="true"
+                      placeholder="Paste the client's brief here, or open a file below."></textarea>
             <div class="file-row">
-              <label class="file-label" for="brief-file">Or open a file — PDF, Word, or text</label>
+              <label class="file-label" for="brief-file">Or open a file: PDF, Word, or text</label>
               <input class="file-input" type="file" id="brief-file"
                      accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown">
             </div>
@@ -56,9 +87,10 @@
 
           <div class="input-col">
             <label class="field" for="cv">The candidate's CV</label>
-            <textarea class="textarea" id="cv" name="cv" rows="14" spellcheck="true"></textarea>
+            <textarea class="textarea" id="cv" name="cv" rows="14" spellcheck="true"
+                      placeholder="Paste the candidate's CV here, or open a file below."></textarea>
             <div class="file-row">
-              <label class="file-label" for="cv-file">Or open a file — PDF, Word, or text</label>
+              <label class="file-label" for="cv-file">Or open a file: PDF, Word, or text</label>
               <input class="file-input" type="file" id="cv-file"
                      accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown">
             </div>
@@ -82,7 +114,7 @@
       <!-- ── act 2 ────────────────────────────────────────────────────────────────────── -->
       <section class="act" id="act-waiting" aria-labelledby="waiting-head" hidden>
         <div class="act-head-row">
-          <h2 class="act-head" id="waiting-head">2. In Claude</h2>
+          <h2 class="act-head" id="waiting-head"><span class="act-num" aria-hidden="true">2</span>In Claude</h2>
           <!-- Honest seconds since the prompt was copied, not a percentage and not a spinner.
                aria-hidden because it updates every second and a per-second live region is a
                screen reader denial of service. The act change is what gets announced, once. -->
@@ -93,13 +125,14 @@
              or lost behind a window, and "paste the prompt into Claude" with no Claude in sight
              is where this flow used to dead-end. -->
         <p class="act-note">
-          The prompt is on your clipboard and Claude is open in the other tab — paste it there
+          The prompt is on your clipboard and Claude is open in the other tab. Paste it there
           (⌘V). When it answers, copy the whole reply and paste it below.
           <a class="claude-link" href="https://claude.ai/new" target="_blank" rel="noopener">Open Claude again</a>
         </p>
 
         <label class="field" for="reply">Claude's reply</label>
-        <textarea class="textarea" id="reply" name="reply" rows="10" spellcheck="false"></textarea>
+        <textarea class="textarea" id="reply" name="reply" rows="10" spellcheck="false"
+                  placeholder="Paste the whole reply, including the JSON block."></textarea>
 
         <div class="act-row">
           <button class="btn btn-primary" type="button" id="read-pack">Read the pack</button>
@@ -111,7 +144,7 @@
       <!-- ── act 3 ────────────────────────────────────────────────────────────────────── -->
       <section class="act" id="act-pack" aria-labelledby="pack-head" hidden>
         <div class="act-head-row">
-          <h2 class="act-head" id="pack-head">3. The pack</h2>
+          <h2 class="act-head" id="pack-head"><span class="act-num" aria-hidden="true">3</span>The pack</h2>
           <span class="pack-summary" id="provenance-summary"></span>
         </div>
 

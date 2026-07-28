@@ -53,7 +53,7 @@
     openClaude: "Open Claude",
     promptManual: "Your browser would not let this page use the clipboard. The prompt is " +
                   "below. Select it and copy it by hand.",
-    readIdle: "Read the pack",
+    readIdle: "Show the pack",
     reading: "Checking the sources…",
     packReady: "Every claim is checked. Read the marks before you send it.",
     packCopied: "Copied. Paste it into your email.",
@@ -64,10 +64,12 @@
     needReply: "Paste Claude's reply first.",
 
     sessionExpired: "Your session expired. Reload the page to sign in again.",
-    notConfigured: "This deployment is not connected to its database. Nothing can be read or " +
-                   "saved yet.",
-    notMigrated: "This deployment's database has no tables yet. Nothing can be read or saved " +
-                 "yet.",
+    // Setup faults a recruiter cannot fix. "not connected to its database" is load-bearing:
+    // the clients-screen probe matches it, and DEPLOY.md's triage table keys off the two codes.
+    notConfigured: "This tool is not connected to its database, so nothing can be read or " +
+                   "saved yet. Ask whoever set it up.",
+    notMigrated: "This tool's database is empty, so nothing can be read or saved yet. Ask " +
+                 "whoever set it up.",
     noteEmpty: "There is no note for this client yet. Write down how they hire, then come back.",
     noteEmptyLink: "Write the note",
     unknownClient: "That client does not exist. Pick one from the list.",
@@ -75,7 +77,7 @@
     tooLong: "That is longer than 100,000 characters. Shorten it and try again. Your text is " +
              "still here.",
     noPack: "That does not look like a pack. Copy the whole of Claude's reply, including the " +
-            "JSON block, and paste it again.",
+            "code block at the end, and paste it again.",
     badPack: "Claude's reply is missing something the pack needs. Ask it to try again, then " +
              "paste the new reply.",
 
@@ -89,7 +91,7 @@
     fileFailed: "Could not read that file. Paste the text instead.",
     // A scanned CV is the common case here, and naming it is the difference between a
     // recruiter retrying the same file and a recruiter pasting the text.
-    fileUnreadable: "No text could be read from that file — it is most likely a scan or an " +
+    fileUnreadable: "No text could be read from that file. It is most likely a scan or an " +
                     "image. Open it, copy the text, and paste it instead.",
     fileReading: "Reading the file…",
 
@@ -292,6 +294,18 @@
     // can still see what they pasted, which leaves a live-looking button that no longer does
     // anything — aria-disabled is how the rest of this screen says "not right now".
     setBusy(el.readPack, next === "pack");
+    // The arriving act comes to the reader. Act 3 otherwise renders two viewports down and
+    // "nothing happened" is what a recruiter sees. Never on "inputs": that is the load and
+    // reset path, where jumping the page is the bug. Smooth only when motion is welcome.
+    if (next === "waiting" || next === "pack") {
+      var arrived = next === "waiting" ? el.actWaiting : el.actPack;
+      arrived.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth"
+      });
+    }
   }
 
   function startClock() {
@@ -341,10 +355,14 @@
 
   /* ── the rail ────────────────────────────────────────────────────────────────────────── */
 
+  /** "Note: 1,842 characters · 6 packs", or "No note yet" — the words a recruiter acts on.
+   *  "0 characters" made the reader do the arithmetic; the empty state is the actionable one. */
   function rowMeta(client) {
-    var chars = client.note_chars.toLocaleString("en-GB");
-    return chars + (client.note_chars === 1 ? " character · " : " characters · ") +
-      client.packs + (client.packs === 1 ? " pack" : " packs");
+    var note = client.note_chars > 0
+      ? "Note: " + client.note_chars.toLocaleString("en-GB") +
+        (client.note_chars === 1 ? " character" : " characters")
+      : "No note yet";
+    return note + " · " + client.packs + (client.packs === 1 ? " pack" : " packs");
   }
 
   function renderList(clients) {
@@ -630,7 +648,10 @@
           body.event_recorded ? COPY.packReady : COPY.eventFailed,
           !body.event_recorded
         );
-        el.copyPack.focus();
+        // preventScroll, so the smooth scroll setPhase just started lands on the pack's TOP
+        // rather than being yanked to this button below it. Engines without the option object
+        // ignore it and scroll, which is the old behaviour rather than a break.
+        el.copyPack.focus({ preventScroll: true });
       })
       .catch(function (err) {
         if (!mine()) return;
@@ -778,10 +799,21 @@
       el.packBody.appendChild(questions);
     }
 
+    // The headline number, worn in the marks' own colours — word plus colour, never colour
+    // alone, same rule as the marks. Built element by element: model-adjacent numbers still
+    // go nowhere near an HTML-parsing assignment.
     var sourced = body.provenance.cv + body.provenance.client_note;
-    el.provenanceSummary.textContent =
-      sourced + (sourced === 1 ? " sourced · " : " sourced · ") +
-      body.provenance.unverified + " unverified";
+    var unverified = body.provenance.unverified;
+    el.provenanceSummary.textContent = "";
+    var sourcedNode = document.createElement("span");
+    sourcedNode.className = "summary-sourced";
+    sourcedNode.textContent = sourced + " sourced";
+    el.provenanceSummary.appendChild(sourcedNode);
+    el.provenanceSummary.appendChild(document.createTextNode(" · "));
+    var unverifiedNode = document.createElement("span");
+    if (unverified > 0) unverifiedNode.className = "summary-unverified";
+    unverifiedNode.textContent = unverified + " unverified";
+    el.provenanceSummary.appendChild(unverifiedNode);
 
     el.rendererNote.textContent = COPY.renderers[body.renderer] || "";
   }

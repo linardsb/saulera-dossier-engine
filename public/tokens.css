@@ -23,7 +23,18 @@
   --text-muted:   #6b6b6b;
   --accent:       #0099ff;
   --border:       #595959;
+  /* Decorative only: card edges, the top bar's rule, dividers whose grouping the surface
+     change already carries. Never the sole boundary of a meaningful control — inputs and
+     textareas keep --border, which is what holds the 3:1 non-text floor. That is why this
+     token is deliberately NOT in test/tokens.test.js's PAIRINGS. */
+  --border-hairline: #e3e3e3;
   --danger:       #78350f;
+
+  /* stackai's soft layered card shadow, one token so every card lifts identically. Alpha hex
+     is fine here: the contrast gate reads single whole-value hex tokens only, and a shadow is
+     not a colour pairing. */
+  --shadow-card: 0 1px 1px #0000000a, 0 4px 6px #1d1d1d05, 0 20px 60px #1d1d1d0a,
+                 0 2px 4px #0000000a;
 
   /* type — font files deferred, reason in the header; tokens exist now so it is a one-file change */
   --font-ui:   "Aspekta 500", system-ui, -apple-system, sans-serif;
@@ -58,7 +69,7 @@
 
   /* 4px grid */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
-  --space-6: 24px; --space-8: 32px; --space-12: 48px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
 
   --radius: 9px;
   --max-width: 1024px;

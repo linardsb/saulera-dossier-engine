@@ -44,11 +44,12 @@
     // The two deployment faults, which are separate problems with separate remedies. They are
     // the likeliest thing on this screen on the day it is first stood up, and they fire on
     // first paint before the agency has touched anything — so neither can borrow the save
-    // copy, which would claim a save nobody asked for.
-    notConfigured: "This deployment is not connected to its database. Nothing can be read or " +
-                   "saved yet.",
-    notMigrated: "This deployment's database has no tables yet. Nothing can be read or saved " +
-                 "yet.",
+    // copy, which would claim a save nobody asked for. "not connected to its database" is
+    // load-bearing: the clients-screen probe matches that phrase.
+    notConfigured: "This tool is not connected to its database, so nothing can be read or " +
+                   "saved yet. Ask whoever set it up.",
+    notMigrated: "This tool's database is empty, so nothing can be read or saved yet. Ask " +
+                 "whoever set it up.",
     // Read-path failures. The save copy promises "your text is still here", which is a lie on
     // a path where nothing was being saved and there is no text.
     listFailed: "Could not load the client list. Reload the page.",
@@ -56,6 +57,16 @@
     addFailed: "Could not add that client. Try again.",
     settingFailed: "Could not change that setting. It is still what it was.",
     agencySaved: "Saved",
+
+    deleteIdle: "Delete this client",
+    deleting: "Deleting…",
+    // Named, and priced: the reader decides while looking at what leaves with the row.
+    deleteConfirm: function (name) {
+      return "Delete " + name + "? Its note and its pack count go with it. This cannot be " +
+        "undone.";
+    },
+    deleteFailed: "Could not delete that client. Try again.",
+    deleted: function (name) { return "Deleted " + name + "."; },
   };
 
   var el = {
@@ -70,12 +81,13 @@
     editorHead: document.getElementById("editor-head"),
     note: document.getElementById("note"),
     saveButton: document.getElementById("save-button"),
+    deleteButton: document.getElementById("delete-button"),
     saveState: document.getElementById("save-state"),
     agencyState: document.getElementById("agency-state"),
     sendFormat: document.getElementById("send-format"),
   };
 
-  var state = { selected: null, dirty: false, saving: false, adding: false };
+  var state = { selected: null, dirty: false, saving: false, adding: false, deleting: false };
 
   /* ── talking to the API ──────────────────────────────────────────────────────────────── */
 
@@ -121,12 +133,15 @@
 
   /* ── the rail ────────────────────────────────────────────────────────────────────────── */
 
-  /** "1,842 characters · 6 packs" — the row's main content, because the point is how much is
-   *  written down. Grouped thousands, because a note's length is read at a glance. */
+  /** "Note: 1,842 characters · 6 packs", or "No note yet" — the row's main content, in the
+   *  words a reader acts on. "0 characters" made them do the arithmetic; the empty state is
+   *  the actionable one. Same function as app.js's rowMeta, deliberately. */
   function rowMeta(client) {
-    var chars = client.note_chars.toLocaleString("en-GB");
-    return chars + (client.note_chars === 1 ? " character · " : " characters · ") +
-      client.packs + (client.packs === 1 ? " pack" : " packs");
+    var note = client.note_chars > 0
+      ? "Note: " + client.note_chars.toLocaleString("en-GB") +
+        (client.note_chars === 1 ? " character" : " characters")
+      : "No note yet";
+    return note + " · " + client.packs + (client.packs === 1 ? " pack" : " packs");
   }
 
   function renderList(clients) {
@@ -405,6 +420,46 @@
   el.saveButton.addEventListener("click", save);
   el.note.addEventListener("input", function () {
     if (!state.dirty) markDirty();
+  });
+
+  el.deleteButton.addEventListener("click", function () {
+    if (state.deleting || !state.selected) return;
+    // The name from the heading, so the confirm names what the reader is looking at. Unsaved
+    // edits need no second confirm: deleting the client is a stronger statement about the note
+    // than abandoning a draft of it.
+    var name = el.editorHead.textContent;
+    if (!window.confirm(COPY.deleteConfirm(name))) return;
+
+    var deletingId = state.selected;
+    state.deleting = true;
+    setBusy(el.deleteButton, true);
+    el.deleteButton.textContent = COPY.deleting;
+
+    api("/api/clients/" + encodeURIComponent(deletingId), { method: "DELETE" })
+      .then(function () {
+        if (state.selected !== deletingId) return;
+        state.dirty = false; // the note went with the client; the leave-warning guards nothing
+        select(null);
+        showRailState(COPY.deleted(name), false);
+      })
+      .catch(function (err) {
+        if (state.selected !== deletingId) return;
+        if (err && err.code === "not_found") {
+          // Already gone, likely deleted in another tab. The screen catches up rather than
+          // reporting a failure about a row that no longer exists.
+          state.dirty = false;
+          select(null);
+          showRailState(COPY.deleted(name), false);
+          return;
+        }
+        // The editor stays as it was: same rule as a failed save.
+        showSaveState(messageFor(err, COPY.deleteFailed), true);
+      })
+      .then(function () {
+        state.deleting = false;
+        setBusy(el.deleteButton, false);
+        el.deleteButton.textContent = COPY.deleteIdle;
+      });
   });
 
   document.querySelectorAll('input[name="renderer"]').forEach(function (input) {

@@ -27,6 +27,7 @@ import {
   cleanRenderer,
   cleanSendFormat,
   createClient,
+  deleteClient,
   eventCounts,
   getAgency,
   getClient,
@@ -156,6 +157,34 @@ test("updateClient without a note issues no note write at all", async () => {
 
 test("updateClient with nothing to change is an error, not a silent no-op", async () => {
   assert.equal(await codeOf(() => updateClient(fakeD1([CLIENT]), CLIENT.id, {})), "missing_fields");
+});
+
+test("deleteClient checks the client exists before issuing the DELETE", async () => {
+  const db = fakeD1([CLIENT, null]);
+  const result = await deleteClient(db, CLIENT.id);
+  // The name comes back so the screen can say what it removed.
+  assert.deepEqual(result, { ok: true, name: CLIENT.name });
+  const statements = db.calls.map((call) => call.sql);
+  assert.match(statements[0], /^SELECT/);
+  assert.match(statements[1], /^DELETE FROM clients WHERE id = \?$/);
+  // The id is bound, never interpolated — same property the update path asserts.
+  assert.deepEqual(db.calls[1].args, [CLIENT.id]);
+});
+
+test("deleteClient on an unknown id is not_found and issues no DELETE", async () => {
+  const db = fakeD1([null]);
+  assert.equal(await codeOf(() => deleteClient(db, "nope")), "not_found");
+  assert.equal(db.calls.length, 1, "the DELETE must not run when the SELECT found nothing");
+});
+
+test("deleteClient issues exactly one DELETE: the events go by the schema's cascade", async () => {
+  // ON DELETE CASCADE in migrations/0001_init.sql is what removes the events. A second
+  // statement here would be the same fact in two places, drifting independently.
+  const db = fakeD1([CLIENT, null]);
+  await deleteClient(db, CLIENT.id);
+  const deletes = db.calls.filter((call) => /^DELETE/.test(call.sql));
+  assert.equal(deletes.length, 1);
+  assert.doesNotMatch(deletes[0].sql, /events/);
 });
 
 test("getClient on an unknown id is not_found, not null", async () => {

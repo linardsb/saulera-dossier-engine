@@ -5,15 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Client knowledge · saulera dossier engine</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+
+<!-- The one piece of chrome both screens share. This screen previously had no route back to /
+     at all; the two screens are one tool, and the bar is what says so. Static aria-current,
+     because each file knows which screen it is. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Dossier engine</span>
+    <nav class="topbar-nav" aria-label="Screens">
+      <a href="/">Submission pack</a>
+      <a href="/clients" aria-current="page">Client knowledge</a>
+    </nav>
+  </div>
+</header>
+
 <main>
 
   <div class="page-head">
     <h1>Client knowledge</h1>
-    <p class="page-sub">Notes on how each client hires. Read on every pack.</p>
+    <p class="page-sub">Write down how each client hires. Every pack for that client is built
+      from its note, so the more you file here, the better the packs get.</p>
   </div>
 
   <div class="workspace">
@@ -55,25 +72,24 @@
         </div>
 
         <label class="field" for="note">What we know about how they hire</label>
-        <textarea class="textarea" id="note" name="note" rows="24" spellcheck="true"></textarea>
+        <!-- The signature element: §5.3's four things as prompts rather than fields. It sat
+             below the save row, under a 24-row box, which is exactly where it could not do its
+             one job — staying visible while writing. One line, above the box, does. -->
+        <p class="scaffold-line">Their process and stages · who sits on the panel · what each
+          stage tests · why candidates were turned down</p>
+        <textarea class="textarea" id="note" name="note" rows="16" spellcheck="true"
+                  placeholder="Write it as you would tell a colleague. Plain notes beat blank perfection."></textarea>
 
         <div class="save-row">
           <button class="btn btn-primary" type="button" id="save-button">Save note</button>
           <span class="save-state" id="save-state" role="status"></span>
         </div>
 
-        <!-- The signature element. §5.3's four things, which is the client-knowledge schema
-             architecture §8 says does not exist yet, rendered as prompts rather than fields.
-             Static on purpose: it does not collapse, animate or count anything, and unlike
-             placeholder text it stays visible while writing. -->
-        <div class="scaffold">
-          <h3 class="scaffold-head">What belongs in a note</h3>
-          <ul class="scaffold-list">
-            <li>Their process and stages</li>
-            <li>Who sits on the panel</li>
-            <li>What each stage tests</li>
-            <li>Why candidates were turned down</li>
-          </ul>
+        <!-- Removal, away from Save on purpose: the two most opposite actions on the screen
+             should not be neighbours. The confirm in clients.js names the client and what
+             leaves with it. -->
+        <div class="editor-remove">
+          <button class="btn btn-danger" type="button" id="delete-button">Delete this client</button>
         </div>
       </div>
     </section>
@@ -81,23 +97,34 @@
   </div>
 
   <section class="agency" aria-labelledby="agency-head">
-    <h2 class="agency-head" id="agency-head">This deployment</h2>
+    <h2 class="agency-head" id="agency-head">Pack settings</h2>
+    <p class="agency-sub">Set once for the whole agency. They change every pack, not just the
+      next one, and saving is automatic.</p>
 
     <div class="agency-controls">
       <fieldset class="radio-group">
-        <legend class="field">Sources in packs</legend>
+        <legend class="field">Where each claim's source quote goes</legend>
+        <!-- Decision guidance, not decoration: the two renderings say the same things, so the
+             hint gives the reader the one trade-off that actually decides it. -->
+        <p class="field-hint">Every line in a pack quotes the CV or your note as proof. Choose
+          where those quotes sit: collected at the end, or under each line.</p>
         <div class="radio-row">
-          <label><input type="radio" name="renderer" value="appendix"> In an appendix</label>
-          <label><input type="radio" name="renderer" value="inline"> Beside each claim</label>
+          <label><input type="radio" name="renderer" value="appendix"> Numbered, in an appendix at the end</label>
+          <label><input type="radio" name="renderer" value="inline"> Quoted beside each claim</label>
         </div>
       </fieldset>
 
       <div>
-        <label class="field" for="send-format">How packs are sent</label>
+        <label class="field" for="send-format">Where your packs usually land</label>
+        <!-- "does not change the pack yet" is deliberate honesty: send_format is recorded
+             config nothing reads at render time. Without that sentence a recruiter flips it,
+             sees no difference, and stops trusting the other setting too. -->
+        <p class="field-hint">ATS is your applicant tracking system, the software you log
+          candidates in. This is a note for tuning the tool; it does not change the pack yet.</p>
         <select class="select" id="send-format" name="send_format">
-          <option value="email_body">Email body</option>
-          <option value="attachment">Attachment</option>
-          <option value="ats_field">ATS field</option>
+          <option value="email_body">In the body of an email</option>
+          <option value="attachment">As an attachment</option>
+          <option value="ats_field">In a field in your ATS</option>
         </select>
       </div>
     </div>
