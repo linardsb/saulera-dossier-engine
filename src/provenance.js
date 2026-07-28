@@ -30,6 +30,16 @@ export function normalise(s) {
 }
 
 /**
+ * Does `quote` appear literally in `source`? The one definition of "literal", shared with
+ * src/prep, so the candidate brief's competency quotes are held to exactly the same standard
+ * as the pack's claims — including the same latitude and no more.
+ */
+export function quoteAppears(quote, source) {
+  const needle = normalise(quote);
+  return Boolean(needle) && normalise(source).includes(needle);
+}
+
+/**
  * @param pack   a pack that has passed assertPack()
  * @param inputs { cv, clientNote } — the exact text handed to generation
  * @returns { pack, failures } — pack with every claim's source status resolved
