@@ -44,10 +44,14 @@ Also fixed the palette bug that would have made the product's central marking il
 
 ## Tests added
 
-`npm test` is **219 passing, 0 failing on Node v20.20.2 and v24.11.0** (was 140 before; the six
-existing test files are untouched and all still pass). The four files below account for 161 of
-those; the remaining 58 are `test/extract.test.js`, added in a later commit to give
-`public/extract.js` coverage.
+`npm test` is **219 passing, 0 failing on Node v20.20.2 and v24.11.0** at head. It was **161** when
+this report was written: the 83 already in the suite plus the 78 in the four files below. The
+remaining 58 are `test/extract.test.js`, added in a later commit to give `public/extract.js`
+coverage. The existing test files are untouched and all still pass.
+
+> This line first read "161 passing … (was 140 before)". 140 was wrong at every reading: the suite
+> was 65 at the branch point and 83 immediately before this ticket, once `test/render.test.js`
+> landed with #7. These are counted per file, not recalled.
 
 - **`test/tokens.test.js`** — 17 tests. Parses `tokens.css`, computes WCAG relative luminance,
   asserts a floor for every pairing that renders, and requires the provenance three to be
