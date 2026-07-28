@@ -1,0 +1,146 @@
+{
+  "role_title": "Senior Community Staff Nurse (Band 6 equivalent)",
+  "blocks": [
+    {
+      "name": "PrimerCard",
+      "props": {
+        "role_shape": "A caseload of around 25 patients in their own homes, worked mostly alone, with a weekly MDT as the only routine point of contact with colleagues.",
+        "register": "Plain and clinical. This is a provider that would rather hear how you decided than how confident you felt.",
+        "what_stage_one_tests": "Whether you are comfortable holding a decision on your own, and whether you can say when you would escalate."
+      }
+    },
+    {
+      "name": "CompetencyMap",
+      "props": {
+        "intro": "Four things the brief keeps returning to. Two of them are about working alone; the third is about what you write down afterwards.",
+        "competency_ids": ["comp-lone-working", "comp-wound-management", "comp-documentation"]
+      },
+      "children": [
+        {
+          "name": "StoryBankCard",
+          "props": {
+            "prompt": "A visit where you made a clinical call on your own and had to decide whether to escalate.",
+            "covers_competency_ids": ["comp-lone-working", "comp-documentation"],
+            "skeleton": [
+              "The setting, and who else was involved",
+              "What you noticed that made this a decision rather than a routine visit",
+              "What you weighed before you acted",
+              "What you did, and when you escalated or chose not to",
+              "What you wrote up, and when"
+            ]
+          }
+        },
+        {
+          "name": "StoryBankCard",
+          "props": {
+            "prompt": "A wound you assessed and managed independently over several visits.",
+            "covers_competency_ids": ["comp-wound-management"],
+            "skeleton": [
+              "The wound at first assessment",
+              "The regime you chose and why",
+              "What you changed when it did not respond",
+              "How you knew it was working"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "PanelBrief",
+      "props": {
+        "intro": "Who you are likely to meet, and what each of them is listening for.",
+        "panel": [
+          {
+            "who": "Clinical Services Manager",
+            "what_they_probe": "Whether you can hold your nerve alone in someone's house.",
+            "source_field_key": "their-process"
+          },
+          {
+            "who": "Someone from governance",
+            "what_they_probe": "Careful record-keeping — they sit in on the second stage.",
+            "source_field_key": "what-they-actually-care-about"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StoryBankCard",
+      "props": {
+        "prompt": "A time your notes were the thing the next clinician had to work from.",
+        "covers_competency_ids": ["comp-documentation"],
+        "skeleton": [
+          "What the visit involved",
+          "What you recorded, and when",
+          "What the next person did with it"
+        ]
+      }
+    },
+    {
+      "name": "LogisticsRail",
+      "props": {
+        "when": "Second stage, East Grinstead.",
+        "format": "Panel, including a scenario drawn from a real case on the caseload.",
+        "bring": "NMC PIN, driving licence, and the dates of your community roles.",
+        "note": "The brief does not say how long the second stage runs. Ask when you confirm."
+      }
+    }
+  ],
+  "competencies": [
+    {
+      "id": "comp-lone-working",
+      "label": "Working autonomously on a rural caseload",
+      "source_quote": "Comfortable lone working with a rural caseload",
+      "importance": 5
+    },
+    {
+      "id": "comp-wound-management",
+      "label": "Independent wound assessment and management",
+      "source_quote": "at least one of them in a community or district nursing setting",
+      "importance": 4
+    },
+    {
+      "id": "comp-documentation",
+      "label": "Same-day documentation others rely on",
+      "source_quote": "the postholder must document every visit before the end of the day",
+      "importance": 4
+    }
+  ],
+  "questions": [
+    {
+      "competency_id": "comp-lone-working",
+      "text": "Tell me about the last clinical decision you made with nobody available to check it.",
+      "axis": "core",
+      "difficulty": "standard"
+    },
+    {
+      "competency_id": "comp-lone-working",
+      "text": "How do you decide, in someone's home, that a situation needs escalating now rather than at the end of the round?",
+      "axis": "core",
+      "difficulty": "probing"
+    },
+    {
+      "competency_id": "comp-wound-management",
+      "text": "Walk me through how you assess a wound you are seeing for the first time.",
+      "axis": "core",
+      "difficulty": "gentle"
+    },
+    {
+      "competency_id": "comp-wound-management",
+      "text": "Describe a wound that did not respond to the regime you chose. What did you change?",
+      "axis": "core",
+      "difficulty": "standard"
+    },
+    {
+      "competency_id": "comp-documentation",
+      "text": "What goes into your write-up of a visit, and when do you do it?",
+      "axis": "core",
+      "difficulty": "gentle"
+    },
+    {
+      "competency_id": "comp-documentation",
+      "text": "A colleague picks up your caseload tomorrow. What would they struggle to find in your notes?",
+      "axis": "core",
+      "difficulty": "probing"
+    }
+  ]
+}
