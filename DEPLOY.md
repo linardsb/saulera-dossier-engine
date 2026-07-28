@@ -385,19 +385,24 @@ Access — re-verify after any change to the applications or the policy:
 
 - **Custom domain.** `<project>.pages.dev` is enough until an agency is real. Whose domain
   it should be — saulera's or the agency's — is a branding decision, not a DNS one.
-- **Cloudflare Access itself** (27 Jul 2026) — steps 2–4, per the banner at the top. Must be
-  restored before #6. This is the only deferral on this list with a hard deadline attached.
+- **Cloudflare Access itself: done** (27 Jul 2026, #12). This entry used to defer steps 2–4 with
+  the only hard deadline on this list attached to it. Both applications exist and both hostnames
+  were verified; the banner at the top of this file is the record. Kept as a line so the one
+  deferral that carried a deadline is visibly discharged rather than quietly gone — and it is
+  load-bearing now in a way it was not when it was written, because since 28 July this
+  deployment holds a key. Access is what stands between `/api/generate` and the world.
 - **`_headers`: partly done** (27 Jul 2026, #8). `public/_headers` now sets
   `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options` on `/*`. **What remains is
   a Content-Security-Policy**, which is the one worth having on a screen that renders model
   output and also the one that breaks a deployment in a way nobody notices until a recruiter
   cannot copy a pack. It needs its own ticket and its own smoke pass.
-- **Web fonts, re-deferred with a reason** (27 Jul 2026, #8). This entry used to say the
-  `.woff2` files land with the recruiter screen. They did not, and this no longer points at #8.
-  There are no font files in the repo, "Aspekta 500" and "Geist" each need a licensing
-  decision, and the `system-ui` fallback renders correctly and costs nothing against the
-  ten-minute guardrail. Fonts are also branding-adjacent, and branding is per-agency config.
-  The `--font-*` tokens exist, so shipping them later is a one-file change.
+- **Web fonts: done** (28 Jul 2026, `95566b2`). Deferred twice before that, most recently on the
+  grounds that there were no font files in the repo and that "Aspekta 500" and "Geist" each
+  needed a licensing decision. The decision was made rather than dodged — Aspekta is MIT, Geist
+  and DM Mono are SIL OFL, all redistributable — and four `.woff2` files now ship self-hosted
+  from `public/fonts/` behind `public/fonts.css`, so no request leaves the origin. The entry's
+  own prediction held: the `--font-*` tokens already existed, and shipping them was a one-file
+  change. Fonts stay branding-adjacent, so an agency swap is still a `tokens.css` edit.
 - **An Access service token, re-scoped** (27 Jul 2026, #8). It would still make the Functions
   curl-able from CI. The original reason — measuring generation latency automatically — is
   gone: there is no model call on this deployment to time. What is measured now is the
