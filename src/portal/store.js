@@ -29,8 +29,12 @@ export async function hashToken(token) {
  * The retention rule as one statement (decision 13): every invite whose interview is 30 or
  * more days past dies, and the cascade does the rest. No bound values — the boundary is
  * the schema's own clock, never a caller's. Pages has no cron, so functions/prep runs this
- * lazily on every portal request; `invite_by_interview` keeps that every-request guard
- * cheap, and scripts/purge.py is the assurance path for a portal nobody visits.
+ * lazily on every portal request. That guard is a full-table scan — wrapping interview_at
+ * in datetime() defeats `invite_by_interview`, and deliberately so: the schema admits
+ * ISO-8601 'T' forms, which a raw string comparison against datetime('now')'s
+ * space-separated format would misorder on the boundary day. Fine at invite-count scale;
+ * the index is left for #22's date-ordered lookups. scripts/purge.py is the assurance
+ * path for a portal nobody visits.
  */
 export async function purgeExpired(db) {
   const result = await db

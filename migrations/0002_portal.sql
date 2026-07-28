@@ -5,7 +5,10 @@
 
 -- interview_at / expires_at / sent_at / opened_at are SQLite UTC datetime strings
 -- ('YYYY-MM-DD HH:MM:SS', the datetime('now') format). #22 writes them; purge compares
--- them through datetime(), which also accepts ISO-8601 'T' forms.
+-- them through datetime(), which also accepts ISO-8601 'T' forms. interview_at alone
+-- carries a CHECK: datetime() of an unparseable string is NULL, NULL never satisfies the
+-- purge's <=, and the row would outlive retention silently — rejecting the write is the
+-- loud failure the fail-open middleware cannot give.
 
 -- status carries no CHECK deliberately: its vocabulary belongs to #20/#22, and a hard
 -- delete means there is never a 'deleted' state to represent. sent_at/opened_at are the
@@ -15,7 +18,7 @@ CREATE TABLE invite (
   client_id    TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   token_hash   TEXT NOT NULL UNIQUE,
   email        TEXT NOT NULL,
-  interview_at TEXT NOT NULL,
+  interview_at TEXT NOT NULL CHECK (datetime(interview_at) IS NOT NULL),
   sent_at      TEXT,
   opened_at    TEXT,
   expires_at   TEXT NOT NULL,

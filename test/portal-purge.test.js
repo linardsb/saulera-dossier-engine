@@ -211,3 +211,28 @@ test("a fourth attempt.mode and a fourth events.kind are constraint violations",
     "decision 3/23: the telemetry vocabulary is closed — a fourth kind is a schema change to make in the open",
   );
 });
+
+test("an unparseable interview_at is a constraint violation, not an immortal row", { skip }, () => {
+  const db = openMigrated();
+  const insert = db.prepare(
+    `INSERT INTO invite (id, client_id, token_hash, email, interview_at, expires_at)
+     VALUES (?, 'c-1', ?, 'x@example.com', ?, datetime('now', '+14 days'))`,
+  );
+
+  // datetime('next Tuesday') is NULL, NULL <= datetime('now') is NULL, and the purge's
+  // WHERE would never match — the scope outlives retention with no signal, breaching the
+  // privacy page's 30-day promise. The CHECK moves that failure to write time, loudly.
+  assert.throws(
+    () => insert.run("inv-X", "h-X", "next Tuesday"),
+    /CHECK/i,
+    "decision 13: a scope that cannot state its interview date cannot honour retention — reject the write",
+  );
+
+  // Every form the schema comment promises still inserts: datetime('now')'s own format,
+  // ISO-8601 'T' and 'Z' forms, and date-only.
+  const accepted = ["2026-06-01 09:00:00", "2026-06-01T09:00:00", "2026-06-01T09:00:00Z", "2026-06-01"];
+  for (const [i, at] of accepted.entries()) {
+    insert.run(`inv-ok-${i}`, `h-ok-${i}`, at);
+  }
+  assert.equal(countOf(db, "invite"), accepted.length);
+});
