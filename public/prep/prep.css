@@ -25,6 +25,13 @@
   min-width: 0;
 }
 
+/* The state line sits straight under `.page-sub`, and app.css declares no margin on it — so the
+   failure line renders flush against the paragraph above and reads as a third line of it rather
+   than as something that has just happened. Measured at 0px in Chrome. This SUPPLEMENTS: it adds
+   a property app.css leaves unset rather than overriding one it owns, and only in the shown
+   state, so the page gains no dead space on the path where nothing went wrong. */
+.brief .save-state.is-shown { margin-top: var(--space-4); }
+
 /* ── the block landmark ────────────────────────────────────────────────────────────────── */
 
 /* Each block is a `<section>` named by its own heading, so it is a region in a landmark list.

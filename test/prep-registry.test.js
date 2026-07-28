@@ -231,23 +231,47 @@ function assertPropsRendered(blocks, html) {
   }
 }
 
-/** Every `<section>` is a named landmark whose label points at a heading that exists. */
-function assertLandmarks(mount) {
+/** Every element carrying an id, so a label reference can be resolved the way a browser does. */
+function idMap(mount) {
   const ids = new Map();
   for (const node of findAll(mount, (n) => n.attrs.id !== undefined)) {
     assert.ok(!ids.has(node.attrs.id), `duplicate id ${node.attrs.id}: a label would point at the first`);
     ids.set(node.attrs.id, node);
   }
+  return ids;
+}
+
+/** A region's accessible name: `aria-labelledby` is a LIST of ids, and the name is their text
+ *  joined in the order given — which is how Chrome's accessibility tree computes it. */
+function accessibleName(node, ids) {
+  return (node.attrs["aria-labelledby"] || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => textOf(ids.get(id)).trim())
+    .join(" ");
+}
+
+/** Every `<section>` is a named landmark whose label points at elements that exist. */
+function assertLandmarks(mount) {
+  const ids = idMap(mount);
 
   const sections = findAll(mount, (n) => n.tag === "section");
   assert.ok(sections.length > 0, "nothing rendered a section");
   for (const node of sections) {
     const label = node.attrs["aria-labelledby"];
     assert.ok(label, "a <section> with no accessible name is not a region");
-    const heading = ids.get(label);
-    assert.ok(heading, `aria-labelledby=${label} points at no element`);
-    assert.equal(heading.tag, "h2", `${label} is a ${heading.tag}, not a heading`);
-    assert.ok(textOf(heading).trim(), `${label} is an empty heading`);
+
+    // Every id in the list has to resolve and contribute text, or the region is named by less
+    // than the markup claims — a dangling reference is silently dropped from the name.
+    const parts = label.split(/\s+/).filter(Boolean);
+    for (const part of parts) {
+      assert.ok(ids.get(part), `aria-labelledby=${label} points at no element for ${part}`);
+      assert.ok(textOf(ids.get(part)).trim(), `${part} contributes no text to the name`);
+    }
+
+    // The first is always the block's own reviewed heading, whatever else is appended to it.
+    const heading = ids.get(parts[0]);
+    assert.equal(heading.tag, "h2", `${parts[0]} is a ${heading.tag}, not a heading`);
   }
   return sections;
 }
@@ -261,6 +285,28 @@ test("the stored payload renders every block it carries", () => {
   assert.deepEqual(result.unresolved, []);
   assert.equal(assertLandmarks(mount).length, result.rendered);
   assertPropsRendered(payload.blocks, html);
+});
+
+test("no two regions on the page share an accessible name", () => {
+  // Chrome's accessibility tree showed three regions all named "A story worth bringing" — the
+  // list a screen-reader user navigates by, with nothing in it to tell the three stories apart.
+  // A fake DOM could not have surfaced that; the browser sweep did.
+  //
+  // Derived over every section rather than asserted about StoryBankCard, so a future duplicate
+  // arriving from any block fails here rather than in somebody's ears.
+  const { mount } = render(stored());
+  const ids = idMap(mount);
+  const names = findAll(mount, (n) => n.tag === "section").map((n) => accessibleName(n, ids));
+
+  assert.equal(names.length, 7);
+  assert.equal(
+    new Set(names).size,
+    names.length,
+    `two regions carry the same name:\n  ${names.join("\n  ")}`,
+  );
+  // Still the reviewed heading on all three: what was added is the prompt already on screen
+  // beneath it, not a heading the model wrote.
+  assert.equal(names.filter((n) => n.startsWith("A story worth bringing")).length, 3);
 });
 
 test("every competency the map names renders under its label, not its id", () => {
@@ -827,12 +873,16 @@ test("the serializer reached the deepest node, so the groups above measured a wh
   assert.ok(nested, "the fixture no longer nests anything, so this guard checks nothing");
   assert.ok(html.includes(nested.props.prompt), "the nested block's own prompt is missing");
   assert.ok(html.includes(nested.props.skeleton.at(-1)), "the nested block's last item is missing");
-  assert.ok(html.includes('aria-labelledby="block-1-0-head"'), "the nested landmark id is missing");
+  assert.ok(
+    html.includes('aria-labelledby="block-1-0-head block-1-0-lede"'),
+    "the nested landmark id is missing",
+  );
 
   // And that a nested section really is inside its parent rather than a sibling that happened
   // to render — the traversal, not just the strings.
-  const parent = findAll(mount, (n) => n.attrs["aria-labelledby"] === "block-1-head")[0];
-  const inside = findAll(parent, (n) => n.attrs["aria-labelledby"] === "block-1-0-head");
+  const labels = (n) => (n.attrs["aria-labelledby"] || "").split(/\s+/);
+  const parent = findAll(mount, (n) => labels(n).includes("block-1-head"))[0];
+  const inside = findAll(parent, (n) => labels(n).includes("block-1-0-head"));
   assert.equal(inside.length, 1, "the nested card did not render inside its map");
 });
 

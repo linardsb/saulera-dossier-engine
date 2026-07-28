@@ -323,7 +323,20 @@ function PanelBrief(doc, props, ctx, id) {
  */
 function StoryBankCard(doc, props, ctx, id) {
   const { node, body } = section(doc, id, COPY.storyHead);
-  body.appendChild(el(doc, "p", "prep-lede", props.prompt));
+
+  // A page carries one of these per story, so a brief with three stories puts three regions all
+  // named "A story worth bringing" in the landmark list, and a screen-reader user picking one
+  // cannot tell which story it is. Confirmed in Chrome's accessibility tree, which is where a
+  // fake DOM could not have shown it.
+  //
+  // The HEADING stays the reviewed one — a heading the model writes is a heading nobody reviewed
+  // (see COPY above) — and the prompt already rendered directly under it joins the ACCESSIBLE
+  // name instead. Nothing new reaches the screen, and the landmark list gains the one line that
+  // tells the three apart.
+  const lede = el(doc, "p", "prep-lede", props.prompt);
+  lede.setAttribute("id", `${id}-lede`);
+  node.setAttribute("aria-labelledby", `${id}-head ${id}-lede`);
+  body.appendChild(lede);
 
   const labels = [];
   for (const competencyId of Array.isArray(props.covers_competency_ids)
