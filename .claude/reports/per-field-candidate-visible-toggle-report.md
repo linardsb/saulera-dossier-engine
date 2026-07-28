@@ -56,7 +56,7 @@ Task 17 has posted the collision note on #17.
 | 1 | GATE — reading, migration number, schema array | — | verified |
 | 2 | the pure parser and the gate | `src/note-fields.js` | CREATE |
 | 3 | the fail-closed properties first | `test/note-fields.test.js` | CREATE |
-| 4 | the allow-list table | `migrations/0002_note_visibility.sql` | CREATE |
+| 4 | the allow-list table | `migrations/0003_note_visibility.sql` | CREATE |
 | 5 | the deliberate boundary amendment | `test/schema.test.js` | UPDATE |
 | 6 | `listVisibleKeys` | `src/store.js` | UPDATE |
 | 7 | `setFieldVisibility` + `VISIBILITY_KEYS_MAX` | `src/store.js` | UPDATE |
@@ -227,7 +227,7 @@ note's own "Unsaved changes" untouched.
   unrelated edit. Re-running `node .claude/probes/clients-screen.mjs` normally needs 8788 free.
 - **`npx wrangler d1 execute --local` crashes on this machine** with `table _cf_ALARM has 3
   columns but 2 values were supplied` — a wrangler/workerd version fault, unrelated to this
-  change. The migration itself applies cleanly (`0002_note_visibility.sql ✅`), and the table was
+  change. The migration itself applies cleanly (`0003_note_visibility.sql ✅`), and the table was
   inspected with `sqlite3` against the D1 file directly instead.
 - **The plan's Level 1 `grep -n 'innerHTML' public/clients.js` expects nothing but already
   matched on `main`** — there is one pre-existing comment saying "textContent, never innerHTML".

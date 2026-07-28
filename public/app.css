@@ -438,6 +438,12 @@ a {
   gap: var(--space-2);
 }
 
+/* `display: flex` above is an AUTHOR rule, and the UA's `[hidden] { display: none }` is not, so
+   the author rule wins whatever the specificity — which made `el.visibilityList.hidden = true`
+   in clients.js a silent no-op. It hid nothing today only because the list is empty whenever it
+   is set, so the bug was invisible rather than absent. */
+.visibility-list[hidden] { display: none; }
+
 /* center, exactly as .radio-row label does. baseline was tried and measured wrong: the row is
    44px tall and the heading wraps at 360px, so aligning to the first text baseline dropped the
    checkbox to the bottom of a two-line row. min-width: 0 lets a long heading wrap inside the

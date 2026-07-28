@@ -208,15 +208,24 @@ export async function updateClient(db, id, patch = {}) {
   }
 
   const client = await getClient(db, id); // 404 before writing, not after
-  await db
-    .prepare(`UPDATE clients SET ${columns.join(", ")}, updated_at = datetime('now') WHERE id = ?`)
-    .bind(...values, client.id)
-    .run();
 
   // A heading that no longer exists must not keep its permission (#18). Rename a section while
   // its permission is stored, retype the old name six months later, and without this the
   // section is already shared with nobody having ticked it. Clearing the note drops every
   // permission, which is the same rule at its limit.
+  //
+  // THE PRUNE RUNS BEFORE THE UPDATE, AND THE ORDER IS THE POINT. D1 gives this path no
+  // transaction, so a failure part-way through leaves whichever statements already ran. Run the
+  // UPDATE first and that half-state is: the note now has NEW headings while permissions for
+  // the OLD ones survive — the armed form of the leak above, waiting for someone to retype a
+  // heading. Run the prune first and the half-state is a note that still has its old headings
+  // with some permissions already revoked. One direction over-shares, the other over-hides, and
+  // this is a module where a bug of omission must hide.
+  //
+  // The behaviour change that buys: a save that fails at the UPDATE has still revoked
+  // permissions for headings that are, from the recruiter's point of view, still in the note.
+  // They see the save fail, their text is still on screen, and the ticks they have to re-tick
+  // are the ones for sections they were editing. That is the acceptable side of this trade.
   //
   // Note this is the note-save path only. A name-only update issues neither the SELECT nor a
   // DELETE, because pruning is a fact about the note's headings.
@@ -227,7 +236,7 @@ export async function updateClient(db, id, patch = {}) {
   // so a heavily-headed note would fail the save path for the product's compounding asset, on
   // the recruiter's own text. This shape is bounded by stored permissions — few, and
   // recruiter-created — and has no dynamic SQL at all, which is a stronger property than the
-  // UPDATE above.
+  // UPDATE below.
   if (note !== null) {
     const kept = new Set(parseNoteFields(note).map((f) => f.key).filter(Boolean));
     const stale = (await listVisibleKeys(db, client.id)).filter((key) => !kept.has(key));
@@ -238,6 +247,11 @@ export async function updateClient(db, id, patch = {}) {
         .run();
     }
   }
+
+  await db
+    .prepare(`UPDATE clients SET ${columns.join(", ")}, updated_at = datetime('now') WHERE id = ?`)
+    .bind(...values, client.id)
+    .run();
 
   return getClient(db, client.id);
 }

@@ -77,7 +77,11 @@
     visibilityDuplicate: "Two sections have this name, so neither can be shared. Give them " +
                          "different names and save.",
     visibilitySaved: "Saved",
-    visibilityFailed: "Could not change that. It is still what it was.",
+    // Not "It is still what it was", which claims something the browser cannot know. If the
+    // PUT succeeded and its answer was lost, AND the recovery read also failed, it DID change
+    // — and that is exactly the path this message is shown on. The checkbox has been put back,
+    // so the screen must not also promise the server agrees with it.
+    visibilityFailed: "Could not change that, so it may not have changed. Reload to check.",
     sectionMeta: function (chars) {
       return chars.toLocaleString("en-GB") + (chars === 1 ? " character" : " characters");
     },
@@ -108,6 +112,19 @@
   // flag: two different sections may legitimately be in flight at once, but the same section of
   // the same client twice is a double-click racing itself. The client half is load-bearing —
   // see toggleField.
+  //
+  // `fieldsVersion` is the OTHER half of decision 4 above, and it took a bug to notice it was
+  // missing. `reqId`/`savingId` answer "is this response about the client on screen" — identity.
+  // They do not answer "has newer truth already been painted" — recency. Four paint sites had
+  // the first guard and not the second, so the SLOWER of two responses won simply by landing
+  // last: save the note (a 100k-character PUT), tick a section 60ms later (a 40-byte PUT that
+  // answers first and is stored), and the save's older snapshot repaints the box unticked. The
+  // server holds true and the screen says the section is not shared — for this feature the
+  // harmful direction, because the recruiter is told a section is private that the portal will
+  // ship.
+  //
+  // It counts PAINTS, not requests. A response that lost the race must not paint; it re-reads
+  // instead, because by then the headings themselves may have changed.
   var state = {
     selected: null,
     dirty: false,
@@ -115,6 +132,7 @@
     adding: false,
     deleting: false,
     togglingKeys: {},
+    fieldsVersion: 0,
   };
 
   /* ── talking to the API ──────────────────────────────────────────────────────────────── */
@@ -303,6 +321,12 @@
     }
 
     var reqId = id;
+    // A load is a whole-screen reset, so it CLAIMS the next paint rather than competing for
+    // it: bumping first invalidates every save or toggle already in flight, and a second load
+    // invalidates the first. Without the bump, a toggle answering between this request and its
+    // response would leave the note painted from one client and the section list from another.
+    state.fieldsVersion += 1;
+    var fieldsAt = state.fieldsVersion;
     return api("/api/clients/" + encodeURIComponent(id))
       .then(function (body) {
         // A later click already owns the screen. Writing this response now would put one
@@ -314,7 +338,7 @@
         el.editorHead.textContent = body.client.name;
         el.note.value = body.client.note;
         showSaveState(body.client.note ? "" : COPY.notSaved, false);
-        renderFields(body.fields);
+        paintFields(body.fields, fieldsAt);
         showVisibilityState("", false);
         return refreshList();
       })
@@ -338,6 +362,9 @@
     // proves was stored.
     var savingId = state.selected;
     var sent = el.note.value;
+    // Captured with them, and for the same reason: this is the request whose answer is slowest
+    // and therefore likeliest to arrive after a toggle the recruiter made while waiting.
+    var fieldsAt = state.fieldsVersion;
 
     state.saving = true;
     setBusy(el.saveButton, true);
@@ -364,7 +391,13 @@
         // The sections came back with the save, so the list follows the headings without a
         // second request. A renamed heading's permission was pruned server-side; re-rendering
         // from this response is how the screen stops showing a tick that no longer exists.
-        renderFields(body.fields);
+        //
+        // Unless a toggle answered while this was in flight. Then this snapshot predates it and
+        // painting it would undo, on screen only, a permission the server has already stored —
+        // so re-read instead. A re-read rather than simply skipping the paint, because a save
+        // is the one request that can RENAME headings: the rows themselves may be wrong here,
+        // not just the ticks.
+        if (!paintFields(body.fields, fieldsAt)) repaintFields(savingId);
         showVisibilityState(stillTyping ? COPY.visibilityStale : "", false);
 
         return refreshList();
@@ -459,6 +492,45 @@
   }
 
   /**
+   * Paint the list, unless newer truth has already been painted.
+   *
+   * `seen` is the value of `state.fieldsVersion` captured BEFORE the request that produced
+   * `fields` went out. If it has moved, something more recent has already been drawn and this
+   * response is stale — it must not paint, whatever its own identity guard says.
+   *
+   * Returns whether it painted, so a losing caller can decide to re-read instead of silently
+   * dropping the answer.
+   */
+  function paintFields(fields, seen) {
+    if (state.fieldsVersion !== seen) return false;
+    renderFields(fields);
+    state.fieldsVersion += 1;
+    return true;
+  }
+
+  /**
+   * Ask the server what it actually holds now, and paint that.
+   *
+   * The answer for a response that lost the recency race. Re-reading rather than keeping the
+   * loser's snapshot matters most on the save path: a save can RENAME headings, so the stale
+   * answer is not merely out of date about which boxes are ticked, it can be out of date about
+   * which rows exist. It captures its own version at request time, so it plays by the same
+   * rule it was called to repair.
+   */
+  function repaintFields(clientId) {
+    var seen = state.fieldsVersion;
+    return api("/api/clients/" + encodeURIComponent(clientId))
+      .then(function (body) {
+        if (state.selected !== clientId) return;
+        paintFields(body.fields, seen);
+      })
+      .catch(function () {
+        // Whatever message is on screen stands. This path exists to correct a stale PAINT, and
+        // failing to correct it leaves the previous paint — which was itself a server answer.
+      });
+  }
+
+  /**
    * Tick or untick one section. This mirrors saveAgency, not save: it saves the moment it is
    * made, has its own live region, and puts the control back from server truth on failure.
    *
@@ -476,9 +548,25 @@
     // never stored, until a reload.
     var savingId = state.selected;
     var guard = savingId + "|" + key;
-    if (state.togglingKeys[guard]) return;
+    if (state.togglingKeys[guard]) {
+      // The native checkbox has ALREADY flipped by the time `change` fires, so returning here
+      // without touching it leaves the screen showing a value nothing is going to store. Put
+      // back what the in-flight request is writing — which is what its answer will paint
+      // anyway — so the discarded tap leaves no trace instead of a silent lie.
+      //
+      // The window this closes is not theoretical: a 1.5s PUT plus an impatient second tap
+      // showed "not shared" for ~1.4s on a section being stored as shared, then snapped. A
+      // hung fetch stretches that to minutes.
+      box.checked = !wanted;
+      return;
+    }
 
     state.togglingKeys[guard] = true;
+
+    // Same rule as save: whatever is painted when this answer lands wins over this answer if it
+    // is newer. Two toggles resolving out of order would otherwise leave the loser's snapshot
+    // on screen, showing a tick the server does not hold.
+    var fieldsAt = state.fieldsVersion;
 
     var patch = { visibility: {} };
     patch.visibility[key] = wanted;
@@ -490,8 +578,9 @@
     })
       .then(function (body) {
         if (state.selected !== savingId) return;
-        // Re-rendered from what the server stored, never from the checkbox that was clicked.
-        renderFields(body.fields);
+        // Re-rendered from what the server stored, never from the checkbox that was clicked —
+        // and only if nothing newer has been painted since this toggle was sent.
+        if (!paintFields(body.fields, fieldsAt)) repaintFields(savingId);
         // "Saved" must not overwrite the stale-list warning. The note can be dirty while a
         // toggle succeeds, and the list is still describing the note as it was saved — which is
         // the more important of the two things to be saying.
@@ -503,12 +592,11 @@
         // permission that was not stored.
         box.checked = !wanted;
         showVisibilityState(messageFor(err, COPY.visibilityFailed), true);
-        return api("/api/clients/" + encodeURIComponent(savingId))
-          .then(function (body) {
-            if (state.selected !== savingId) return;
-            renderFields(body.fields);
-          })
-          .catch(function () { /* the checkbox is already back; the message already says so */ });
+        // The recovery read captures its own version at ITS request time, not this toggle's —
+        // it is asking what the server holds now, which is exactly the newest truth available.
+        // This is the site that gets missed: it is inside the `.catch`, so the happy path never
+        // exercises it, and it is the one place the screen has nothing else to go on.
+        return repaintFields(savingId);
       })
       .then(function () {
         delete state.togglingKeys[guard];

@@ -26,8 +26,21 @@ import { readFile } from "node:fs/promises";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PUBLIC = join(ROOT, "public");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const PORT = 8788;
 const CDP_PORT = 9333;
+
+// PORT 0 asks the OS for a free one, and the real number is read back after listen().
+//
+// This was hardcoded to 8788 — which is `wrangler pages dev`'s default. With a dev server
+// already running, `serveStatic` still bound (the wildcard address is free even when 127.0.0.1
+// is taken) so nothing failed, but Chrome's `http://127.0.0.1:8788` resolved to workerd. The
+// suite then measured a DIFFERENT PAGE: one with no visibility list in it at all, where the
+// existence probes pass vacuously against whatever `main` happens to serve and only the last
+// probe dies, on a null dereference that reads like an unrelated bug.
+//
+// A probe suite that cannot tell "the feature works" from "I measured the wrong page" is worse
+// than no probe suite, so this asks for a port nobody can be on. CHECKLIST.md already says it:
+// "SHOULD: screenshot iterations served on a fresh port".
+let PORT = 0;
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 
@@ -46,7 +59,15 @@ function serveStatic() {
       res.writeHead(404).end("not found");
     }
   });
-  return new Promise((resolve) => server.listen(PORT, () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    // Bind 127.0.0.1 explicitly, not the wildcard: it is the address Chrome is sent to, so a
+    // conflict has to surface here as an error rather than as a silently different page.
+    server.once("error", reject);
+    server.listen(PORT, "127.0.0.1", () => {
+      PORT = server.address().port;
+      resolve(server);
+    });
+  });
 }
 
 async function startChrome() {
@@ -137,8 +158,14 @@ async function newPage() {
 /* ── the fetch stub, installed before clients.js runs ────────────────────────────────── */
 
 /**
- * `routes` is an ordered list of { method, match, status, delay, body }. The first entry whose
- * method and regexp match wins, so a probe overrides one route and inherits the rest.
+ * `routes` is an ordered list of { method, match, bodyMatch, status, delay, body }. The first
+ * entry whose method and regexp match wins, so a probe overrides one route and inherits the
+ * rest.
+ *
+ * `bodyMatch` is optional and is tested against the REQUEST body. It exists because the note
+ * save and a visibility toggle are both `PUT /api/clients/:id` — same method, same path — and
+ * the H2 race is precisely about those two answering out of order. Without it the two cannot
+ * be given different delays, which is the whole experiment.
  */
 function harness(config) {
   return `
@@ -160,6 +187,7 @@ function harness(config) {
         var r = window.__probe.config.routes[i];
         if (r.method && r.method !== method) continue;
         if (!new RegExp(r.match).test(path)) continue;
+        if (r.bodyMatch && !new RegExp(r.bodyMatch).test(String(options.body || ""))) continue;
         route = r;
         break;
       }
@@ -251,6 +279,23 @@ async function openScreen(config, { query = "", viewport = null } = {}) {
     });
   }
   await page.eval("new Promise(r => setTimeout(r, 150))");
+
+  // The page is THIS repo's clients.html, or the run stops here.
+  //
+  // The ephemeral port makes a collision unlikely; this makes a wrong page impossible to
+  // mistake for a passing suite. Without it, every existence probe below reads "element absent"
+  // as a legitimate FAIL of the feature — or worse, passes vacuously — when the real answer is
+  // "you are looking at someone else's server".
+  const served = await page.eval(
+    `!!document.getElementById("visibility-list") && !!document.getElementById("note")`,
+  );
+  if (!served) {
+    const url = await page.eval("location.href");
+    throw new Error(
+      `the page at ${url} is not this repo's clients.html — it has no #visibility-list. ` +
+        `Something else answered on that port; nothing measured below would mean anything.`,
+    );
+  }
   return page;
 }
 
@@ -740,23 +785,246 @@ async function probeV18dup() {
   await page.close();
 }
 
+async function probeV18stale() {
+  // H2. Every paint site guarded on IDENTITY — is this response about the client on screen —
+  // and none on RECENCY — has newer truth already been painted. So the slower of two responses
+  // wins simply by arriving last.
+  //
+  // The sequence is the ordinary one, not a contrived one. The list says "Save the note to
+  // update this list.", which invites exactly this: save, then tick.
+  //
+  //   1. Save the note. That PUT carries up to 100k characters and returns the whole note, so
+  //      it is reliably the slower request. Its `fields` snapshot is computed NOW, with
+  //      their-process = false.
+  //   2. Tick "Their process" ~60ms later. The visibility PUT is ~40 bytes, answers first, the
+  //      server stores TRUE, the box paints ticked.
+  //   3. The note save's answer lands, passes the identity guard, and repaints its older
+  //      snapshot — false.
+  //
+  // The server holds true and the screen says the section is not shared. For THIS feature that
+  // is the harmful direction: the recruiter has been told a section is private while the
+  // portal will ship it.
+  // A starts with their-process SHARED, so the toggle below unticks it and the stale repaint
+  // would re-tick it. Both directions of this bug are harmful; this one is chosen because a
+  // ticked box the server does not hold is the one a reader can dismiss as "just a refresh
+  // away", and it is not.
+  const SHARED = [
+    { key: "their-process", heading: "Their process", chars: 412, candidate_visible: true },
+    { key: "practical", heading: "Practical", chars: 88, candidate_visible: false },
+  ];
+  const UNSHARED = [
+    { key: "their-process", heading: "Their process", chars: 412, candidate_visible: false },
+    { key: "practical", heading: "Practical", chars: 88, candidate_visible: false },
+  ];
+
+  const page = await openScreen({
+    routes: baseRoutes([
+      // The visibility toggle: ~40 bytes on the wire, answers first, and it is the NEWER truth.
+      { method: "PUT", match: `^/api/clients/${A}$`, bodyMatch: "visibility",
+        status: 200, delay: 40,
+        body: { client: { id: A, name: LIST.clients[0].name, note: "A's note" }, fields: UNSHARED } },
+      // The note save: up to 100k characters, so reliably slower, and its snapshot was computed
+      // BEFORE the toggle. This is the response that must not win.
+      { method: "PUT", match: `^/api/clients/${A}$`, bodyMatch: "note",
+        status: 200, delay: 600,
+        body: {
+          client: { id: A, name: LIST.clients[0].name, note: "A's note, edited" },
+          fields: SHARED,
+        } },
+      // The recency-losing save should re-read rather than paint stale truth.
+      { method: "GET", match: `^/api/clients/${A}$`, status: 200, delay: 20,
+        body: { client: { id: A, name: LIST.clients[0].name, note: "A's note, edited" }, fields: UNSHARED } },
+    ]),
+  }, { query: `?client=${A}` });
+  await page.eval(SETTLE(250));
+
+  await page.eval(TYPE("A's note, edited"));
+  await page.eval(`document.getElementById("save-button").click(), true`);
+  await page.eval(SETTLE(60));
+  await page.eval(`
+    (function () {
+      document.querySelector('#visibility-list input[data-key="their-process"]').click();
+      return true;
+    })()`);
+
+  await page.eval(SETTLE(200));
+  const afterToggle = await page.eval(
+    `document.querySelector('#visibility-list input[data-key="their-process"]').checked`,
+  );
+  await page.eval(SETTLE(800));
+  const afterSave = await page.eval(
+    `document.querySelector('#visibility-list input[data-key="their-process"]').checked`,
+  );
+
+  check(
+    "V18r", "a slow note save does not repaint a stale permission over a newer toggle",
+    afterToggle === false && afterSave === false,
+    `after the toggle: checked=${afterToggle} · after the save's answer: checked=${afterSave} ` +
+      `(the section was UNTICKED and the server stored false; a true here is the screen ` +
+      `showing a permission the server does not hold)`,
+  );
+  await page.close();
+}
+
+async function probeV18guard() {
+  // M3. The re-entrancy guard's early return runs AFTER the native checkbox has flipped. It
+  // sends nothing, puts nothing back and writes no message, so for the whole in-flight window
+  // the recruiter sees "not shared" for a section being stored as shared — and the second tap
+  // is discarded without a word.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "PUT", match: `^/api/clients/${A}$`, status: 200, delay: 1500,
+        body: { client: { id: A, name: LIST.clients[0].name, note: "A's note" }, fields: A_FIELDS } },
+    ]),
+  }, { query: `?client=${A}` });
+  await page.eval(SETTLE(250));
+
+  await page.eval(`
+    (function () {
+      var box = document.querySelector('#visibility-list input[data-key="practical"]');
+      box.click();          // stores true; the answer is 1.5s away
+      return true;
+    })()`);
+  await page.eval(SETTLE(120));
+  await page.eval(`
+    (function () {
+      document.querySelector('#visibility-list input[data-key="practical"]').click();  // impatient second tap
+      return true;
+    })()`);
+  await page.eval(SETTLE(200));
+
+  const r = await page.eval(`
+    (function () {
+      var box = document.querySelector('#visibility-list input[data-key="practical"]');
+      return {
+        checked: box.checked,
+        puts: window.__probe.calls.filter(function (c) { return c.method === "PUT"; }).length,
+      };
+    })()`);
+
+  check(
+    "V18g", "a swallowed second tap leaves the checkbox showing what is actually in flight",
+    r.checked === true && r.puts === 1,
+    `checked=${r.checked} (must be true — that is what the in-flight PUT is writing) · ` +
+      `PUTs=${r.puts} (the guard must still swallow the second tap)`,
+  );
+  await page.close();
+}
+
+async function probeV18fail() {
+  // M6. Four probes cover races; none covered a FAILING PUT, which is where the fail-closed
+  // property is actually implemented — the revert, the recovery GET, and the recovery GET
+  // itself failing, which is the case the plan calls out and nothing exercised.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "PUT", match: `^/api/clients/${A}$`, status: 500, delay: 20,
+        body: { error: "boom" } },
+    ]),
+  }, { query: `?client=${A}` });
+  await page.eval(SETTLE(250));
+
+  // The FIRST GET has to succeed or there is no list to click. Only the recovery read that
+  // follows the failed toggle is broken, which is the case the plan calls out and nothing
+  // exercised: the code has no truth to repaint from, so the revert is all that stands between
+  // the recruiter and a checkbox lying in the sharing direction.
+  await page.eval(`
+    (function () {
+      window.__probe.config.routes.unshift({
+        method: "GET", match: "^/api/clients/${A}$", status: 500, delay: 20, body: { error: "boom" }
+      });
+      return true;
+    })()`);
+
+  // A's `practical` is stored false. Tick it, and let both the PUT and the recovery GET fail.
+  const before = await page.eval(
+    `document.querySelector('#visibility-list input[data-key="practical"]').checked`,
+  );
+  await page.eval(`
+    (function () {
+      document.querySelector('#visibility-list input[data-key="practical"]').click();
+      return true;
+    })()`);
+  await page.eval(SETTLE(400));
+
+  const r = await page.eval(`
+    (function () {
+      var box = document.querySelector('#visibility-list input[data-key="practical"]');
+      var state = document.getElementById("visibility-state");
+      return {
+        checked: box.checked,
+        state: state.textContent,
+        isError: state.classList.contains("is-error"),
+      };
+    })()`);
+
+  check(
+    "V18f", "a failing toggle reverts the box and says so, even when the recovery read also fails",
+    before === false && r.checked === false && r.isError && r.state.length > 0,
+    `checked=${r.checked} (must be back to ${before}) · error-styled=${r.isError} · ` +
+      `state=${JSON.stringify(r.state)}`,
+  );
+  await page.close();
+}
+
 async function probeV18tap() {
   // The same CRAFT floor M10 measures, on the row this ticket adds.
-  const page = await openScreen({ routes: baseRoutes() }, { query: `?client=${A}`, viewport: 360 });
+  //
+  // THE FIXTURE IS THE PROBE. This rendered `Their process` / `Practical` and so passed with
+  // BOTH `overflow-wrap: anywhere` (app.css) and `min-width: 0` deleted — it asserted a claim
+  // it could not fail. The screen already knows the fixture that bites: app.css records "a
+  // 120-character unbroken client name scrolled the page 1,338px", and H6 uses it.
+  //
+  // So: one 120-character unbroken heading, and a duplicate row whose 90-character reason text
+  // right-aligns via `margin-left: auto` into a very narrow column at 360px — the other new
+  // rule on this row, and previously unmeasured.
+  const UNBROKEN = "A".repeat(120);
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "GET", match: `^/api/clients/${A}$`, status: 200,
+        body: {
+          client: { id: A, name: LIST.clients[0].name, note: "A's note" },
+          fields: [
+            { key: "long", heading: UNBROKEN, chars: 412, candidate_visible: false },
+            { key: null, heading: "Notes", chars: 88, candidate_visible: false },
+            { key: null, heading: "Notes", chars: 88, candidate_visible: false },
+          ],
+        } },
+    ]),
+  }, { query: `?client=${A}`, viewport: 360 });
   await page.eval(SETTLE(250));
   const r = await page.eval(`
     (function () {
-      var row = document.querySelector("#visibility-list label");
+      var rows = document.querySelectorAll("#visibility-list label");
+      var heights = [].map.call(rows, function (n) {
+        return Math.round(n.getBoundingClientRect().height);
+      });
+      var metas = [].map.call(document.querySelectorAll(".visibility-meta"), function (n) {
+        var box = n.getBoundingClientRect();
+        return { w: Math.round(box.width), right: Math.round(box.right) };
+      });
       return {
-        h: row ? Math.round(row.getBoundingClientRect().height) : null,
+        rows: rows.length,
+        heights: heights,
+        metas: metas,
+        headingOverflows: (function () {
+          var n = document.querySelector(".visibility-name");
+          return n ? Math.round(n.getBoundingClientRect().width) > window.innerWidth : null;
+        })(),
         scrollWidth: document.documentElement.scrollWidth,
         innerWidth: window.innerWidth,
       };
     })()`);
+
+  const tallEnough = r.heights.every((h) => h >= 44);
+  // The 90-character reason must stay inside the viewport, not just fail to scroll the page.
+  const metaInside = r.metas.every((m) => m.right <= r.innerWidth && m.w > 0);
   check(
-    "V18t", "the visibility row meets the 44px floor and does not scroll the page at 360px",
-    r.h >= 44 && r.scrollWidth <= r.innerWidth,
-    `row=${r.h}px (floor 44) · viewport=${r.innerWidth} scrollWidth=${r.scrollWidth}`,
+    "V18t", "a 120-char unbroken heading and a 90-char reason stay inside 360px, rows keep 44px",
+    r.rows === 3 && tallEnough && r.scrollWidth <= r.innerWidth &&
+      r.headingOverflows === false && metaInside,
+    `rows=${r.rows} heights=${JSON.stringify(r.heights)} (floor 44) · viewport=${r.innerWidth} ` +
+      `scrollWidth=${r.scrollWidth} · heading wider than viewport=${r.headingOverflows} · ` +
+      `metas=${JSON.stringify(r.metas)}`,
   );
   await page.close();
 }
@@ -768,7 +1036,8 @@ const chrome = await startChrome();
 try {
   for (const probe of [probeH1, probeH2, probeH3add, probeH3back, probeM9,
                        probeM3, probeM4, probeM7, probeM8, probeM10, probeH6,
-                       probeV18, probeV18slug, probeV18dup, probeV18tap]) {
+                       probeV18, probeV18slug, probeV18dup, probeV18stale,
+                       probeV18guard, probeV18fail, probeV18tap]) {
     await probe();
   }
 } finally {

@@ -32,25 +32,71 @@ const KEY_MAX = 80;
 // trailing `#*` absorbs CommonMark's optional closing sequence (`## Practical ##`).
 const HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 
+// The two heading shapes this parser does NOT name, and must therefore refuse to swallow.
+//
+// A markdown heading the parser cannot see does not vanish — it and everything under it ride
+// inside the PREVIOUS section's body. Tick that previous section and the unnamed one is shared
+// with it, under a name that says nothing about what it contains. That is the leaking
+// direction, and it is the opposite of the fenced-code case documented above: a `#` inside a
+// fence becomes a field that arrives unticked, which over-hides.
+//
+// So both are TERMINATORS. They close the current section without opening one, which puts
+// their content in no field at all — it cannot be ticked, so it cannot be shared. Naming them
+// properly is a bigger change than this gate needs; refusing to misattribute them is not.
+//
+// SETEXT: `Salary expectations` over `-------`. CommonMark requires the underline to follow
+// paragraph content directly, so a blank line before `---` makes it a thematic break and no
+// terminator — which is why the caller checks the preceding line rather than this alone.
+const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+
+// INDENTED ATX: 1-3 spaces still make a heading in CommonMark, but `HEADING` is anchored and
+// would not match, so `   ## Salary` read as body text.
+const INDENTED_HEADING = /^ {1,3}#{1,6}[ \t]+\S/;
+
 /**
  * A heading's key: the stable name a permission is stored under.
  *
  * Lowercased and punctuation-collapsed so that what the recruiter sees in the list and what
- * D1 holds cannot drift apart over a capital letter. A heading of pure punctuation slugs to
- * nothing and falls back to `section` — every field needs a name, and an empty string is not
- * one.
+ * D1 holds cannot drift apart over a capital letter.
+ *
+ * TWO PROPERTIES THIS FUNCTION MUST HAVE, both learned the hard way:
+ *
+ * 1. It slugs over UNICODE letters and numbers, not `[a-z0-9]`. An ASCII-only class strips
+ *    every non-Latin script to nothing, so `## Процесс` and `## Зарплата` produced the SAME
+ *    key. Rename the first to the second and the prune sees the key as still present, issues
+ *    no DELETE, and a section nobody ticked is shared — the exact rename-transfer leak this
+ *    module's header claims to have closed, arriving through a door the ASCII tests could not
+ *    see. It also cost accuracy on Latin script: `Übersicht` keyed as `bersicht`, `Café` as
+ *    `caf`.
+ *
+ * 2. It returns `null`, not a constant, when nothing survives. The old fallback was the string
+ *    `"section"`, which is a REAL KEY: `## ***`, `## 🎉`, `## Процесс` and a literal
+ *    `## Section` all collided on it. Returning null routes an unsluggable heading into the
+ *    existing unflaggable path, which is the fail-closed answer the rest of this module
+ *    already implements — it cannot be ticked, so it cannot be shared.
+ *
+ * `.normalize("NFC")` is load-bearing rather than decorative: without it `## Café` typed as
+ * NFD (`e` + U+0301) keys as `cafe` while the NFC form keys as `café`, and the same visible
+ * heading gets two keys depending on which keyboard typed it.
+ *
+ * Known and accepted: `.slice(0, KEY_MAX)` is its own collision class — two headings sharing
+ * their first 80 slug characters get one key, and the transfer above becomes possible again.
+ * Neither reviewer could construct a plausible pair (80 characters is a paragraph, not a
+ * heading) so it is documented rather than solved. If it ever needs solving, the answer is a
+ * short hash suffix on the truncated form, not a longer cap.
  *
  * @param {string} heading
- * @returns {string} the slug
+ * @returns {string|null} the slug, or null if the heading has no sluggable characters
  */
 export function fieldKey(heading) {
   const slug = String(heading ?? "")
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, KEY_MAX)
     .replace(/-+$/, ""); // the truncation itself can leave a trailing dash
-  return slug || "section";
+  return slug || null;
 }
 
 /**
@@ -95,11 +141,36 @@ export function parseNoteFields(note) {
       fields.push(current);
       continue;
     }
+    // A heading shape this parser cannot name closes the current section rather than joining
+    // it. See SETEXT_UNDERLINE / INDENTED_HEADING above for why the direction matters.
+    if (current) {
+      const previous = current.lines[current.lines.length - 1];
+      const isSetext =
+        SETEXT_UNDERLINE.test(line) && previous !== undefined && previous.trim() !== "";
+      if (isSetext) {
+        // The line above the underline is the setext heading's TEXT, not the previous
+        // section's body, so it goes too. Leave it behind and ticking `## Public process`
+        // still emits the words "Salary expectations" as if they were part of it.
+        current.lines.pop();
+        current = null;
+        continue;
+      }
+      if (INDENTED_HEADING.test(line)) {
+        current = null;
+        continue;
+      }
+    }
+
     if (current) current.lines.push(line); // before the first heading, `current` is null: dropped
   }
 
   // Two passes, because a slug's uniqueness is a property of the whole note and not of the
   // heading in front of you.
+  //
+  // `slugs` may contain nulls — a heading with no sluggable characters. A Map takes null as a
+  // key, so the count works without a special case, and both outcomes land on `key: null`: one
+  // such heading is "unique" and yields `slugs[i]`, which IS null, and two of them are
+  // duplicates and yield null by the ternary. Unflaggable either way, which is the answer.
   const slugs = fields.map((f) => fieldKey(f.heading));
   const seen = new Map();
   for (const slug of slugs) seen.set(slug, (seen.get(slug) ?? 0) + 1);

@@ -161,18 +161,122 @@ test("closing hashes are part of the syntax, not part of the name", () => {
   assert.equal(parseNoteFields("## Practical ##")[0].heading, "Practical");
 });
 
-test("fieldKey slugs, truncates and never returns an empty string", () => {
+test("a setext heading terminates the section instead of riding inside it", () => {
+  // A heading this parser cannot NAME must not become a heading it silently SWALLOWS. Before
+  // the fix this note parsed to one field, `public-process`, whose text carried the salary
+  // lines — so ticking "Public process" shared what the client pays. The recruiter's only
+  // signal was a section missing from the list, which reads as "not tickable", not as "folded
+  // into a ticked one".
+  const note = [
+    "## Public process",
+    "Blah",
+    "",
+    "Salary expectations",
+    "-------------------",
+    "They pay under market.",
+  ].join("\n");
+
+  assert.deepEqual(keysOf(note), ["public-process"], "the setext heading is still not named");
+  const [visible] = visibleFields(note, ["public-process"]);
+  assert.doesNotMatch(visible.text, /under market/, "its CONTENT must not ride along");
+  assert.doesNotMatch(
+    visible.text,
+    /Salary expectations/,
+    "and neither must its heading text, which is the line above the underline",
+  );
+});
+
+test("an indented ATX heading terminates the section too", () => {
+  // 1-3 spaces still make a heading in CommonMark, but the anchored HEADING regex misses it.
+  const note = "## Public process\nBlah\n   ## Salary\nThey pay under market.";
+  assert.deepEqual(keysOf(note), ["public-process"]);
+  assert.doesNotMatch(visibleFields(note, ["public-process"])[0].text, /under market/);
+});
+
+test("a thematic break and a table are body text, not terminators", () => {
+  // The terminator must not be so eager that ordinary prose loses its second half. `---` after
+  // a BLANK line is a thematic break, and a table's delimiter row has pipes in it.
+  const broken = "## Public process\nBlah\n\n---\n\nStill the same section.";
+  assert.match(visibleFields(broken, ["public-process"])[0].text, /Still the same section/);
+
+  const table = "## Public process\n| a | b |\n|---|---|\n| 1 | 2 |";
+  assert.match(visibleFields(table, ["public-process"])[0].text, /\| 1 \| 2 \|/);
+});
+
+test("fieldKey slugs, truncates and returns null rather than a shared fallback", () => {
   assert.equal(fieldKey("Their process"), "their-process");
   assert.equal(fieldKey("Why candidates have been turned down"), "why-candidates-have-been-turned-down");
   assert.equal(fieldKey("  Spaced  &  punctuated!  "), "spaced-punctuated");
-  // A heading of pure punctuation slugs to nothing; every field needs a name.
-  assert.equal(fieldKey("***"), "section");
-  assert.equal(fieldKey(""), "section");
-  assert.equal(fieldKey(null), "section");
+
+  // A heading with nothing sluggable in it has no name, and the answer is null rather than a
+  // constant. The constant was `"section"`, which is a real key that four unrelated headings
+  // could collide on — see the aliasing test below for what that cost.
+  assert.equal(fieldKey("***"), null);
+  assert.equal(fieldKey(""), null);
+  assert.equal(fieldKey(null), null);
+  assert.equal(fieldKey("🎉"), null, "an emoji is neither a letter nor a number");
 
   const long = fieldKey("a".repeat(200));
   assert.equal(long.length, 80, "keys are capped so they stay keys");
   assert.doesNotMatch(long, /-$/, "and truncation never leaves a trailing dash");
+});
+
+test("fieldKey slugs over Unicode letters, not just ASCII", () => {
+  // The ASCII-only class stripped these to nothing and every one of them became "section".
+  assert.equal(fieldKey("Процесс"), "процесс");
+  assert.equal(fieldKey("Зарплата"), "зарплата");
+  assert.equal(fieldKey("面接プロセス"), "面接プロセス");
+  // And it silently mangled Latin script that happened to carry a diacritic.
+  assert.equal(fieldKey("Übersicht"), "übersicht", "not `bersicht`");
+  assert.equal(fieldKey("Café"), "café", "not `caf`");
+});
+
+test("fieldKey normalises to NFC, so the same heading keys the same from any keyboard", () => {
+  // "Café" with a precomposed é (U+00E9) and with e + combining acute (U+0065 U+0301) look
+  // identical in the textarea. Without normalisation the second keys as `cafe` — a different
+  // permission for a heading the recruiter cannot tell apart.
+  const composed = "Café";
+  const decomposed = "Café";
+  assert.notEqual(composed, decomposed, "the fixture is only meaningful if these differ");
+  assert.equal(fieldKey(composed), fieldKey(decomposed));
+});
+
+test("distinct headings never share a key — the property a permission transfer needs broken", () => {
+  // THE REGRESSION THIS FILE EXISTS FOR. Duplicates WITHIN one note were tested thoroughly;
+  // distinct headings colliding ACROSS saves was not, and that is the gap a rename-transfer
+  // leak walked through: `## Процесс` and `## Зарплата` both keyed as "section", so replacing
+  // the first with the second left the stored permission matching the new heading. The prune
+  // saw the key as still present, issued no DELETE, and a section about the client paying
+  // under market was shared with nobody having ticked it.
+  const distinct = [
+    "Their process",
+    "Процесс",
+    "Зарплата",
+    "面接プロセス",
+    "Section",
+    "Übersicht",
+    "Café",
+    "Practical",
+  ];
+  for (let i = 0; i < distinct.length; i += 1) {
+    for (let j = i + 1; j < distinct.length; j += 1) {
+      assert.notEqual(
+        fieldKey(distinct[i]),
+        fieldKey(distinct[j]),
+        `"${distinct[i]}" and "${distinct[j]}" share a key. A permission stored under one ` +
+          `transfers to the other on a rename, and the prune cannot see it happen.`,
+      );
+    }
+  }
+});
+
+test("a heading with no sluggable characters is unflaggable, not shared under a fallback", () => {
+  const note = "## 🎉\n\nThey pay under market.";
+  const [field] = parseNoteFields(note);
+  assert.equal(field.key, null, "no key means no checkbox and no way to tick it");
+  assert.equal(field.heading, "🎉", "it is still listed — the recruiter can see it in the note");
+  assert.deepEqual(visibleFields(note, ["section"]), [], "the old fallback key shares nothing");
+  assert.deepEqual(visibleFields(note, [null]), [], "and neither does null itself");
 });
 
 test("a heading longer than the key cap still round-trips through visibleFields", () => {
@@ -184,12 +288,14 @@ test("a heading longer than the key cap still round-trips through visibleFields"
   assert.deepEqual(visibleFields(note, [field.key]).map((f) => f.heading), [heading]);
 });
 
-test("two punctuation-only headings collide on the fallback key and are both unflaggable", () => {
-  // The fallback is a real key, so it can collide like any other. If it could not, two
-  // `***` headings would each be independently tickable under one name.
+test("two punctuation-only headings are both unflaggable, and share no key to collide on", () => {
+  // Each is independently unsluggable, so each is null on its own account — they no longer
+  // meet on a fallback string first. The outcome is the same and the reason is better: there
+  // is no key here for a permission to be stored under at all.
   const note = "## ***\n\nfirst\n\n## ---\n\nsecond";
   assert.deepEqual(keysOf(note), [null, null]);
   assert.deepEqual(visibleFields(note, ["section"]), []);
+  assert.deepEqual(visibleFields(note, ["", "-", "null"]), []);
 });
 
 test("headings that differ only by case are duplicates, because the list cannot tell them apart", () => {
