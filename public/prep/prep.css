@@ -1,0 +1,175 @@
+/* The candidate portal's block surface (#21).
+
+   This file SUPPLEMENTS public/app.css and never restates it. The page links fonts.css →
+   tokens.css → app.css → this file, so everything below inherits, rather than redeclares:
+   the type and colour base, `.topbar`, `.btn`, `.page-head` / `.page-sub`, `.save-state`, the
+   provenance marks (`.mark`, `.mark-unverified`) and the claim treatments (`.claim`,
+   `.claim-head`, `.claim-text`, `.claim-source`, `.claim-unverified`), the ONE `:focus-visible`
+   rule for the whole deployment, and the reduced-motion guard at app.css:866-870. A component
+   rule here that fights one of those is a bug in this file, not a missing rule.
+
+   What is here: the page measure, the block landmark, and the small shared vocabulary the ten
+   constructors in registry.js build from. That vocabulary is shared on purpose — a rule that
+   exists to style one block is the sign this file has started becoming a second app.css.
+
+   Every colour, size and space resolves through a custom property in tokens.css. Nothing here
+   animates: the reduced-motion MUST is inherited from app.css for free, and an entrance added
+   here would re-open it. */
+
+/* ── the page ──────────────────────────────────────────────────────────────────────────── */
+
+/* CRAFT's 65-75ch measure. This is prose a candidate reads end to end before an interview,
+   which is the same kind of text the pack is, and it takes the same cap privacy.html does. */
+.brief {
+  max-width: 72ch;
+  min-width: 0;
+}
+
+/* ── the block landmark ────────────────────────────────────────────────────────────────── */
+
+/* Each block is a `<section>` named by its own heading, so it is a region in a landmark list.
+   The rhythm BETWEEN blocks is a full step larger than anything inside one: the blocks are the
+   page's zones, and CRAFT asks for that separation to be carried by whitespace rather than by
+   a rule across the page. */
+.block { margin-bottom: var(--space-12); }
+.block:last-child { margin-bottom: 0; }
+
+.block-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-h3);
+  margin: 0 0 var(--space-4);
+  /* A heading built from model output can carry a long unbroken word; app.css:377-382 hit this
+     on the client name and records the measurement. */
+  overflow-wrap: anywhere;
+}
+
+/* ── the shared vocabulary the constructors build from ─────────────────────────────────── */
+
+/* The opening line of a block: the model's own framing, at reading size. */
+.prep-lede {
+  margin: 0 0 var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+/* Body prose inside a block. */
+.prep-body {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* A labelled line: the label above its value rather than beside it, so a long value wraps
+   under the label instead of pushing it off a narrow screen. */
+.prep-field {
+  margin: 0 0 var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.prep-field:last-child { margin-bottom: 0; }
+
+/* The small label above a value or a list. Same treatment as app.css's section headings, so
+   the two screens read as one system. */
+.prep-label {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+/* A quiet line under something: what a heading list is for, where a claim came from, what the
+   material did not say. Never the only carrier of a provenance state — the mark's WORD is. */
+.prep-caption {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* One competency or one panel member. `.claim` from app.css already supplies the spacing and,
+   with `.claim-unverified`, the demotion treatment; this adds only the wrap guard, because
+   `.claim-head` is a flex row and a flex item will not shrink below its content without it. */
+.prep-entry { min-width: 0; }
+
+/* The quote box. `.claim-source` (app.css) styles the quote itself; this is the container that
+   keeps a long unbroken span of a brief scrolling inside its own box rather than widening the
+   page — CRAFT's Safari and Chrome blowout trap, and the reason this wrapper exists at all
+   rather than the rule being added to `.claim-source`. */
+.prep-provenance {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* ── lists ─────────────────────────────────────────────────────────────────────────────── */
+
+/* Story skeletons, help structures, competencies covered. Every one of these is a list of
+   headings or names, so they all take the same rule. */
+.prep-list {
+  margin: 0;
+  padding-left: var(--space-6);
+  overflow-wrap: anywhere;
+}
+
+.prep-list li { margin-bottom: var(--space-2); }
+.prep-list li:last-child { margin-bottom: 0; }
+
+/* The logistics rail: when, format, what to bring. A definition list because that is what it
+   is. `dd` carries a UA indent that would double the one the term already implies. */
+.prep-dl {
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.prep-dl dt {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.prep-dl dd {
+  margin: 0 0 var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.prep-dl dd:last-child { margin-bottom: 0; }
+
+/* ── the help ladder, the one interactive block ────────────────────────────────────────── */
+
+.help-rung { margin-bottom: var(--space-4); }
+.help-rung:last-child { margin-bottom: 0; }
+
+.help-panel {
+  margin-top: var(--space-3);
+  min-width: 0;
+}
+
+/* An AUTHOR `display` on this panel would beat the user agent's `[hidden] { display: none }`
+   whatever the specificity, and the rungs would never close. app.css:441-445 records that exact
+   bug on `.visibility-list` and this is the same fix, written before the bug rather than after.
+   Any rule above that gives `.help-panel` a display needs this line to stay correct. */
+.help-panel[hidden] { display: none; }
+
+/* ── the footer ────────────────────────────────────────────────────────────────────────── */
+
+.prep-footer {
+  max-width: 72ch;
+  margin: var(--space-12) auto 0;
+  font-size: var(--text-body);
+  color: var(--text-muted);
+}
+
+/* ── narrow screens ────────────────────────────────────────────────────────────────────── */
+
+/* Down to 360px. app.css already stacks the provenance mark under its claim at this width and
+   trims the chrome; this only tightens the rhythm between blocks, which is the one thing on
+   this page that is sized for a laptop. Nothing restructures — a single column already is the
+   layout. */
+@media (max-width: 600px) {
+  .block { margin-bottom: var(--space-8); }
+  .prep-footer { margin-top: var(--space-8); }
+}
