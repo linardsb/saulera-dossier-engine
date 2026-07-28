@@ -67,10 +67,23 @@ structural here rather than instructed: no such constructor exists, and a test a
     skeleton item, its generated landmark id, and that it is *inside* its map rather than a
     sibling), and the serializer carries attributes and class names.
 
-**Mutation-tested.** Each of the five load-bearing gates was broken on purpose and confirmed red,
-then restored byte-identically: an 11th answer-shaped registry key (3 fail), an HTML-parsing
-assignment in `registry.js` (1 fail), `ProgressStrip` rendering "Level 2 of 4" (1 fail), a
-hand-repaired `verified: false` in the fixture (2 fail), a raw hex in `prep.css` (1 fail).
+### The gates were mutation-tested, not just written
+
+The four "never cut" ACs rest on tests that assert an **absence**, and an absence assertion passes
+just as happily when it is measuring nothing. So each load-bearing gate was broken on purpose,
+confirmed red, and the file restored byte-identically (`diff -q` on each):
+
+| Mutation | Gate | Result |
+|---|---|---|
+| An 11th registry key, `ModelAnswerCard` | export surface | **3 fail** |
+| An HTML-parsing assignment in `registry.js` | no-injection scan | **1 fail** |
+| `ProgressStrip` rendering "Level 2 of 4" | rank scan | **1 fail** |
+| `verified: false` → `true` in the fixture | fixture derivation | **2 fail** |
+| A raw hex in `prep.css` | CSS discipline | **1 fail** |
+
+Two further invariants were confirmed rather than assumed: every constructor roots **exactly one**
+`<section>` (which is what makes group 3's `landmarks === rendered` assertion meaningful), and the
+selector parser still reaches rules *inside* `@media` blocks after the fix below.
 
 ## Validation results
 
@@ -176,7 +189,12 @@ npm run dev        # then open http://localhost:8788/prep/brief
 
 - Steps 3, 4, 5 — tab order and visible focus, the screen-reader landmark list, and 360px with no
   horizontal scroll. AC #7's keyboard and focus half is **unevidenced** until step 3 is run.
-- Step 7 — break `SOURCE` to a 404 and confirm the error line reads plainly. The code path is not
-  exercised by any test, because `brief.js` touches the document at module scope.
+- Step 7 — break `SOURCE` to a 404 and confirm the error line reads plainly. **`brief.js` has no
+  test at all**, because it touches the document at module scope, so three of AC #3's user-visible
+  outcomes are uncovered: the **error state** (`res.ok` false, or a network failure), the **empty
+  state** (`rendered === 0`), and the **malformed-payload guard** (`Array.isArray(payload.blocks)`).
+  Only the happy path has been exercised, and only against the served fixture. Making these
+  testable means splitting the fetch-and-state logic out of module scope, which is a change worth
+  its own ticket rather than a late edit here.
 - Steps 1, 2, 6, 8 — proven structurally by tests and by the served-bytes render, but not yet seen
   in a real engine.
