@@ -93,6 +93,11 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
  * above is idempotent, so re-verifying a stored payload emits no `panel_source` failure at all
  * while the competency half still re-fails — on that path `failures` is a complete gate for the
  * JD half and an empty one for the note half, and the payload is the only thing that still knows.
+ *
+ * TOP-LEVEL BLOCKS ONLY, and that is complete only because `assertBrief` rejects a `PanelBrief`
+ * nested in `CompetencyMap.children` — the two are a pair. Drop that guard and a panel smuggled
+ * into `children` goes uncounted here as well as unverified above, which is the same hole in both
+ * halves. #22 calling this on a stored payload must run `assertBrief` first, as generate.js does.
  */
 export function briefSummary(payload) {
   const competencies = payload.competencies ?? [];

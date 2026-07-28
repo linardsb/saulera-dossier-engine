@@ -191,6 +191,34 @@ test("briefSummary moves with the note half too, not only the competencies", () 
   assert.equal(dirty.panel_total, 2, "demote, don't drop, holds in the counts as well");
 });
 
+test("the summary's top-level-only scan is complete because assertBrief closes the nested case", () => {
+  // briefSummary walks payload.blocks and does not descend, exactly as verifyBrief does not.
+  // That is only sound while assertBrief refuses a PanelBrief inside CompetencyMap.children —
+  // the same guard, holding up both halves. Pinned as a pair so removing one surfaces here
+  // rather than as a Send gate that silently stops counting what it was built to count.
+  const sneaky = payload();
+  sneaky.blocks[1].children.push({
+    name: "PanelBrief",
+    props: { intro: "x", panel: [{ who: "a", what_they_probe: "b", source_field_key: "NOPE" }] },
+  });
+
+  assert.equal(briefSummary(sneaky).panel_total, 2, "the nested panel is not counted");
+  assert.throws(() => assertBrief(sneaky), /nested inside children/, "and never gets this far");
+});
+
+test("a demoted payload still passes assertBrief, so it can be re-verified at all", () => {
+  // failed_field_key is not in BRIEF_SCHEMA (the panel item is additionalProperties: false), so
+  // the demoted form is the decoder's output plus a marker. assertBrief does not validate props
+  // contents, which is what makes the re-verify path possible — pinned because #17 storing and
+  // #22 reloading this payload both depend on it and neither would notice it breaking.
+  const p = payload();
+  p.blocks[2].props.panel[0].source_field_key = "invented-key";
+  const { payload: demoted } = verifyBrief(assertBrief(p), { brief: BRIEF, fieldKeys: FIELD_KEYS });
+
+  assert.equal(demoted.blocks[2].props.panel[0].failed_field_key, "invented-key");
+  assert.equal(assertBrief(demoted), demoted, "the marked payload is still a valid brief");
+});
+
 test("re-verifying an already-verified payload changes nothing", () => {
   // The re-verify path is real — the script's own, and #22 re-verifying a payload out of storage.
   // verifyPack is idempotent because it early-returns on an already-demoted claim; verifyBrief's
