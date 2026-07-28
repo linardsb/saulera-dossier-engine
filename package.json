@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "description": "Generated, evidence-anchored candidate submission packs for small recruitment agencies",
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "pack": "node scripts/pack.mjs",

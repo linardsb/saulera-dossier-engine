@@ -33,7 +33,8 @@ export function mintToken() {
  *
  * Rejection-sampled, not `% 1e6` on a raw draw: 2^32 is not a multiple of 10^6, so the plain
  * modulo makes the first 4,967,296 values fractionally likelier than the rest. Redrawing above
- * the largest clean multiple removes the bias for the cost of one extra draw in ~1,400.
+ * the largest clean multiple removes the bias for the cost of one extra draw in ~4,440 — the
+ * reject window is 2^32 − 4,294,000,000 = 967,296, which is 1 in 4,440 of the 2^32 space.
  *
  * It is a string and never a number, because '000123' is a valid code and `Number('000123')`
  * is 123 — a six-digit code that silently becomes three digits is a code space 1,000× smaller
