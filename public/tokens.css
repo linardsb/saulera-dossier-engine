@@ -4,8 +4,12 @@
 
    Values are the stackai-design defaults: neutral (white / light grey / near-black) with a
    single accent, which is what the README's "neutral, not the saulera Sunrise palette"
-   decision asks for. The --font-* families have no .woff2 files behind them yet; they fall
-   back to system-ui until #8 ships the real assets. */
+   decision asks for. The --font-* families have no .woff2 files behind them and fall back to
+   system-ui. #8 was where they were meant to land and did not: there are no font files in this
+   repo, "Aspekta 500" and "Geist" both need a licensing decision, and the fallback renders
+   correctly and costs nothing against the ten-minute guardrail. Fonts are also
+   branding-adjacent, and branding is per-agency config. The tokens stay so shipping them
+   later is a one-file change. */
 
 :root {
   /* colour */
@@ -19,11 +23,9 @@
   --text-muted:   #6b6b6b;
   --accent:       #0099ff;
   --border:       #595959;
-  --success:      #22c55e;
-  --warning:      #c68a0b;
   --danger:       #78350f;
 
-  /* type — font files deferred to #8; tokens exist now so that is a one-file change */
+  /* type — font files deferred, reason in the header; tokens exist now so it is a one-file change */
   --font-ui:   "Aspekta 500", system-ui, -apple-system, sans-serif;
   --font-body: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
@@ -38,12 +40,21 @@
   --text-h3:      20px;   /* the selected client's name */
   --text-h2:      24px;   /* page h1, matching index.html's existing 24px */
 
-  /* provenance status. Whether a claim is sourced is this product's core distinction, so
-     the three states get names here rather than colours invented at the point of building
-     the screen. #8 makes them legible; #3 only reserves them. */
-  --verified:   var(--success);
-  --unverified: var(--warning);
-  --failed:     var(--danger);
+  /* provenance status. Whether a claim is sourced is this product's core distinction, so these
+     are text colours and are held to the 4.5:1 body-text floor rather than to the 3:1 a
+     decorative state colour could take — the mark carries the WORD ("Unverified"), and a word
+     is text. Measured on --background / --surface, the two surfaces they render on:
+       --verified   7.13:1 / 6.54:1
+       --unverified 6.33:1 / 5.81:1
+       --failed     8.02:1 / 7.35:1
+     They replace aliases of --success (#22c55e, 2.28:1) and --warning (#c68a0b, 2.98:1), which
+     both failed the floor. Those two tokens are gone rather than left orphaned: nothing else
+     referenced them. test/tokens.test.js is the gate that keeps these numbers true.
+     --failed is its own red rather than var(--danger) so it separates from --unverified at
+     12px; --danger stays the state-line error colour. */
+  --verified:   #166534;
+  --unverified: #8a5300;
+  --failed:     #9f1239;
 
   /* 4px grid */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;

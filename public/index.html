@@ -1,33 +1,136 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>saulera dossier engine</title>
+<title>Submission pack · saulera dossier engine</title>
 <link rel="stylesheet" href="/tokens.css">
-<!-- The shared rules that used to sit inline here now live in app.css, so this page and
-     /clients are one system rather than two (#5). -->
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <main>
-  <div class="card">
-    <h1>saulera dossier engine</h1>
-    <p>
-      This is the deployment shell for the submission dossier engine. It is behind Cloudflare
-      Access, so if you are reading this you came through the front door.
-    </p>
-    <p>
-      The client knowledge notes are at <a href="/clients">Client knowledge</a>, where the
-      agency writes down what it knows about how each client hires. The recruiter screen and
-      the generation route are separate tickets.
-    </p>
-    <p class="muted">
-      Every colour, size and radius on this page comes from <code>/tokens.css</code>. An
-      agency's branding is an override of that file, never a fork of this one.
-    </p>
+
+  <div class="page-head">
+    <h1>Submission pack</h1>
+    <p class="page-sub">Pick a client, paste the brief and the CV.</p>
   </div>
+
+  <div class="workspace">
+
+    <!-- The client rail, the same grammar as /clients. No add-client form: adding a client and
+         writing its note both live on that screen, and two save paths to one row is how the
+         product's compounding asset gets overwritten. This links there instead. -->
+    <section class="rail" aria-labelledby="rail-head">
+      <h2 class="rail-head" id="rail-head">Clients</h2>
+
+      <p class="rail-empty" id="rail-empty" hidden>
+        No clients yet. Add the first one on the client knowledge screen, then come back.
+      </p>
+
+      <ul class="client-list" id="client-list"></ul>
+
+      <p class="rail-link"><a href="/clients">Write client notes</a></p>
+
+      <!-- The rail's own live region. A role="status" inside a hidden subtree is not in the
+           accessibility tree, so each act below owns one too rather than sharing this. -->
+      <p class="save-state rail-state" id="rail-state" role="status"></p>
+    </section>
+
+    <section class="stage" aria-label="Build a pack">
+
+      <!-- ── act 1 ────────────────────────────────────────────────────────────────────── -->
+      <section class="act" id="act-inputs" aria-labelledby="inputs-head">
+        <h2 class="act-head" id="inputs-head">1. The inputs</h2>
+
+        <div class="input-pair">
+          <div class="input-col">
+            <label class="field" for="brief">The client's brief</label>
+            <textarea class="textarea" id="brief" name="brief" rows="14" spellcheck="true"></textarea>
+            <div class="file-row">
+              <label class="file-label" for="brief-file">Or open a file — PDF, Word, or text</label>
+              <input class="file-input" type="file" id="brief-file"
+                     accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown">
+            </div>
+          </div>
+
+          <div class="input-col">
+            <label class="field" for="cv">The candidate's CV</label>
+            <textarea class="textarea" id="cv" name="cv" rows="14" spellcheck="true"></textarea>
+            <div class="file-row">
+              <label class="file-label" for="cv-file">Or open a file — PDF, Word, or text</label>
+              <input class="file-input" type="file" id="cv-file"
+                     accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown">
+            </div>
+          </div>
+        </div>
+
+        <div class="act-row">
+          <button class="btn btn-primary" type="button" id="copy-prompt">Copy the prompt and open Claude</button>
+          <span class="save-state" id="inputs-state" role="status"></span>
+        </div>
+
+        <!-- The manual fallback. Shown only when the clipboard write is refused, which happens
+             on an insecure context and when the browser denies the permission. Without it a
+             refused write is a dead end on the one action the whole flow depends on. -->
+        <div class="fallback" id="prompt-fallback" hidden>
+          <label class="field" for="prompt-text">Copy this text into Claude</label>
+          <textarea class="textarea" id="prompt-text" rows="8" readonly></textarea>
+        </div>
+      </section>
+
+      <!-- ── act 2 ────────────────────────────────────────────────────────────────────── -->
+      <section class="act" id="act-waiting" aria-labelledby="waiting-head" hidden>
+        <div class="act-head-row">
+          <h2 class="act-head" id="waiting-head">2. In Claude</h2>
+          <!-- Honest seconds since the prompt was copied, not a percentage and not a spinner.
+               aria-hidden because it updates every second and a per-second live region is a
+               screen reader denial of service. The act change is what gets announced, once. -->
+          <span class="elapsed" id="elapsed" aria-hidden="true"></span>
+        </div>
+
+        <!-- The link repeats what the button already did, because the tab gets closed, blocked,
+             or lost behind a window, and "paste the prompt into Claude" with no Claude in sight
+             is where this flow used to dead-end. -->
+        <p class="act-note">
+          The prompt is on your clipboard and Claude is open in the other tab — paste it there
+          (⌘V). When it answers, copy the whole reply and paste it below.
+          <a class="claude-link" href="https://claude.ai/new" target="_blank" rel="noopener">Open Claude again</a>
+        </p>
+
+        <label class="field" for="reply">Claude's reply</label>
+        <textarea class="textarea" id="reply" name="reply" rows="10" spellcheck="false"></textarea>
+
+        <div class="act-row">
+          <button class="btn btn-primary" type="button" id="read-pack">Read the pack</button>
+          <button class="btn" type="button" id="start-again">Start again</button>
+          <span class="save-state" id="waiting-state" role="status"></span>
+        </div>
+      </section>
+
+      <!-- ── act 3 ────────────────────────────────────────────────────────────────────── -->
+      <section class="act" id="act-pack" aria-labelledby="pack-head" hidden>
+        <div class="act-head-row">
+          <h2 class="act-head" id="pack-head">3. The pack</h2>
+          <span class="pack-summary" id="provenance-summary"></span>
+        </div>
+
+        <div class="pack" id="pack-body"></div>
+
+        <div class="act-row">
+          <button class="btn btn-primary" type="button" id="copy-pack">Copy the pack</button>
+          <button class="btn" type="button" id="start-again-2">Start again</button>
+          <span class="renderer-note" id="renderer-note"></span>
+          <span class="save-state" id="pack-state" role="status"></span>
+        </div>
+      </section>
+
+    </section>
+
+  </div>
+
 </main>
+<script src="/extract.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>

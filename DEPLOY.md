@@ -291,7 +291,7 @@ the dashboard.
 |---|---|---|
 | `503 {"error":"not_configured"}` from any `/api/*` | the `DB` binding did not resolve | re-run `scripts/setup-d1.py` and read its confirming GET; if it reports the binding present and the deployment still answers 503, bind it in the dashboard under Settings → Bindings and redeploy |
 | `503 {"error":"not_migrated"}` from any `/api/*` | the binding resolved, but that database has no tables | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations, and both have been run |
-| `200` returning the `index.html` shell instead of JSON | `functions/` was not picked up | confirm it is at the repo root and the project root directory is `/`; the build log should say `Found Functions directory at /functions` |
+| `200` returning `index.html` instead of JSON | `functions/` was not picked up | confirm it is at the repo root and the project root directory is `/`; the build log should say `Found Functions directory at /functions` |
 | the build fails with a module error | a Function could not bundle its `../../src/` imports | move the shared modules to `functions/_lib/` and re-point the imports; the tests can import from anywhere |
 | `500 {"error":"internal"}` on a route that used to work | the migration did not run against this environment's database | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations |
 
@@ -301,11 +301,17 @@ the dashboard.
 
 ## 5b. Secrets · none
 
-**There are still no secrets on this deployment.** No model call, no `ANTHROPIC_API_KEY`, no
-runtime SDK. Generation happens in Claude Code on the subscription — a Pages Function cannot
-use subscription auth (short-lived OAuth token in a local credential file; a Function has no
-filesystem and no process to refresh it), and adding a per-token API key is a #6 decision, not
-an MVP one.
+**There are still no secrets on this deployment, and #6 and #8 did not add one.** No model
+call, no `ANTHROPIC_API_KEY`, no runtime SDK, no `nodejs_compat`. A Pages Function cannot use
+subscription auth (short-lived OAuth token in a local credential file; a Function has no
+filesystem and no process to refresh it), so a model call from here would need a per-token API
+key.
+
+The generation seam is built around that rather than through it. `POST /api/prompt` assembles
+the string, the recruiter runs it in **their own** Claude session, and `POST /api/verify` checks
+and renders the reply. Both are pure Functions over D1 and neither holds a credential. A model
+call from Pages was built (`3d72737`) and reverted (`5e311d1`); if it ever comes back, this
+section is the one that changes, and it changes to say there IS a secret.
 
 The deployment does now have a **binding**, added in section 5. A binding is not a secret: it
 is a reference to a resource in the same account, it carries no credential, and it is set as
@@ -318,11 +324,21 @@ project configuration rather than as an encrypted variable.
 Run these authenticated — Access is on, so an unauthenticated curl only ever sees the login
 page and tells you nothing about the site itself. Log in in a browser first.
 
-- [ ] `https://<project>.pages.dev/` renders the shell and links to `/clients`
-- [ ] `tokens.css` and `app.css` load; card renders on the neutral palette, no off-palette colour
+- [ ] `https://<project>.pages.dev/` renders the one screen: a client rail and three numbered
+      acts. It is no longer a deployment shell
+- [ ] `tokens.css` and `app.css` load; the neutral palette renders, no off-palette colour
 - [ ] `/clients` loads, a client can be added, and a note saves and survives a reload
 - [ ] `/api/clients`, `/api/events` and `/api/agency` all return JSON, not a `503`
-- [ ] Mobile: 375px width, no horizontal scroll
+- [ ] On `/`: a client can be picked, and **Copy the prompt** puts a prompt on the clipboard
+      and freezes the brief and the CV
+- [ ] Pasting a real Claude reply and pressing **Read the pack** renders a pack where every
+      claim carries a source word, and anything unverified says so
+- [ ] **Copy the pack** pastes into an email client with formatting, and into a plain text
+      field without markup
+- [ ] `curl -s $P/api/events` shows the event landed, with the round-trip `duration_ms`
+- [ ] A client whose note is empty answers `note_empty` and offers a link to `/clients`
+- [ ] `curl -sI $P/ | grep -i x-content-type-options` returns the header from `public/_headers`
+- [ ] Mobile: 375px width, no horizontal scroll, through all three acts
 
 Unauthenticated, the only thing any of these tells you is that the door is shut — Access
 intercepts every path, so all four answer `302` whether the deployment is healthy or broken:
@@ -350,14 +366,23 @@ Access — re-verify after any change to the applications or the policy:
   it should be — saulera's or the agency's — is a branding decision, not a DNS one.
 - **Cloudflare Access itself** (27 Jul 2026) — steps 2–4, per the banner at the top. Must be
   restored before #6. This is the only deferral on this list with a hard deadline attached.
-- **`_headers`.** The marketing site ships security headers; there is no real UI here yet.
-  The original reasoning was "Access already fronts everything" — **that no longer holds**,
-  so this is now a weaker deferral than it was. Revisit alongside Access, and at #8.
-- **Web fonts.** `public/tokens.css` declares `--font-*` with `system-ui` fallbacks; the
-  `.woff2` files land with the recruiter screen (#8).
-- **An Access service token.** Would make the Function curl-able from CI and is genuinely
-  useful once generation latency needs measuring automatically. Raise it at #6 — where it is
-  now one of the two acceptable ways to close the gap the banner describes.
+- **`_headers`: partly done** (27 Jul 2026, #8). `public/_headers` now sets
+  `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options` on `/*`. **What remains is
+  a Content-Security-Policy**, which is the one worth having on a screen that renders model
+  output and also the one that breaks a deployment in a way nobody notices until a recruiter
+  cannot copy a pack. It needs its own ticket and its own smoke pass.
+- **Web fonts, re-deferred with a reason** (27 Jul 2026, #8). This entry used to say the
+  `.woff2` files land with the recruiter screen. They did not, and this no longer points at #8.
+  There are no font files in the repo, "Aspekta 500" and "Geist" each need a licensing
+  decision, and the `system-ui` fallback renders correctly and costs nothing against the
+  ten-minute guardrail. Fonts are also branding-adjacent, and branding is per-agency config.
+  The `--font-*` tokens exist, so shipping them later is a one-file change.
+- **An Access service token, re-scoped** (27 Jul 2026, #8). It would still make the Functions
+  curl-able from CI. The original reason — measuring generation latency automatically — is
+  gone: there is no model call on this deployment to time. What is measured now is the
+  browser-side round trip, recorded per pack in `events.duration_ms` and readable at
+  `GET /api/events`, which needs no service token. Keep it as a CI convenience, not a metric
+  dependency.
 
 **A note for whoever automates this.** Steps 1 and 5 can be driven from the Cloudflare REST
 API, and step 5 already is, by `scripts/setup-d1.py`. For step 1,

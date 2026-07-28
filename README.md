@@ -12,15 +12,14 @@ process. **That note is the product. The generation is the cheap part.**
 Live at **https://saulera-dossier-engine.pages.dev** — a Cloudflare Pages site serving
 `public/`. Still no secrets and no build step.
 
-The Pages Functions and the D1 schema for the client knowledge store are **written and their
-database is live, but not yet serving production**: #5 is still an open PR, so `main` carries
-no `functions/`. Both D1 databases are created, bound and migrated — production verified by
-`d1 execute dossier-engine --remote`, which returns `agency`, `clients` and `events` with the
-seed agency row and zero clients. The store starts serving the moment #5 merges. See
-`DEPLOY.md` §5.
+The Pages Functions and the D1 schema for the client knowledge store are **live**: #5 merged
+on 27 July 2026, which put `functions/` on `main`. Both D1 databases are created, bound and
+migrated — production verified by `d1 execute dossier-engine --remote`, which returns `agency`,
+`clients` and `events` with the seed agency row and zero clients. See `DEPLOY.md` §5.
 
 `src/` — the pack contract, the provenance verifier, both renderers and the store — is library
-code, driven from Claude Code to generate packs by hand. See **Model access** under Decisions.
+code. It is no longer only driven by hand: `/` is the tool that drives it. See **Model access**
+under Decisions.
 
 **Behind Cloudflare Access** (27 Jul 2026, #12). Production and every preview hostname
 require an email one-time PIN; only `linardsberzins@gmail.com` is admitted. Two Access
@@ -30,11 +29,22 @@ creates both. Verified: both hostnames answer `302` to `cloudflareaccess.com`.
 **The client knowledge store is built** (27 Jul 2026, #5). Three tables in D1, four `/api/*`
 routes over them, and a screen at **`/clients`** where the agency adds a client and edits its
 note. The non-personal event counter ships with it, so the epic's primary metric is a number
-rather than a memory. Its D1 databases are created, bound and migrated on both environments;
-**it goes live when #5 merges**, because that is what puts `functions/` on `main`.
+rather than a memory. Its D1 databases are created, bound and migrated on both environments,
+and it went live when #5 merged, because that is what put `functions/` on `main`.
 
-Not built: generation (#6), the recruiter screen (#8). See **#1** for the epic, the dependency
-graph and the date gates. `DEPLOY.md` is the runbook for the deployment.
+**The tool is at `/`** (27 Jul 2026, #6 and #8). One screen: pick a client, paste or open the
+brief and the CV, copy an assembled prompt, run it in your own Claude session, paste the reply
+back, read a pack where every claim carries its source, and copy it. The two routes either side
+of that session are `POST /api/prompt` and `POST /api/verify`, and **neither calls a model** —
+see **Model access** under Decisions for why, and for what was built and reverted first.
+
+Every claim passes a deterministic literal-quote check before the recruiter sees it. Anything
+that fails is demoted, marked with the word, shown with the quote it could not stand up, and
+**never dropped**. `test/seam.test.js` proves that over the real spike fixtures rather than
+asserting it in prose.
+
+See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the runbook for
+the deployment.
 
 ## Where the specs live
 
@@ -52,16 +62,32 @@ without the doc to hand.
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
 
-**Model access: Claude Code on the subscription. No API key, no server.** (27 Jul 2026.)
-Packs are generated in Claude Code using `src/`, by hand, and sent. **Nothing in this
-deployment calls a model.** There is no `ANTHROPIC_API_KEY` and no runtime SDK, and that has
-not changed since #5 added Functions for storage — see the entry below, which restates the
-same boundary rather than relaxing it.
+**Model access: the recruiter's own Claude session. No API key, no model call from Pages.**
+(27 Jul 2026, #6 and #8.) **Nothing in this deployment calls a model.** There is no
+`ANTHROPIC_API_KEY`, no runtime SDK and no `nodejs_compat`.
 
 A Pages Function *cannot* use the subscription: subscription auth is a short-lived OAuth
 token in a local credential file that the CLI refreshes, and a Function has no filesystem and
-no process to refresh it. So a model call from Pages means a per-token API key. That trade is
-only worth making once an agency is self-serving — which is #6, and is not an MVP problem.
+no process to refresh it. So a model call from Pages means a per-token API key.
+
+**This was built the other way first, and reverted.** `3d72737` added `POST /api/generate`
+calling `claude-opus-5` through `@anthropic-ai/sdk`; `5e311d1` reverted it. The revert stands
+and it is not a decision to reopen per ticket.
+
+What replaced it is a **seam in two halves, either side of the recruiter's own Claude session**:
+`POST /api/prompt` assembles the client note, the brief, the CV and the pack schema into one
+copyable string, and `POST /api/verify` takes the pasted reply back, checks every quote against
+the actual source text, renders it and records the event. Say plainly what that costs and what
+it buys. It costs the recruiter one trip to their own Claude session, in the middle of the flow,
+which the screen designs for rather than hides. It buys a deployment with no key to issue, no
+key to rotate and no per-agency model billing, on a product whose commercial shape is one
+bespoke deployment per agency. `@anthropic-ai/sdk` stays a devDependency and `spike/run.js`
+still runs the API path with a key, so that door is shut rather than bricked up.
+
+**On the data posture, this is the whole claim and nothing broader.** No new store of candidate
+data is created, and this deployment keeps no copy after the pack is produced. What changed is
+where the model call happens: it now runs in the recruiter's own Claude session rather than from
+Pages. Nothing is claimed here about provider-side retention in either arrangement.
 
 **Storage: Cloudflare D1, not KV.** (27 Jul 2026, #5.) Both handle a few packs a week from a
 two-to-ten-person agency, so throughput does not decide it. Two things do. First, *"there is no
@@ -77,13 +103,21 @@ product. The counter settles what is left — `SELECT client_id, COUNT(*) … GR
 against a key-space scan. D1 is on the Workers free plan: 10 databases, 500 MB each, 5 GB per
 account.
 
-**Pages Functions return, for storage only.** (27 Jul 2026, #5.) **The model-access boundary
-above is unchanged**: there is still no model call from this deployment, no
-`ANTHROPIC_API_KEY`, and no runtime SDK. What the amendment above forbids is a *model call*
-from Pages, and its reasoning is about a credential a V8 isolate cannot refresh. A D1 binding
-is not a secret and needs no filesystem, so it does not touch that argument. Without a
-server-side store there is nowhere for the note to live and no way for the agency rather than
-saulera to edit it, which is the whole point of the ticket.
+**Pages Functions return — for storage, and for the two halves of the seam. Never for a model
+call.** (27 Jul 2026, #5, amended by #6 and #8.) **The model-access boundary above is
+unchanged**: there is still no model call from this deployment, no `ANTHROPIC_API_KEY` and no
+runtime SDK. What that decision forbids is a *model call* from Pages, and its reasoning is about
+a credential a V8 isolate cannot refresh. A D1 binding is not a secret and needs no filesystem,
+so it does not touch that argument. Without a server-side store there is nowhere for the note to
+live and no way for the agency rather than saulera to edit it, which is the whole point of #5.
+
+#6 and #8 added two more Functions, and neither is storage: `/api/prompt` assembles a string and
+`/api/verify` checks and renders a pasted one. They are Functions rather than client-side
+JavaScript because `wrangler.toml` serves only `public/`, so a browser cannot import `src/` —
+and the alternatives were copying the verifier and the renderers into `public/` (two copies of
+the one module whose whole value is being the single deterministic check) or adding a bundler,
+which #8 AC9 forbids. A Function is the only shape that keeps one verifier, no build step, and
+`src/` where the tests can reach it.
 
 The binding is configured **per deployment** through the Pages API by `scripts/setup-d1.py`,
 not in `wrangler.toml`. A `database_id` is per-agency config and `wrangler.toml` is engine —
@@ -98,6 +132,17 @@ contrast floor, and row meta and the note scaffold both sit on `--surface`. The 
 inherits the fix. Two related facts worth knowing before using the palette: `--accent` is
 3.00:1 on white, so it is a fill and never a text colour, and a button label on it must be
 `--text-primary` (5.62:1) rather than white (3.00:1).
+
+**The provenance tokens are text colours held to 4.5:1.** (27 Jul 2026, #8.) Same shape of fix
+as `--text-muted` above, on the tokens that matter most. `--verified` and `--unverified` shipped
+in #3 as aliases of `--success` (#22c55e) and `--warning` (#c68a0b), which measure **2.28:1** and
+**2.98:1** on `--background`. Whether a claim is sourced is this product's core distinction and
+the mark carries the word "Unverified", so these are body text and take the 4.5:1 floor rather
+than the 3:1 a decorative state colour could take. They are now `#166534` (7.13:1 / 6.54:1 on
+`--background` / `--surface`), `#8a5300` (6.33:1 / 5.81:1) and `#9f1239` (8.02:1 / 7.35:1).
+`--success` and `--warning` are gone rather than left orphaned; nothing else referenced them.
+`test/tokens.test.js` measures every pairing in `tokens.css` and fails the suite under the
+floor, including for an agency that swaps a colour.
 
 **Provenance placement: appendix by default; both renderings ship.** (26 Jul 2026, spike
 #2.) Body reads as prose, sources numbered in a footer. Inline sourcing ships as a second
@@ -135,13 +180,17 @@ back up.
 
 **Engine — tracked upstream, shared by every agency:**
 
-- `src/` — the pack contract and schema (`pack.js`), the prompt (`prompt.js`), the
+- `src/` — the pack contract and schema (`pack.js`), the prompt and the paste-prompt builder
+  (`prompt.js`), the extractor that recovers a pack from a pasted reply (`paste.js`), the
   provenance verifier (`provenance.js`), both renderers (`render/`), the client knowledge
   store (`store.js`) and the HTTP helpers its endpoints share (`http.js`)
-- `functions/api/` — the thin adapters over the store. Storage only; no model call
+- `functions/api/` — the thin adapters. Storage, plus the two halves of the generation seam:
+  `prompt.js` builds the string the recruiter pastes into their own Claude session and
+  `verify.js` checks and renders what comes back. **No model call from any of them**
 - `migrations/` — the schema, one reviewable file
-- `public/` — including `tokens.css`, the default token layer, and `app.css`, the components
-  built from it
+- `public/` — the one screen (`index.html`, `app.js`), the note editor (`clients.html`,
+  `clients.js`), `tokens.css`, the default token layer, `app.css`, the components built from
+  it, and `_headers`
 - `scripts/setup-d1.py` and `scripts/dev.py` — binding the databases and the local dev loop
 - `wrangler.toml` — the Pages project name and compatibility date
 
