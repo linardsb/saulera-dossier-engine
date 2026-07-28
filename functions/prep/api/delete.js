@@ -1,4 +1,4 @@
-// POST /prep/api/delete { token? } -> 200 { ok: true }
+// POST /prep/api/delete { token? } -> 200 { ok: true, deleted: 0 | 1 }
 //
 // The day-one delete-now (#17, decision 13): the same scope the automatic purge takes,
 // immediately. Idempotent 200 by design — a candidate holding a stale link is already in
