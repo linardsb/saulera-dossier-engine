@@ -53,10 +53,16 @@ export async function purgeExpired(db) {
  * design — `{ok: true}` whether or not a row matched, because after the call the
  * candidate's state is clean either way, and a not-found answer would make the delete
  * button lie to a candidate holding a stale link.
+ *
+ * `deleted` rides alongside it because idempotent must not mean blind. #20's rotation made
+ * a present-but-stale credential ordinary — signing in on a second device rotates the
+ * first device's cookie out — so the caller can hold two tokens and needs to know whether
+ * the first one it tried matched anything before it decides about the second. The answer
+ * stays `{ok: true}` at zero; the count is what makes that decision possible.
  */
 export async function deleteInviteByTokenHash(db, tokenHash) {
-  await db.prepare("DELETE FROM invite WHERE token_hash = ?").bind(tokenHash).run();
-  return { ok: true };
+  const result = await db.prepare("DELETE FROM invite WHERE token_hash = ?").bind(tokenHash).run();
+  return { ok: true, deleted: result.meta.changes ?? 0 };
 }
 
 // ── the auth statements (#20) ──────────────────────────────────────────────────────────

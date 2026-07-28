@@ -39,6 +39,7 @@ import {
 } from "../src/portal/store.js";
 import { hashOtpCode, mintToken, SESSION_COOKIE } from "../src/prep/tokens.js";
 import { sessionFromRequest, requireSession } from "../src/prep/session.js";
+import { onRequestPost as deleteRoute } from "../functions/prep/api/delete.js";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
@@ -457,4 +458,94 @@ test("purge takes an expired invite's otp row with it", { skip }, async () => {
   assert.equal(purged, 1, "only the 30-day-past invite purges");
   assert.equal(otpRows(db, "inv-P").length, 0, "and its otp row goes with it, by cascade");
   assert.ok(rowOf(db, "inv-L"), "the live invite is untouched");
+});
+
+// ── delete-now picks the credential the caller NAMED (PR #30 review, Medium 1) ──────────
+//
+// These run here, against real SQL, and not in a fake-d1 file, for the reason this whole
+// file exists: the behaviour branches on `meta.changes`, and the fake hard-codes it to 1.
+// "the cookie matched nothing, so fall through to the body token" is unobservable under a
+// fake that says every DELETE matched — both assertions below would pass while broken.
+
+/** A Request the delete route accepts: no Sec-Fetch-Site and no Origin is the curl path. */
+const deleteRequest = ({ cookie = null, body = {} } = {}) => ({
+  headers: { get: (name) => (name === "Cookie" && cookie !== null ? `${SESSION_COOKIE}=${cookie}` : null) },
+  json: async () => body,
+});
+
+test("a live cookie does not outrank the token the caller asked to erase", { skip }, async () => {
+  const db = openMigrated();
+  const { d1, tokens } = await seed(db);
+
+  // The kiosk case, exactly: one browser holding two invites. O has been clicked, so its
+  // cookie is live and matches a row; L is still an unclicked emailed link. The caller
+  // names L. Under `cookie || body` the cookie won, L was never hashed, and O — a different
+  // invite, possibly a different person — was destroyed instead, under an {ok: true}.
+  const response = await deleteRoute({
+    request: deleteRequest({ cookie: tokens.OSession, body: { token: tokens.L } }),
+    env: { DB: d1 },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, deleted: 1 });
+  assert.equal(rowOf(db, "inv-L"), undefined, "the invite the caller NAMED is the one erased");
+  assert.ok(rowOf(db, "inv-O"), "and the one it merely had a cookie for survives");
+});
+
+test("a rotated-out cookie erases nothing, and the answer says so", { skip }, async () => {
+  const db = openMigrated();
+  const { d1, tokens } = await seed(db);
+
+  // tokens.O was rotated out by the exchange in seed(), which is ordinary after #20: signing
+  // in on a second device does this to the first device's cookie. It matches no row, so no
+  // statement runs — and the endpoint used to answer a bare {ok: true} to that, telling a
+  // candidate their data was erased while every row of it survived.
+  const response = await deleteRoute({
+    request: deleteRequest({ cookie: tokens.O }),
+    env: { DB: d1 },
+  });
+
+  assert.equal(response.status, 200, "still idempotent — #17's contract is unchanged");
+  assert.deepEqual(await response.json(), { ok: true, deleted: 0 }, "but no longer claiming an erasure");
+  assert.ok(rowOf(db, "inv-O"), "the row is still there, which is what deleted: 0 means");
+});
+
+test("the cookie is still the credential when no token is named", { skip }, async () => {
+  const db = openMigrated();
+  const { d1, tokens } = await seed(db);
+
+  // #24's button cannot read the HttpOnly cookie, so it sends no body at all. The fallback
+  // is the whole reason the cookie is still consulted.
+  const response = await deleteRoute({
+    request: deleteRequest({ cookie: tokens.OSession }),
+    env: { DB: d1 },
+  });
+
+  assert.deepEqual(await response.json(), { ok: true, deleted: 1 });
+  assert.equal(rowOf(db, "inv-O"), undefined, "the signed-in candidate's own invite");
+  assert.ok(rowOf(db, "inv-L"), "and nothing else");
+});
+
+test("a body token that matches nothing falls through to the cookie", { skip }, async () => {
+  const db = openMigrated();
+  const { d1, tokens } = await seed(db);
+
+  // Explicit-first must not mean explicit-only: a candidate pasting a spent link while
+  // signed in should still erase the session they actually hold.
+  const response = await deleteRoute({
+    request: deleteRequest({ cookie: tokens.OSession, body: { token: tokens.O } }),
+    env: { DB: d1 },
+  });
+
+  assert.deepEqual(await response.json(), { ok: true, deleted: 1 });
+  assert.equal(rowOf(db, "inv-O"), undefined);
+});
+
+test("neither credential is still a 400, not an idempotent lie", { skip }, async () => {
+  const db = openMigrated();
+  const { d1 } = await seed(db);
+
+  const response = await deleteRoute({ request: deleteRequest(), env: { DB: d1 } });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "missing_fields" });
 });

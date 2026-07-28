@@ -77,8 +77,10 @@ test("deleteInviteByTokenHash binds the hash and answers ok regardless of matche
   const result = await deleteInviteByTokenHash(db, hash);
 
   // {ok: true} even though the fake reports changes — and the same shape at changes 0: a
-  // candidate holding a stale link is already in the clean state the button promises.
-  assert.deepEqual(result, { ok: true });
+  // candidate holding a stale link is already in the clean state the button promises. The
+  // count rides alongside so the route can pick between two credentials; whether it reads
+  // 0 correctly is provable only against real SQL, in test/portal-purge.test.js.
+  assert.deepEqual(result, { ok: true, deleted: 1 }); // fake-d1 run() reports changes: 1
   assert.equal(db.calls.length, 1, "delete-now is exactly one statement");
   assert.match(db.calls[0].sql, /^DELETE FROM invite WHERE token_hash = \?$/i);
   assert.deepEqual(db.calls[0].args, [hash], "the hash travels as a bound parameter, never in the SQL");

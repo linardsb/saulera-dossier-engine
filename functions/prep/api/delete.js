@@ -9,9 +9,20 @@
 // #20 made the cookie the primary credential, and this route had to follow or break. The
 // emailed token now dies at first click — /prep/auth/enter rotates it — so a body token is
 // only ever the token a candidate has not spent yet. Afterwards the live credential is in an
-// HttpOnly cookie, which is by design unreadable to #24's delete button. Cookie first, body
-// second: the cookie is what a signed-in candidate has, and the body is what someone holding
-// a fresh, unclicked link has. Both are the candidate; neither is anyone else.
+// HttpOnly cookie, which is by design unreadable to #24's delete button: the button sends no
+// token, and the cookie is the only thing it has.
+//
+// THE BODY TOKEN WINS, and the cookie is the fallback. The first cut had it the other way
+// round and wrote it as `cookie || body`, which made the cookie unconditional: whenever any
+// session cookie was present the body token was never hashed and never consulted. One
+// browser can hold two invites — a clicked A and an emailed, unclicked B — so a candidate
+// asking to erase B erased A instead, and was told `{ok: true}`. On a shared or kiosk
+// machine the two invites need not even belong to the same person. An erase names its
+// target; an ambient credential must not silently outrank the named one.
+//
+// The cookie is still tried, but only after an explicit token matched nothing — which is
+// both the ordinary signed-in case (#24's button, no body at all) and the reason the store
+// now reports `deleted` rather than a bare ok.
 
 import { deleteInviteByTokenHash, hashToken } from "../../../src/portal/store.js";
 import { clearCookie, readCookie } from "../../../src/prep/tokens.js";
@@ -35,17 +46,28 @@ export async function onRequestPost(context) {
       return json({ error: "unexpected_fields", fields: unexpected }, 400);
     }
 
-    const token = readCookie(request) || String(body.token ?? "").trim();
+    const bodyToken = String(body.token ?? "").trim();
+    const cookieToken = readCookie(request);
     // Still a 400 with neither. An erase with nothing naming what to erase is a caller fault
     // — and answering the idempotent {ok: true} to it would tell a candidate their data was
     // deleted when no statement ran.
-    if (!token) return json({ error: "missing_fields" }, 400);
+    if (!bodyToken && !cookieToken) return json({ error: "missing_fields" }, 400);
 
-    await deleteInviteByTokenHash(env.DB, await hashToken(token));
+    let deleted = 0;
+    if (bodyToken) {
+      ({ deleted } = await deleteInviteByTokenHash(env.DB, await hashToken(bodyToken)));
+    }
+    if (!deleted && cookieToken) {
+      ({ deleted } = await deleteInviteByTokenHash(env.DB, await hashToken(cookieToken)));
+    }
     // Clear the session on the way out. A candidate who just erased everything must not keep
     // a cookie pointing at a row that no longer exists — every /prep page would bounce them
     // to the login screen with no explanation, which reads like the delete failed.
-    return new Response(JSON.stringify({ ok: true }), {
+    //
+    // `deleted` is reported rather than flattened away. The 200 stays idempotent, so nothing
+    // #17 decided changes; but a stale credential now answers `{ok: true, deleted: 0}`
+    // instead of claiming an erasure that never ran, and #24 can say which happened.
+    return new Response(JSON.stringify({ ok: true, deleted }), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
