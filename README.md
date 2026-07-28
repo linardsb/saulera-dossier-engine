@@ -10,7 +10,8 @@ process. **That note is the product. The generation is the cheap part.**
 ## Status
 
 Live at **https://saulera-dossier-engine.pages.dev** — a Cloudflare Pages site serving
-`public/`. Still no secrets and no build step.
+`public/`. Still no build step; one secret since 28 Jul 2026 (`ANTHROPIC_API_KEY`, see
+**Model access** under Decisions and `DEPLOY.md` §5b).
 
 The Pages Functions and the D1 schema for the client knowledge store are **live**: #5 merged
 on 27 July 2026, which put `functions/` on `main`. Both D1 databases are created, bound and
@@ -32,11 +33,12 @@ note. The non-personal event counter ships with it, so the epic's primary metric
 rather than a memory. Its D1 databases are created, bound and migrated on both environments,
 and it went live when #5 merged, because that is what put `functions/` on `main`.
 
-**The tool is at `/`** (27 Jul 2026, #6 and #8). One screen: pick a client, paste or open the
-brief and the CV, copy an assembled prompt, run it in your own Claude session, paste the reply
-back, read a pack where every claim carries its source, and copy it. The two routes either side
-of that session are `POST /api/prompt` and `POST /api/verify`, and **neither calls a model** —
-see **Model access** under Decisions for why, and for what was built and reverted first.
+**The tool is at `/`** (27 Jul 2026, #6 and #8; primary route superseded 28 Jul 2026). One
+screen: pick a client, paste, open or drop the brief and the CV, press **Generate the pack**,
+and read a pack where every claim carries its source — the model call now happens in
+`POST /api/generate`, on this deployment. The seam routes (`POST /api/prompt` and
+`POST /api/verify`) remain as the fallback: copy the prompt, run it in your own Claude
+session, paste the reply back. See **Model access** under Decisions for the full history.
 
 Every claim passes a deterministic literal-quote check before the recruiter sees it. Anything
 that fails is demoted, marked with the word, shown with the quote it could not stand up, and
@@ -62,17 +64,33 @@ without the doc to hand.
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
 
-**Model access: the recruiter's own Claude session. No API key, no model call from Pages.**
-(27 Jul 2026, #6 and #8.) **Nothing in this deployment calls a model.** There is no
-`ANTHROPIC_API_KEY`, no runtime SDK and no `nodejs_compat`.
+**Model access: `POST /api/generate` on this deployment, behind a per-deployment API key.
+The recruiter's own Claude session is the fallback route.** (28 Jul 2026, owner decision,
+superseding the whole entry below.) The tab trip was designed honestly and it was still the
+part of the loop the owner felt every time, so the trade was re-taken with eyes open: one
+`ANTHROPIC_API_KEY` Pages secret per agency deployment, ~15–25p per pack at Claude Opus 5
+rates, a key to issue and rotate — bought back as one click from inputs to verified pack.
+`3d72737` was restored on top of the seam rather than instead of it: the seam stays fully
+working (a deployment with no key answers `no_model_key` in words and the screen points at
+the manual buttons), the single-model-call-boundary rule from architecture §5.6 stands, and
+the verifier runs server-side on both routes. The data-posture sentence narrows accordingly:
+candidate text now transits this deployment's Function and Anthropic's API under API-tier
+terms for the primary route; still no store, still no copy kept after the pack is produced.
+
+The paragraphs below are the 27 Jul decision this supersedes, kept because its reasoning
+still governs the fallback route and the key's handling:
+
+**Model access (superseded): the recruiter's own Claude session. No API key, no model call
+from Pages.** (27 Jul 2026, #6 and #8.)
 
 A Pages Function *cannot* use the subscription: subscription auth is a short-lived OAuth
 token in a local credential file that the CLI refreshes, and a Function has no filesystem and
 no process to refresh it. So a model call from Pages means a per-token API key.
 
 **This was built the other way first, and reverted.** `3d72737` added `POST /api/generate`
-calling `claude-opus-5` through `@anthropic-ai/sdk`; `5e311d1` reverted it. The revert stands
-and it is not a decision to reopen per ticket.
+calling `claude-opus-5` through `@anthropic-ai/sdk`; `5e311d1` reverted it. The revert stood
+until 28 Jul 2026, when the owner — not a ticket — reopened it after using the flow; that is
+the supersession above, and `3d72737` is what came back.
 
 What replaced it is a **seam in two halves, either side of the recruiter's own Claude session**:
 `POST /api/prompt` assembles the client note, the brief, the CV and the pack schema into one

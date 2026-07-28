@@ -1,0 +1,46 @@
+/* The font files behind the --font-* tokens in tokens.css, which named these families from #5
+   onward with nothing on disk behind them. Self-hosted in /fonts so no request leaves the
+   origin: this page accepts CVs, and a third-party font host in the waterfall is a thing to
+   have to explain to a trust.
+
+   Sources and licences, checked 28 Jul 2026: Aspekta (Ivo Dolenc, MIT) from the stackai design
+   reference; Geist (Vercel) and DM Mono (Colophon) under the SIL Open Font License from Google
+   Fonts' hosted woff2. The Geist files are the latin subset — pasted text outside latin falls
+   back to system-ui, which is the stack's next entry and costs nothing.
+
+   Aspekta ships as its single 500 face on purpose (that is the stackai register: family carries
+   the weight). app.css sets headings to 500 so nothing asks the browser to synthesise a bold
+   that does not exist. Geist carries a real 600 for the two places body text uses weight as a
+   signal: a claim's requirement and the selected client's name. */
+
+@font-face {
+  font-family: "Aspekta 500";
+  src: url("/fonts/Aspekta500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DM Mono";
+  src: url("/fonts/DMMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

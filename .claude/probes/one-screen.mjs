@@ -748,13 +748,253 @@ async function probe10() {
   await page.close();
 }
 
+async function probe11() {
+  // The MVP is one client (PRD §6). With exactly one and no deep link, the screen picks it:
+  // no click, no confirm, and the selection is real enough to build a prompt with. The URL
+  // gains the id via replaceState, so there is no extra history entry to Back through.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "GET", match: "^/api/clients$", status: 200,
+        body: { clients: [LIST.clients[0]] } },
+    ]),
+  });
+  await page.eval(SETTLE(250));
+  const current = await page.eval(`
+    (function () {
+      var row = document.querySelector('.client-row[aria-current="true"]');
+      return row ? row.dataset.id : null;
+    })()`);
+  await page.eval(FILL("brief", "Band 6 community nurse."));
+  await page.eval(FILL("cv", "Registered nurse. NMC registration current to Mar 2027."));
+  await page.eval(CLICK("copy-prompt"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  check(
+    "11", "a sole client is selected on load, without a click, well enough to copy a prompt",
+    current === A && r.url.includes(A) && r.confirms === 0 &&
+      r.waitingHidden === false && r.clipboard.length === 1,
+    `aria-current row=${current} · url=${r.url} · confirms=${r.confirms}\n` +
+      `        reached act 2=${!r.waitingHidden} · clipboard writes=${r.clipboard.length}`,
+  );
+  await page.close();
+}
+
+async function probe12() {
+  // The return path is one paste. During the wait, ⌘V anywhere fills the reply, and a paste
+  // that carries a pack runs the check itself — no click into the textarea, no button. The
+  // check must still send the FROZEN cv, exactly as the button path does.
+  const page = await openScreen({ routes: baseRoutes() });
+  await primeInputs(page);
+  await page.eval(CLICK("copy-prompt"));
+  await page.eval(SETTLE(250));
+  await page.eval(`
+    (function () {
+      var dt = new DataTransfer();
+      dt.setData("text/plain", '{"role_title":"Band 6 Community Nurse"}');
+      document.dispatchEvent(new ClipboardEvent("paste",
+        { clipboardData: dt, bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  await page.eval(SETTLE(400));
+
+  const r = await page.eval(READ);
+  const verifies = r.calls.filter((c) => c.path === "/api/verify");
+  const sentCv = verifies.length ? JSON.parse(verifies[0].body).cv : null;
+  check(
+    "12", "one paste during the wait fills the reply and runs the check itself",
+    (r.reply ?? "").includes('"role_title"') && verifies.length === 1 &&
+      r.packHidden === false &&
+      sentCv === "Registered nurse. NMC registration current to Mar 2027.",
+    `reply=${JSON.stringify(r.reply)} · /api/verify calls=${verifies.length} ` +
+      `· pack rendered=${!r.packHidden}\n` +
+      `        cv sent=${JSON.stringify(sentCv)} (must be the frozen one)`,
+  );
+  await page.close();
+}
+
+async function probe13() {
+  // A paste that is not a pack fills the box and fires nothing. An error flash over a partial
+  // copy would punish the recruiter for a habit the previous act just taught them.
+  const page = await openScreen({ routes: baseRoutes() });
+  await primeInputs(page);
+  await page.eval(CLICK("copy-prompt"));
+  await page.eval(SETTLE(250));
+  await page.eval(`
+    (function () {
+      var dt = new DataTransfer();
+      dt.setData("text/plain", "Here is what Claude said so far.");
+      document.dispatchEvent(new ClipboardEvent("paste",
+        { clipboardData: dt, bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const verifies = r.calls.filter((c) => c.path === "/api/verify");
+  check(
+    "13", "a paste that is not a pack fills the reply and does not fire the check",
+    r.reply === "Here is what Claude said so far." && verifies.length === 0 &&
+      r.waitingHidden === false && r.packHidden === true,
+    `reply=${JSON.stringify(r.reply)} · /api/verify calls=${verifies.length} ` +
+      `· still in act 2=${!r.waitingHidden}`,
+  );
+  await page.close();
+}
+
+async function probe14() {
+  // A file dropped on the CV column lands in the textarea through the extractor — the same
+  // path as the picker, so the same honest failures. The dragover must be claimed (or the
+  // browser navigates to the file) and the drag state must clear after the drop.
+  const page = await openScreen({ routes: baseRoutes() });
+  await page.eval(CLICK_ROW(A));
+  await page.eval(SETTLE(120));
+  await page.eval(`
+    (function () {
+      var f = new File(
+        ["Registered nurse. NMC registration current to Mar 2027. Community caseload " +
+         "experience across Sussex."],
+        "cv.txt", { type: "text/plain" });
+      var dt = new DataTransfer();
+      dt.items.add(f);
+      var col = document.getElementById("cv").closest(".input-col");
+      col.dispatchEvent(new DragEvent("dragover",
+        { dataTransfer: dt, bubbles: true, cancelable: true }));
+      window.__probe.dragClaimed = col.classList.contains("is-dragover");
+      col.dispatchEvent(new DragEvent("drop",
+        { dataTransfer: dt, bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  await page.eval(SETTLE(400));
+
+  const r = await page.eval(READ);
+  const claimed = await page.eval("window.__probe.dragClaimed");
+  const cleared = await page.eval(
+    `!document.getElementById("cv").closest(".input-col").classList.contains("is-dragover")`);
+  check(
+    "14", "a file dropped on the CV column lands in the textarea through the extractor",
+    claimed === true && cleared === true &&
+      (r.cv ?? "").includes("NMC registration current") &&
+      (r.inputsState ?? "").trim() === "",
+    `dragover claimed=${claimed} · drag state cleared after drop=${cleared}\n` +
+      `        cv=${JSON.stringify((r.cv ?? "").slice(0, 60))} ` +
+      `· state line=${JSON.stringify(r.inputsState)}`,
+  );
+  await page.close();
+}
+
+async function probe15() {
+  // The primary route (28 Jul 2026): one click on Generate produces a rendered, verified pack
+  // with zero trips through /api/verify, the inputs frozen while it runs, and the same act 3
+  // as the manual route — including the copy action.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "POST", match: "^/api/generate$", status: 201, delay: 300, body: VERIFIED },
+    ]),
+  });
+  await primeInputs(page);
+  await page.eval(CLICK("generate"));
+  await page.eval(SETTLE(100));
+
+  const during = await page.eval(READ);
+  const mode = await page.eval(
+    `document.getElementById("act-waiting").classList.contains("is-generating")`);
+  await page.eval(SETTLE(500));
+
+  const r = await page.eval(READ);
+  const generateCalls = r.calls.filter((c) => c.path === "/api/generate").length;
+  const verifyCalls = r.calls.filter((c) => c.path === "/api/verify").length;
+  await page.eval(CLICK("copy-pack"));
+  await page.eval(SETTLE(200));
+  const after = await page.eval(READ);
+
+  check(
+    "15", "Generate runs the whole loop in the page: one POST, frozen inputs, pack, copy",
+    during.waitingHidden === false && during.briefReadOnly === true && mode === true &&
+      r.packHidden === false && r.claimCount === 2 && generateCalls === 1 &&
+      verifyCalls === 0 && after.clipboard.some((c) => c.text === "SUBMISSION PACK"),
+    `mid-flight: act 2 shown=${!during.waitingHidden} · inputs frozen=${during.briefReadOnly} ` +
+      `· generating mode=${mode}\n` +
+      `        pack rendered=${!r.packHidden} · claims=${r.claimCount} · ` +
+      `/api/generate=${generateCalls} · /api/verify=${verifyCalls}\n` +
+      `        pack copied=${JSON.stringify(after.clipboard.map((c) => c.text))}`,
+  );
+  await page.close();
+}
+
+async function probe16() {
+  // The deployment with no key yet. Generate must fail back to act 1 with the inputs kept and
+  // thawed, a message naming both remedies, and the manual route still working — day one of a
+  // fresh deployment is exactly this state.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "POST", match: "^/api/generate$", status: 503, body: { error: "no_model_key" } },
+    ]),
+  });
+  await primeInputs(page);
+  await page.eval(CLICK("generate"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  await page.eval(CLICK("copy-prompt"));
+  await page.eval(SETTLE(300));
+  const manual = await page.eval(READ);
+
+  check(
+    "16", "no_model_key falls back to act 1 with inputs kept, and the manual route still works",
+    r.waitingHidden === true && r.briefReadOnly === false &&
+      r.cv.includes("NMC registration current") &&
+      (r.inputsState ?? "").includes("no model key") &&
+      (r.inputsState ?? "").includes("your own Claude") &&
+      manual.waitingHidden === false && manual.clipboard.length === 1,
+    `back in act 1=${r.waitingHidden} · inputs thawed=${!r.briefReadOnly} · kept=${r.cv.includes("NMC")}\n` +
+      `        message=${JSON.stringify(r.inputsState)}\n` +
+      `        manual route after: act 2=${!manual.waitingHidden} · ` +
+      `prompt copied=${manual.clipboard.length}`,
+  );
+  await page.close();
+}
+
+async function probe17() {
+  // /api/generate is slow and the recruiter switches client mid-flight. The landing pack must
+  // render nothing — same stale-write class as probes 1 and 2, on the new route.
+  const page = await openScreen({
+    confirm: true,
+    routes: baseRoutes([
+      { method: "POST", match: "^/api/generate$", status: 201, delay: 500, body: VERIFIED },
+    ]),
+  });
+  await primeInputs(page);
+  await page.eval(`
+    (function () {
+      setTimeout(function () {
+        document.querySelector('.client-row[data-id="${B}"]').click();
+      }, 60);
+      return true;
+    })()`);
+  await page.eval(CLICK("generate"));   // switch fires at +60ms, response at +500ms
+  await page.eval(SETTLE(1200));
+
+  const r = await page.eval(READ);
+  check(
+    "17", "an /api/generate landing after a client switch renders no pack",
+    r.url.includes(B) && r.packHidden === true && r.claimCount === 0 &&
+      r.briefReadOnly === false && (r.elapsed ?? "") === "",
+    `url=${r.url} · act-pack hidden=${r.packHidden} · claims=${r.claimCount}\n` +
+      `        inputs thawed by the switch=${!r.briefReadOnly} · ` +
+      `clock cleared=${JSON.stringify(r.elapsed)} · confirms=${r.confirms}`,
+  );
+  await page.close();
+}
+
 /* ── run ─────────────────────────────────────────────────────────────────────────────── */
 
 const server = await serveStatic();
 const chrome = await startChrome();
 try {
   for (const probe of [probe1, probe2, probe3, probe4, probe5, probe6, probe7,
-                       probe8, probe9, probe10]) {
+                       probe8, probe9, probe10, probe11, probe12, probe13, probe14,
+                       probe15, probe16, probe17]) {
     await probe();
   }
 } finally {

@@ -200,6 +200,21 @@ export async function updateClient(db, id, patch = {}) {
   return getClient(db, client.id);
 }
 
+/**
+ * Delete a client, its note and its events.
+ *
+ * The events go too, by the schema's own ON DELETE CASCADE rather than a second statement
+ * here. That is deliberate about the metric: a deleted client is the agency saying this row
+ * should not exist, and packs counted against a client that no longer does are a number about
+ * nothing. The 404-before-write mirrors updateClient, and returning the deleted client's name
+ * lets the screen say what it removed rather than a bare ok.
+ */
+export async function deleteClient(db, id) {
+  const client = await getClient(db, id); // not_found before deleting, same as updateClient
+  await db.prepare("DELETE FROM clients WHERE id = ?").bind(client.id).run();
+  return { ok: true, name: client.name };
+}
+
 // ── agency ─────────────────────────────────────────────────────────────────────────────
 
 /**

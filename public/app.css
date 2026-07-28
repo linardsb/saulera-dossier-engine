@@ -12,7 +12,8 @@
 
 body {
   margin: 0;
-  padding: var(--space-8) var(--space-4);
+  /* Top padding lives on the top bar now, so the hairline sits close to the window edge. */
+  padding: 0 var(--space-4) var(--space-8);
   background: var(--background);
   color: var(--text-primary);
   font-family: var(--font-body);
@@ -27,9 +28,13 @@ main {
 
 /* ── type ──────────────────────────────────────────────────────────────────────────────── */
 
+/* Weight 500, not the browser's 700: Aspekta ships as its single 500 face (fonts.css), and
+   asking for bold would synthesise one. Medium headings are also the stackai register — the
+   family carries the weight. */
 h1 {
   font-family: var(--font-ui);
   font-size: var(--text-h2);
+  font-weight: 500;
   line-height: 1.2;
   margin: 0 0 var(--space-4);
   text-wrap: balance;
@@ -38,6 +43,7 @@ h1 {
 h2 {
   font-family: var(--font-ui);
   font-size: var(--text-h3);
+  font-weight: 500;
   line-height: 1.2;
   margin: 0;
   text-wrap: balance;
@@ -71,6 +77,62 @@ a {
   box-shadow: 0 0 0 var(--focus-inner) var(--text-primary);
 }
 
+/* ── the top bar ───────────────────────────────────────────────────────────────────────── */
+
+/* Shared by both screens; the hairline is what separates chrome from work. Not sticky: the
+   pages scroll long in act 3 and chrome that follows would sit over the pack. */
+.topbar {
+  border-bottom: 1px solid var(--border-hairline);
+  padding: var(--space-2) 0;
+  margin-bottom: var(--space-8);
+}
+
+.topbar-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.topbar-brand {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  color: var(--text-muted);
+}
+
+.topbar-nav {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* Hit area 44px from padding, per the tap-target floor. The active screen is never colour
+   alone: full text colour AND the accent underline; the inactive one is muted with no line.
+   Hover adds contrast (muted to primary), never removes it. */
+.topbar-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  padding: 0 var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color var(--duration-1) var(--ease-out);
+}
+
+.topbar-nav a:hover { color: var(--text-primary); }
+
+.topbar-nav a[aria-current="page"] {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: var(--space-1);
+}
+
 /* ── card ──────────────────────────────────────────────────────────────────────────────── */
 
 .card {
@@ -82,12 +144,17 @@ a {
 
 /* ── buttons ───────────────────────────────────────────────────────────────────────────── */
 
+/* The default .btn is the ghost secondary (stackai's pattern): visible border, plain surface,
+   so "Start again" and its kin read pressable rather than being grey text that happens to
+   respond. The primary below overrides the border to transparent as before. */
 .btn {
   font-family: var(--font-ui);
   font-size: var(--text-body);
   line-height: 1.5;
   padding: var(--space-2) var(--space-4);
-  border: 1px solid transparent;
+  background: var(--background);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   /* CRAFT.md's hit-area floor, actually met. This read --space-8 with a comment claiming 44px;
@@ -97,12 +164,21 @@ a {
               transform var(--duration-1) var(--ease-out);
 }
 
+.btn:hover { border-color: var(--text-primary); }
+
 .btn-primary {
   /* Near-black on the accent, not white. White on --accent measures 3.00:1 and fails the
      4.5:1 floor; --text-primary on it is 5.62:1. stackai's own button spec says the same. */
   background: var(--accent);
   color: var(--text-primary);
+  border-color: transparent;
 }
+
+/* The destructive one. --danger text (4.5:1 held by the tokens gate) on the plain surface;
+   hover draws the border in the same colour so the whole control says what it is before the
+   confirm does. */
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { border-color: var(--danger); }
 
 /* Hover draws the border in rather than darkening the fill. Darkening it would take the label
    from 5.62:1 to about 4.4:1, which is hover REMOVING contrast — the thing CRAFT.md forbids.
@@ -160,10 +236,37 @@ a {
   resize: vertical;
 }
 
+.input::placeholder,
+.textarea::placeholder { color: var(--text-muted); }
+
+/* The frozen state, visible. Act 1's boxes go readOnly when the prompt is copied (the verifier
+   must search the exact text the model read) and previously looked editable while refusing
+   edits — the surface tone is what says "kept, not editable" without taking the text away. */
+.textarea[readonly] { background: var(--surface); }
+
 /* ── layout ────────────────────────────────────────────────────────────────────────────── */
 
 .page-head { margin-bottom: var(--space-12); }
 .page-sub  { color: var(--text-muted); margin: 0; }
+
+/* The journey map: the three act chips, shown before the acts exist. Reads as a row on a
+   desktop and stacks on a phone. */
+.steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  font-size: var(--text-body);
+  color: var(--text-muted);
+}
+
+.steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
 
 .workspace {
   display: grid;
@@ -186,9 +289,11 @@ a {
 
 .rail {
   background: var(--surface);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius);
   padding: var(--space-4);
   min-width: 0;
+  box-shadow: var(--shadow-card);
 }
 
 .rail-head {
@@ -299,25 +404,16 @@ a {
 
 /* ── the note scaffold: the signature element ──────────────────────────────────────────── */
 
-.scaffold { margin-top: var(--space-12); }
-
-.scaffold-head {
-  font-family: var(--font-ui);
+/* One muted line between the label and the box, so the four prompts are in view WHILE writing
+   — which is the whole job, and which "below a 24-row textarea" never did. */
+.scaffold-line {
   font-size: var(--text-caption);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--text-muted);
   margin: 0 0 var(--space-2);
 }
 
-.scaffold-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-size: var(--text-caption);
-  color: var(--text-muted);
-  line-height: 1.8;
-}
+/* Removal sits well away from Save, past its own stretch of whitespace. */
+.editor-remove { margin-top: var(--space-12); }
 
 /* ── the agency strip ──────────────────────────────────────────────────────────────────── */
 
@@ -334,7 +430,23 @@ a {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.agency-sub {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  max-width: 60ch;
   margin: 0 0 var(--space-4);
+}
+
+/* The line under a control's label that says what the control means in the reader's words.
+   Same voice as .scaffold-line: caption size, muted, close to what it explains. */
+.field-hint {
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+  max-width: 60ch;
+  margin: 0 0 var(--space-2);
 }
 
 .agency-controls {
@@ -375,7 +487,7 @@ a {
    carries it at line 183. */
 .stage { min-width: 0; }
 
-.rail-link { font-size: var(--text-body); margin: 0; }
+.rail-hint { font-size: var(--text-body); color: var(--text-muted); margin: 0; }
 
 /* Rhythm BETWEEN the acts is --space-12 and within them --space-4, so the pacing of the flow is
    whitespace rather than dividers. There is not one rule between these three sections. */
@@ -392,15 +504,36 @@ a {
 .act.is-entering { opacity: 0; }
 
 /* Same treatment as .rail-head, deliberately: the act numbering and the rail label are one
-   grammar, not two. The number is real information here, so it is in the text and not a
-   decorative glyph. */
+   grammar, not two. */
 .act-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-family: var(--font-ui);
   font-size: var(--text-caption);
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
   margin: 0 0 var(--space-4);
+}
+
+/* The step number as a chip, so the three-act shape is visible at a glance rather than read
+   out of running text. aria-hidden in the markup: the heading names the act; the number is
+   the visual rhythm. */
+.act-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  height: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  letter-spacing: 0;
+  color: var(--text-primary);
 }
 
 .act-head-row {
@@ -453,19 +586,52 @@ a {
   margin-bottom: var(--space-1);
 }
 
-/* The file button is drawn by the engine and cannot be restyled to the token set, so the rule
-   here only guarantees the hit area and stops a long filename widening the column. */
+/* The engine's own button, restyled to the ghost-button grammar through the standard
+   ::file-selector-button pseudo-element (Chrome 89+, Safari 14.1+ — this deployment's
+   engines). The filename text beside it stays muted; the input still only guarantees hit
+   area and refuses to widen the column. */
 .file-input {
   font-family: var(--font-body);
   font-size: var(--text-body);
-  color: var(--text-primary);
+  color: var(--text-muted);
   min-height: var(--tap-target);
   max-width: 100%;
+}
+
+.file-input::file-selector-button {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  padding: var(--space-1) var(--space-3);
+  margin-right: var(--space-2);
+  background: var(--background);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--duration-1) var(--ease-out);
+}
+
+.file-input::file-selector-button:hover { border-color: var(--text-primary); }
+
+/* The column answering a file dragged over it. Colour is not the only signal: the state is
+   entered by the recruiter's own drag, and the file label says "drop one on the box" in
+   words. --accent as a border is a fill use, never text. */
+.input-col.is-dragover .textarea {
+  border-color: var(--accent);
+  background: var(--surface);
 }
 
 .fallback { margin-top: var(--space-6); }
 
 /* ── act 2: the wait ───────────────────────────────────────────────────────────────────── */
+
+/* Act 2's two modes (28 Jul 2026). Manual children hide while a pack is generating here and
+   after it arrives; the generating note shows only then. Display, not visibility: the reply
+   box must not hold layout space in a mode where it cannot be used. */
+#act-waiting .generating-only { display: none; }
+#act-waiting.is-generating .generating-only { display: block; }
+#act-waiting.is-generating .manual-only { display: none; }
 
 /* Real seconds, monospaced with tabular figures so the count does not jitter the row it sits
    in. Honest by construction: there is no percentage to invent, because the work is happening
@@ -479,10 +645,16 @@ a {
 
 /* ── act 3: the pack, the signature surface ────────────────────────────────────────────── */
 
+/* The headline number of the whole product: how much of this pack stands on evidence. Body
+   size, not caption, and each count wears its mark's colour WITH its word — the same
+   never-colour-alone rule the marks themselves follow. */
 .pack-summary {
-  font-size: var(--text-caption);
+  font-size: var(--text-body);
   color: var(--text-muted);
 }
+
+.summary-sourced   { color: var(--verified); font-weight: 600; }
+.summary-unverified { color: var(--unverified); font-weight: 600; }
 
 .renderer-note {
   font-size: var(--text-body);
@@ -490,15 +662,18 @@ a {
 }
 
 /* Prose a client will read, so it takes CRAFT's 65-75ch measure and the 16px body size rather
-   than the 14px the surrounding chrome uses. */
+   than the 14px the surrounding chrome uses. The card lift matches the rail: the two surfaces
+   that hold the product's content are the two that rise off the page. */
 .pack {
   background: var(--surface);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius);
   padding: var(--space-6);
   font-size: var(--text-note);
   max-width: 68ch;
   min-width: 0;
   overflow-wrap: anywhere;
+  box-shadow: var(--shadow-card);
 }
 
 .pack-role { font-size: var(--text-h3); margin: 0 0 var(--space-1); }
@@ -600,6 +775,18 @@ a {
 }
 
 .pack-questions li { margin-bottom: var(--space-2); }
+
+/* ── mobile density ────────────────────────────────────────────────────────────────────── */
+
+/* Under the one-column breakpoint the rail sits above the work, so every wasted pixel in it
+   pushes the inputs further off the first screen. Measured before: the rail alone consumed
+   most of a 390px viewport's height. */
+@media (max-width: 859px) {
+  .rail { padding: var(--space-3); }
+  .client-row { margin-bottom: 0; }
+  .topbar { margin-bottom: var(--space-6); }
+  .page-head { margin-bottom: var(--space-8); }
+}
 
 /* ── reduced motion ────────────────────────────────────────────────────────────────────── */
 

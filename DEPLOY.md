@@ -1,16 +1,16 @@
 # Deploy — saulera dossier engine on Cloudflare Pages
 
 `public/` served statically, plus Pages Functions over a D1 database for the client knowledge
-store. No build step, no framework, no secrets.
+store. No build step, no framework, one secret.
 
-**Nothing here calls a model.** The Functions read and write the store and do nothing else —
-see **Model access** and **Pages Functions** under Decisions in `README.md`.
+**One Function calls a model** (28 Jul 2026 — the owner superseded the no-key decision):
+`POST /api/generate`, behind the `ANTHROPIC_API_KEY` secret in section 5b. Every other
+Function reads and writes the store or serves the manual seam — see **Model access** under
+Decisions in `README.md`. Without the secret the deployment still works end to end through
+the recruiter's own Claude session; the Generate button says so and points there.
 
 **Push does not currently deploy** — see **Deploying** at the bottom. `git push` then
 `./scripts/deploy.py`.
-
-Packs are generated in Claude Code on the subscription, not by this deployment. See **Model
-access** under Decisions in `README.md`.
 
 This is written as a checklist because the second agency deployment should not be a memory
 test. The reasons matter as much as the clicks — particularly step 3, which looks like
@@ -30,8 +30,8 @@ something you could simplify and cannot.
 >
 > **Created with `scripts/setup-access.py`, not by clicking.** Steps 2–4 below are still the
 > canonical description of *what* the end state must be and why — read them before changing
-> anything — but the script is the faster path and is idempotent. Step 5b is a no-op: there
-> are still no secrets on this deployment.
+> anything — but the script is the faster path and is idempotent. Step 5b now sets the one
+> secret this deployment holds.
 
 ---
 
@@ -294,26 +294,44 @@ the dashboard.
 | `200` returning `index.html` instead of JSON | `functions/` was not picked up | confirm it is at the repo root and the project root directory is `/`; the build log should say `Found Functions directory at /functions` |
 | the build fails with a module error | a Function could not bundle its `../../src/` imports | move the shared modules to `functions/_lib/` and re-point the imports; the tests can import from anywhere |
 | `500 {"error":"internal"}` on a route that used to work | the migration did not run against this environment's database | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations |
+| `503 {"error":"no_model_key"}` from `/api/generate` only | the `ANTHROPIC_API_KEY` secret is not set in this environment | section 5b. Production and preview are set separately. The manual route works meanwhile |
+| `502 {"error":"model_refused"}` from `/api/generate` | the model (and its fallback) declined the request | read the inputs for anything that reads as a security or medical-research document rather than a brief and a CV; the manual route will show Claude's own explanation |
+| `502 {"error":"truncated"}` or `502 {"error":"no_pack"}` from `/api/generate` | the model's answer was cut off or was not a pack | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
 
 ---
 
-## 5b. Secrets · none
+## 5b. Secrets · one, `ANTHROPIC_API_KEY`
 
-**There are still no secrets on this deployment, and #6 and #8 did not add one.** No model
-call, no `ANTHROPIC_API_KEY`, no runtime SDK, no `nodejs_compat`. A Pages Function cannot use
-subscription auth (short-lived OAuth token in a local credential file; a Function has no
-filesystem and no process to refresh it), so a model call from here would need a per-token API
-key.
+**Superseded 28 Jul 2026 by the owner: the model call from Pages is back.** This section used
+to end "if it ever comes back, this section is the one that changes, and it changes to say
+there IS a secret" — this is that change. `3d72737` was restored on top of the seam;
+`POST /api/generate` is the only Function that reads the key, and it remains the single
+model-call boundary (architecture §5.6).
 
-The generation seam is built around that rather than through it. `POST /api/prompt` assembles
-the string, the recruiter runs it in **their own** Claude session, and `POST /api/verify` checks
-and renders the reply. Both are pure Functions over D1 and neither holds a credential. A model
-call from Pages was built (`3d72737`) and reverted (`5e311d1`); if it ever comes back, this
-section is the one that changes, and it changes to say there IS a secret.
+Why a key and not the subscription, still: a Pages Function cannot use subscription auth
+(short-lived OAuth token in a local credential file; a Function has no filesystem and no
+process to refresh it). A model call from Pages is API-key-billed by definition — roughly
+15–25p per pack at Claude Opus 5 rates, a few pounds a month at this volume.
 
-The deployment does now have a **binding**, added in section 5. A binding is not a secret: it
+**Set it, per environment:**
+
+1. Create the key at `console.anthropic.com` → API keys. One key per agency deployment, named
+   after the Pages project, so a leak is revocable without touching any other deployment.
+2. `npx wrangler pages secret put ANTHROPIC_API_KEY --project-name saulera-dossier-engine`
+   (paste the key when prompted). Or dashboard: the Pages project → Settings → Variables and
+   secrets → Add → type **Secret**, name `ANTHROPIC_API_KEY`, both environments.
+3. Local dev: put `ANTHROPIC_API_KEY=sk-ant-...` in `.dev.vars` at the repo root (gitignored —
+   verify with `git check-ignore .dev.vars` before writing the key into it).
+
+**Until the secret is set, nothing is broken.** `/api/generate` answers
+`503 {"error":"no_model_key"}`, the screen says so in words and points at the manual route,
+and packs still get made through the recruiter's own Claude session. That is also the
+fallback if the key is ever revoked in an incident: delete the secret, redeploy nothing,
+the tool degrades to the seam instead of going down.
+
+The deployment also has a **binding**, added in section 5. A binding is not a secret: it
 is a reference to a resource in the same account, it carries no credential, and it is set as
 project configuration rather than as an encrypted variable.
 
@@ -329,7 +347,10 @@ page and tells you nothing about the site itself. Log in in a browser first.
 - [ ] `tokens.css` and `app.css` load; the neutral palette renders, no off-palette colour
 - [ ] `/clients` loads, a client can be added, and a note saves and survives a reload
 - [ ] `/api/clients`, `/api/events` and `/api/agency` all return JSON, not a `503`
-- [ ] On `/`: a client can be picked, and **Copy the prompt** puts a prompt on the clipboard
+- [ ] On `/`: a client can be picked, and **Generate the pack** produces a rendered pack with
+      the provenance summary, without leaving the page (needs the 5b secret; without it the
+      button must answer with the no-model-key message, not a blank failure)
+- [ ] Still on `/`: **Or copy the prompt and open Claude** puts a prompt on the clipboard
       and freezes the brief and the CV
 - [ ] Pasting a real Claude reply and pressing **Read the pack** renders a pack where every
       claim carries a source word, and anything unverified says so
@@ -364,19 +385,24 @@ Access — re-verify after any change to the applications or the policy:
 
 - **Custom domain.** `<project>.pages.dev` is enough until an agency is real. Whose domain
   it should be — saulera's or the agency's — is a branding decision, not a DNS one.
-- **Cloudflare Access itself** (27 Jul 2026) — steps 2–4, per the banner at the top. Must be
-  restored before #6. This is the only deferral on this list with a hard deadline attached.
+- **Cloudflare Access itself: done** (27 Jul 2026, #12). This entry used to defer steps 2–4 with
+  the only hard deadline on this list attached to it. Both applications exist and both hostnames
+  were verified; the banner at the top of this file is the record. Kept as a line so the one
+  deferral that carried a deadline is visibly discharged rather than quietly gone — and it is
+  load-bearing now in a way it was not when it was written, because since 28 July this
+  deployment holds a key. Access is what stands between `/api/generate` and the world.
 - **`_headers`: partly done** (27 Jul 2026, #8). `public/_headers` now sets
   `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options` on `/*`. **What remains is
   a Content-Security-Policy**, which is the one worth having on a screen that renders model
   output and also the one that breaks a deployment in a way nobody notices until a recruiter
   cannot copy a pack. It needs its own ticket and its own smoke pass.
-- **Web fonts, re-deferred with a reason** (27 Jul 2026, #8). This entry used to say the
-  `.woff2` files land with the recruiter screen. They did not, and this no longer points at #8.
-  There are no font files in the repo, "Aspekta 500" and "Geist" each need a licensing
-  decision, and the `system-ui` fallback renders correctly and costs nothing against the
-  ten-minute guardrail. Fonts are also branding-adjacent, and branding is per-agency config.
-  The `--font-*` tokens exist, so shipping them later is a one-file change.
+- **Web fonts: done** (28 Jul 2026, `95566b2`). Deferred twice before that, most recently on the
+  grounds that there were no font files in the repo and that "Aspekta 500" and "Geist" each
+  needed a licensing decision. The decision was made rather than dodged — Aspekta is MIT, Geist
+  and DM Mono are SIL OFL, all redistributable — and four `.woff2` files now ship self-hosted
+  from `public/fonts/` behind `public/fonts.css`, so no request leaves the origin. The entry's
+  own prediction held: the `--font-*` tokens already existed, and shipping them was a one-file
+  change. Fonts stay branding-adjacent, so an agency swap is still a `tokens.css` edit.
 - **An Access service token, re-scoped** (27 Jul 2026, #8). It would still make the Functions
   curl-able from CI. The original reason — measuring generation latency automatically — is
   gone: there is no model call on this deployment to time. What is measured now is the
