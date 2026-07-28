@@ -47,6 +47,15 @@ that fails is demoted, marked with the word, shown with the quote it could not s
 **never dropped**. `test/seam.test.js` proves that over the real spike fixtures rather than
 asserting it in prose.
 
+**The candidate sees their prep at `/prep/brief`** (28 Jul 2026, #21). The prep brief is a
+`{name, props, children}` payload over a closed vocabulary of ten block names (#19), and
+`public/prep/registry.js` holds one hand-built constructor per name. A name the registry does not
+have is reported to the console and skipped, never injected and never rendered as markup, which
+is what makes "no component renders a finished answer or a score" a fact about the code rather
+than an instruction in a prompt — see §3 of `docs/epics/candidate-portal.architecture.md`. The
+screen renders `public/prep/brief.fixture.json`, a payload derived from #19's own test fixtures,
+until #22 wires the token-gated endpoint that reads `candidate_role.brief_json`.
+
 See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the runbook for
 the deployment.
 

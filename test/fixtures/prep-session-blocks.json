@@ -1,0 +1,53 @@
+[
+  {
+    "name": "QuestionCard",
+    "props": {
+      "question": "Tell me about the last clinical decision you made with nobody available to check it.",
+      "competency_label": "Working autonomously on a rural caseload",
+      "difficulty": "standard"
+    }
+  },
+  {
+    "name": "HelpLadder",
+    "props": {
+      "nudge": "They are listening for how you decided, not for how the visit turned out. What did you weigh up, and what would have changed your mind?",
+      "structure": [
+        "The visit, in one line",
+        "What you noticed that made this a decision",
+        "What you weighed, and what you ruled out",
+        "What you did",
+        "How you knew afterwards it was the right call"
+      ]
+    }
+  },
+  {
+    "name": "FeedbackNote",
+    "props": {
+      "worked": "You named the clinical signs that made you escalate, in the order you noticed them. That is the part a panel can follow.",
+      "improve": "The outcome arrived in your last sentence. Lead with it, then explain how you got there."
+    }
+  },
+  {
+    "name": "ProgressStrip",
+    "props": {
+      "covered": [
+        "Working autonomously on a rural caseload",
+        "Independent wound assessment and management"
+      ],
+      "queued": ["Same-day documentation others rely on"],
+      "note": "You have answered on lone working three times now, and the last one held up under a follow-up question."
+    }
+  },
+  {
+    "name": "DayBeforeMode",
+    "props": {
+      "intro": "Your interview is tomorrow. This is a short run through what you already have, not new practice.",
+      "focus": [
+        "The escalation story, out loud, in under three minutes",
+        "Your wound assessment sequence, from first look to review",
+        "One sentence on why community nursing rather than ward work"
+      ],
+      "note": "Have your NMC PIN and the dates of your community roles somewhere you can reach them."
+    }
+  }
+]
