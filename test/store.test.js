@@ -22,24 +22,29 @@ import {
   NOTE_MAX,
   SEND_FORMATS,
   StoreError,
+  VISIBILITY_KEYS_MAX,
   cleanAgencyName,
   cleanName,
   cleanNote,
   cleanRenderer,
   cleanSendFormat,
+  clientWithFields,
   createClient,
   deleteClient,
   eventCounts,
   getAgency,
   getClient,
   listClients,
+  listVisibleKeys,
   newClientId,
   recordEvent,
   recordInviteEvent,
+  setFieldVisibility,
   updateAgency,
   updateClient,
 } from "../src/store.js";
 import { RENDERERS } from "../src/render/index.js";
+import { fieldKey } from "../src/note-fields.js";
 
 const CLIENT = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -142,7 +147,9 @@ test("listClients returns an empty array rather than undefined on an empty datab
 // ── partial updates, where a deliberate clear is easy to lose ──────────────────────────
 
 test("updateClient with an empty note writes the empty note", async () => {
-  const db = fakeD1([CLIENT, null, CLIENT]);
+  // Four queued results, not three: since #18 a note save also reads the visibility allow-list
+  // and deletes the keys the new note no longer contains. `[]` is that read coming back empty.
+  const db = fakeD1([CLIENT, null, [], CLIENT]);
   await updateClient(db, CLIENT.id, { note: "" });
 
   const update = db.calls.find((c) => /^UPDATE clients/i.test(c.sql));
@@ -194,6 +201,306 @@ test("deleteClient issues exactly one DELETE: the events go by the schema's casc
 
 test("getClient on an unknown id is not_found, not null", async () => {
   assert.equal(await codeOf(() => getClient(fakeD1([null]), "nope")), "not_found");
+});
+
+// ── the candidate-visibility allow-list (#18) ──────────────────────────────────────────
+//
+// A fourth assertion of the same kind as the three in the header: what is bound rather than
+// interpolated, and — the one that matters here — what writes do NOT happen on a rejected
+// request. A permission written despite a 400 is the leak this whole ticket exists to prevent,
+// and it is invisible in a return value.
+
+// A note with two headings, so a prune has something to keep and something to drop.
+const TWO_SECTION_NOTE = "## Their process\n\nTwo stages.\n\n## Practical\n\nThey move fast.";
+const TWO_SECTION_CLIENT = { ...CLIENT, note: TWO_SECTION_NOTE };
+
+test("listVisibleKeys selects field_key alone, never the note and never a JOIN", async () => {
+  const db = fakeD1([[{ field_key: "practical" }, { field_key: "their-process" }]]);
+  const keys = await listVisibleKeys(db, CLIENT.id);
+  assert.deepEqual(keys, ["practical", "their-process"]);
+
+  const sql = db.calls[0].sql;
+  assert.match(sql, /^SELECT field_key FROM note_visibility/i, "one column, from one table");
+  assert.doesNotMatch(sql, /\bjoin\b/i, "a permissions read must never reach clients.note");
+  assert.doesNotMatch(sql, /\bnote\b/i, "note_visibility is the table; the note column is not here");
+  assert.deepEqual(db.calls[0].args, [CLIENT.id], "the id is bound, never interpolated");
+});
+
+test("listVisibleKeys on a client that has shared nothing is [], not undefined", async () => {
+  assert.deepEqual(await listVisibleKeys(fakeD1([[]]), CLIENT.id), []);
+});
+
+test("setFieldVisibility inserts on true and deletes on false, with the key bound", async () => {
+  const on = fakeD1([TWO_SECTION_CLIENT, null, TWO_SECTION_CLIENT, []]);
+  await setFieldVisibility(on, CLIENT.id, { "their-process": true });
+  const insert = on.calls.find((c) => /^INSERT/i.test(c.sql));
+  assert.ok(insert, "ticking should INSERT");
+  assert.match(insert.sql, /^INSERT OR IGNORE INTO note_visibility/i, "re-ticking must be a no-op");
+  assert.deepEqual(insert.args, [CLIENT.id, "their-process"]);
+  assert.doesNotMatch(insert.sql, /created_at/i, "the timestamp is the database's clock");
+
+  const off = fakeD1([TWO_SECTION_CLIENT, null, TWO_SECTION_CLIENT, []]);
+  await setFieldVisibility(off, CLIENT.id, { "their-process": false });
+  const del = off.calls.find((c) => /^DELETE/i.test(c.sql));
+  assert.ok(del, "unticking should DELETE");
+  assert.deepEqual(del.args, [CLIENT.id, "their-process"]);
+
+  // The key is agency-authored text, so it is a value and never part of the statement.
+  for (const db of [on, off]) {
+    for (const call of db.calls) {
+      assert.ok(!call.sql.includes("their-process"), `the key reached the SQL: ${call.sql}`);
+    }
+  }
+});
+
+test("a field key that is not a heading in this note is rejected, and nothing is written", async () => {
+  // R5: an allow-list entry for a heading that does not exist is a permission waiting for a
+  // name. Write `## Salary` six months later and it would already be shared.
+  const db = fakeD1([TWO_SECTION_CLIENT]);
+  assert.equal(
+    await codeOf(() => setFieldVisibility(db, CLIENT.id, { salary: true })),
+    "unknown_field",
+  );
+  assert.ok(
+    !db.calls.some((c) => /^(INSERT|DELETE)/i.test(c.sql)),
+    "a rejected key must leave no row behind",
+  );
+});
+
+test("one unknown key rejects the whole request, including the keys that were valid", async () => {
+  // Validated in full before anything is written, so a half-applied permission set is not a
+  // state this function can produce.
+  const db = fakeD1([TWO_SECTION_CLIENT]);
+  assert.equal(
+    await codeOf(() => setFieldVisibility(db, CLIENT.id, { practical: true, salary: true })),
+    "unknown_field",
+  );
+  assert.ok(!db.calls.some((c) => /^INSERT/i.test(c.sql)), "the valid key must not slip through");
+});
+
+test("a duplicated heading is unflaggable through the store, not just through the parser", async () => {
+  const duplicated = { ...CLIENT, note: "## Notes\n\nfirst\n\n## Notes\n\nsecond" };
+  const db = fakeD1([duplicated]);
+  assert.equal(
+    await codeOf(() => setFieldVisibility(db, CLIENT.id, { notes: true })),
+    "unknown_field",
+    "both sections carry key: null, so `notes` is not a heading this note offers",
+  );
+  assert.ok(!db.calls.some((c) => /^INSERT/i.test(c.sql)));
+});
+
+test("a non-boolean visibility value is refused before the client is even looked up", async () => {
+  // "false" is a string and is truthy. A coerced truthy value on this path shares a section.
+  for (const value of ["true", "false", 1, 0, null, undefined, [], {}]) {
+    const db = fakeD1([TWO_SECTION_CLIENT]);
+    assert.equal(
+      await codeOf(() => setFieldVisibility(db, CLIENT.id, { practical: value })),
+      "missing_fields",
+      `visibility value ${JSON.stringify(value)} should be rejected`,
+    );
+    assert.equal(db.calls.length, 0, "the scalar is checked before anything is read or written");
+  }
+});
+
+test("a visibility patch with no keys is an error, not a silent no-op", async () => {
+  assert.equal(
+    await codeOf(() => setFieldVisibility(fakeD1([]), CLIENT.id, {})),
+    "missing_fields",
+  );
+});
+
+test("more than VISIBILITY_KEYS_MAX keys in one request is too_long", async () => {
+  const patch = {};
+  for (let i = 0; i <= VISIBILITY_KEYS_MAX; i += 1) patch[`section-${i}`] = true;
+  const db = fakeD1([TWO_SECTION_CLIENT]);
+  assert.equal(await codeOf(() => setFieldVisibility(db, CLIENT.id, patch)), "too_long");
+  assert.equal(db.calls.length, 0);
+});
+
+test("a __proto__ key in the visibility patch is rejected and touches no prototype", async () => {
+  const db = fakeD1([TWO_SECTION_CLIENT]);
+  const patch = JSON.parse('{"__proto__": true}');
+  const code = await codeOf(() => setFieldVisibility(db, CLIENT.id, patch));
+  // Either vocabulary is correct here — what must not happen is a write.
+  assert.ok(["unknown_field", "missing_fields"].includes(code), `unexpected code ${code}`);
+  assert.ok(!db.calls.some((c) => /^(INSERT|DELETE)/i.test(c.sql)));
+  assert.equal({}.polluted, undefined);
+});
+
+test("setFieldVisibility on an unknown client is not_found and writes nothing", async () => {
+  const db = fakeD1([null]);
+  assert.equal(
+    await codeOf(() => setFieldVisibility(db, "nope", { practical: true })),
+    "not_found",
+  );
+  assert.equal(db.calls.length, 1, "the write must not run when the client does not exist");
+});
+
+test("clientWithFields returns the note's sections with their flag, and no section bodies", async () => {
+  const db = fakeD1([TWO_SECTION_CLIENT, [{ field_key: "practical" }]]);
+  const { client, fields } = await clientWithFields(db, CLIENT.id);
+
+  // The client keeps exactly its existing shape — public/app.js reads this endpoint too.
+  assert.deepEqual(Object.keys(client).sort(), ["created_at", "id", "name", "note", "updated_at"]);
+
+  assert.deepEqual(fields.map((f) => f.key), ["their-process", "practical"]);
+  assert.deepEqual(fields.map((f) => f.candidate_visible), [false, true]);
+  for (const field of fields) {
+    assert.deepEqual(Object.keys(field).sort(), ["candidate_visible", "chars", "heading", "key"]);
+    assert.equal(typeof field.chars, "number");
+  }
+  assert.ok(
+    !JSON.stringify(fields).includes("Two stages"),
+    "section bodies must not ride on the wire a second time",
+  );
+});
+
+test("clientWithFields marks a duplicated heading unflaggable rather than dropping it", async () => {
+  const duplicated = { ...CLIENT, note: "## Notes\n\nfirst\n\n## Notes\n\nsecond" };
+  const db = fakeD1([duplicated, [{ field_key: "notes" }]]);
+  const { fields } = await clientWithFields(db, CLIENT.id);
+  assert.equal(fields.length, 2, "the recruiter can see both in the textarea, so both are listed");
+  assert.deepEqual(fields.map((f) => f.key), [null, null]);
+  assert.deepEqual(
+    fields.map((f) => f.candidate_visible),
+    [false, false],
+    "an orphan row for `notes` must not light either checkbox",
+  );
+});
+
+// ── the prune: a heading that goes away takes its permission with it ────────────────────
+
+test("saving a note deletes exactly the permissions whose headings are gone", async () => {
+  // Stored {their-process, practical}; the saved note keeps only `their-process`.
+  const db = fakeD1([
+    CLIENT,                                                        // getClient
+    [{ field_key: "practical" }, { field_key: "their-process" }],  // listVisibleKeys
+    null,                                                          // DELETE practical
+    null,                                                          // UPDATE clients
+    CLIENT,                                                        // getClient
+  ]);
+  await updateClient(db, CLIENT.id, { note: "## Their process\n\nTwo stages." });
+
+  const deletes = db.calls.filter((c) => /^DELETE FROM note_visibility/i.test(c.sql));
+  assert.equal(deletes.length, 1, "exactly the stale key, and only it");
+  assert.deepEqual(deletes[0].args, [CLIENT.id, "practical"]);
+  assert.deepEqual(
+    deletes[0].sql,
+    "DELETE FROM note_visibility WHERE client_id = ? AND field_key = ?",
+    "one fixed statement per key — no NOT IN list built from an uncapped heading count (R6)",
+  );
+});
+
+test("clearing the note drops every permission, which is the same rule at its limit", async () => {
+  const db = fakeD1([
+    CLIENT,
+    [{ field_key: "practical" }, { field_key: "their-process" }],
+    null,
+    null,
+    null,
+    CLIENT,
+  ]);
+  await updateClient(db, CLIENT.id, { note: "" });
+  const deletes = db.calls.filter((c) => /^DELETE FROM note_visibility/i.test(c.sql));
+  assert.deepEqual(deletes.map((d) => d.args[1]).sort(), ["practical", "their-process"]);
+});
+
+test("saving a note whose headings all survive deletes nothing", async () => {
+  const db = fakeD1([CLIENT, [{ field_key: "their-process" }], null, CLIENT]);
+  await updateClient(db, CLIENT.id, { note: `${TWO_SECTION_NOTE}\n\n## New\n\nbody` });
+  assert.equal(db.calls.filter((c) => /^DELETE/i.test(c.sql)).length, 0);
+});
+
+test("the prune runs BEFORE the UPDATE, so a failure part-way through revokes rather than keeps", async () => {
+  // D1 gives this path no transaction, so the order of these two statements IS the failure
+  // mode. UPDATE-then-prune half-fails into a note with new headings and permissions for the
+  // old ones still stored — the armed form of the rename-transfer leak, waiting for someone to
+  // retype a heading. Prune-then-UPDATE half-fails into over-hiding, which is the direction
+  // this module is built to fail in.
+  const db = fakeD1([
+    CLIENT,
+    [{ field_key: "practical" }, { field_key: "their-process" }],
+    null,
+    null,
+    CLIENT,
+  ]);
+  await updateClient(db, CLIENT.id, { note: "## Their process\n\nTwo stages." });
+
+  const order = db.calls.map((c) => c.sql);
+  const deleteAt = order.findIndex((sql) => /^DELETE FROM note_visibility/i.test(sql));
+  const updateAt = order.findIndex((sql) => /^UPDATE clients/i.test(sql));
+  assert.ok(deleteAt !== -1 && updateAt !== -1, "both statements must actually be issued");
+  assert.ok(
+    deleteAt < updateAt,
+    "the DELETE must precede the UPDATE. If this fails, a half-completed save leaves the " +
+      "note's new headings alongside the old headings' permissions, and the next person to " +
+      "retype an old heading shares a section nobody ticked.",
+  );
+});
+
+test("duplicating a section drops its permission, because the key stops being produced", async () => {
+  // The write-side half of R4. The parser nulls both keys, so `notes` is no longer a key this
+  // note produces, so the stored row is stale and goes — which is what makes the survivor come
+  // back unticked when the first copy is later deleted.
+  const db = fakeD1([CLIENT, [{ field_key: "notes" }], null, null, CLIENT]);
+  await updateClient(db, CLIENT.id, { note: "## Notes\n\nfirst\n\n## Notes\n\nsecond" });
+  const deletes = db.calls.filter((c) => /^DELETE FROM note_visibility/i.test(c.sql));
+  assert.equal(deletes.length, 1);
+  assert.deepEqual(deletes[0].args, [CLIENT.id, "notes"]);
+});
+
+test("replacing a ticked heading with a different one in another script issues the DELETE", async () => {
+  // THE H1 REGRESSION, AT THE STORE LEVEL. `## Процесс` and `## Зарплата` both slugged to the
+  // constant "section", so the prune computed kept = {"section"}, found the stored key still
+  // "present", and issued NO DELETE. The recruiter's permission on a process section silently
+  // became a permission on a section saying the client pays under market.
+  //
+  // The recording fake not executing SQL does not weaken this one: the assertion is that a
+  // DELETE is ISSUED, and before the fix none was.
+  //
+  // The stored key is DERIVED from the old heading rather than written as a literal, which is
+  // what makes this a regression test rather than a restatement of the fix. Under the old
+  // fieldKey it evaluates to "section" — and so does the new heading's key, so `kept` contains
+  // it, nothing is stale, and the assertion below fails. Hardcoding "процесс" would have
+  // passed against the broken code, because the broken code would never have stored it.
+  const oldHeading = "Процесс";
+  const stored = fieldKey(oldHeading);
+  const db = fakeD1([
+    { ...CLIENT, note: `## ${oldHeading}\n\nTwo stages.` },
+    [{ field_key: stored }],
+    null,   // DELETE
+    null,   // UPDATE clients
+    CLIENT,
+  ]);
+  await updateClient(db, CLIENT.id, {
+    note: "## Зарплата\n\nThey pay under market and the HM is difficult.",
+  });
+
+  const deletes = db.calls.filter((c) => /^DELETE FROM note_visibility/i.test(c.sql));
+  assert.equal(deletes.length, 1, "the old heading's permission must not survive the rename");
+  assert.deepEqual(deletes[0].args, [CLIENT.id, stored]);
+});
+
+test("a name-only update issues neither the visibility read nor a delete", async () => {
+  // Pruning is a fact about the note's headings. A rename of the client must not touch it —
+  // and the fixture is the proof: three queued results, exactly as before #18.
+  const db = fakeD1([CLIENT, null, CLIENT]);
+  await updateClient(db, CLIENT.id, { name: "Sussex Care Partners" });
+  assert.ok(
+    !db.calls.some((c) => /note_visibility/i.test(c.sql)),
+    "a name-only update must not read or write the allow-list",
+  );
+});
+
+test("the prune runs against the CLEANED note, not the raw patch value", async () => {
+  // cleanNote is what gets stored, so it is what the headings must be parsed from. Pruning
+  // against a note that was never saved would drop the wrong keys.
+  const db = fakeD1([CLIENT, [{ field_key: "practical" }], null, null, CLIENT]);
+  await updateClient(db, CLIENT.id, { note: undefined });
+  const update = db.calls.find((c) => /^UPDATE clients/i.test(c.sql));
+  assert.equal(update.args[0], "", "cleanNote turns a missing note into an empty one");
+  const deletes = db.calls.filter((c) => /^DELETE FROM note_visibility/i.test(c.sql));
+  assert.equal(deletes.length, 1, "and the prune sees the empty note, so every key is stale");
 });
 
 // ── injection ──────────────────────────────────────────────────────────────────────────

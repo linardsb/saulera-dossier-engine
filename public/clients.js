@@ -67,6 +67,24 @@
     },
     deleteFailed: "Could not delete that client. Try again.",
     deleted: function (name) { return "Deleted " + name + "."; },
+
+    // The candidate-visibility list (#18). The database calls this note_visibility and
+    // field_key; the recruiter never meets either word. Every string says what to do next.
+    visibilityEmpty: "This note has no sections yet. Start a line with ## and a section name, " +
+                     "like ## Their process, then save the note. You can choose what a " +
+                     "candidate sees, section by section.",
+    visibilityStale: "Save the note to update this list.",
+    visibilityDuplicate: "Two sections have this name, so neither can be shared. Give them " +
+                         "different names and save.",
+    visibilitySaved: "Saved",
+    // Not "It is still what it was", which claims something the browser cannot know. If the
+    // PUT succeeded and its answer was lost, AND the recovery read also failed, it DID change
+    // — and that is exactly the path this message is shown on. The checkbox has been put back,
+    // so the screen must not also promise the server agrees with it.
+    visibilityFailed: "Could not change that, so it may not have changed. Reload to check.",
+    sectionMeta: function (chars) {
+      return chars.toLocaleString("en-GB") + (chars === 1 ? " character" : " characters");
+    },
   };
 
   var el = {
@@ -85,9 +103,37 @@
     saveState: document.getElementById("save-state"),
     agencyState: document.getElementById("agency-state"),
     sendFormat: document.getElementById("send-format"),
+    visibilityList: document.getElementById("visibility-list"),
+    visibilityEmpty: document.getElementById("visibility-empty"),
+    visibilityState: document.getElementById("visibility-state"),
   };
 
-  var state = { selected: null, dirty: false, saving: false, adding: false, deleting: false };
+  // `togglingKeys` is a re-entrancy guard keyed on client id AND heading slug, not a single
+  // flag: two different sections may legitimately be in flight at once, but the same section of
+  // the same client twice is a double-click racing itself. The client half is load-bearing —
+  // see toggleField.
+  //
+  // `fieldsVersion` is the OTHER half of decision 4 above, and it took a bug to notice it was
+  // missing. `reqId`/`savingId` answer "is this response about the client on screen" — identity.
+  // They do not answer "has newer truth already been painted" — recency. Four paint sites had
+  // the first guard and not the second, so the SLOWER of two responses won simply by landing
+  // last: save the note (a 100k-character PUT), tick a section 60ms later (a 40-byte PUT that
+  // answers first and is stored), and the save's older snapshot repaints the box unticked. The
+  // server holds true and the screen says the section is not shared — for this feature the
+  // harmful direction, because the recruiter is told a section is private that the portal will
+  // ship.
+  //
+  // It counts PAINTS, not requests. A response that lost the race must not paint; it re-reads
+  // instead, because by then the headings themselves may have changed.
+  var state = {
+    selected: null,
+    dirty: false,
+    saving: false,
+    adding: false,
+    deleting: false,
+    togglingKeys: {},
+    fieldsVersion: 0,
+  };
 
   /* ── talking to the API ──────────────────────────────────────────────────────────────── */
 
@@ -241,6 +287,10 @@
   function markDirty() {
     state.dirty = true;
     showSaveState(COPY.unsaved, false);
+    // The list below describes the note as SAVED. Say so the moment the two diverge, rather
+    // than letting a heading typed a second ago look like it is already accounted for. Not an
+    // error: nothing has gone wrong, there is just a step left.
+    showVisibilityState(COPY.visibilityStale, false);
   }
 
   function select(id) {
@@ -271,6 +321,12 @@
     }
 
     var reqId = id;
+    // A load is a whole-screen reset, so it CLAIMS the next paint rather than competing for
+    // it: bumping first invalidates every save or toggle already in flight, and a second load
+    // invalidates the first. Without the bump, a toggle answering between this request and its
+    // response would leave the note painted from one client and the section list from another.
+    state.fieldsVersion += 1;
+    var fieldsAt = state.fieldsVersion;
     return api("/api/clients/" + encodeURIComponent(id))
       .then(function (body) {
         // A later click already owns the screen. Writing this response now would put one
@@ -282,6 +338,8 @@
         el.editorHead.textContent = body.client.name;
         el.note.value = body.client.note;
         showSaveState(body.client.note ? "" : COPY.notSaved, false);
+        paintFields(body.fields, fieldsAt);
+        showVisibilityState("", false);
         return refreshList();
       })
       .catch(function (err) {
@@ -304,6 +362,9 @@
     // proves was stored.
     var savingId = state.selected;
     var sent = el.note.value;
+    // Captured with them, and for the same reason: this is the request whose answer is slowest
+    // and therefore likeliest to arrive after a toggle the recruiter made while waiting.
+    var fieldsAt = state.fieldsVersion;
 
     state.saving = true;
     setBusy(el.saveButton, true);
@@ -314,7 +375,7 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ note: sent }),
     })
-      .then(function () {
+      .then(function (body) {
         // The client changed while this was in flight. This answer says nothing about what is
         // on screen now: reporting it would claim a save the visible client never had, and the
         // dirty recomputation below would compare this client's sent text against a different
@@ -326,6 +387,19 @@
         var stillTyping = el.note.value !== sent;
         state.dirty = stillTyping;
         showSaveState(stillTyping ? COPY.unsaved : savedAt(), false);
+
+        // The sections came back with the save, so the list follows the headings without a
+        // second request. A renamed heading's permission was pruned server-side; re-rendering
+        // from this response is how the screen stops showing a tick that no longer exists.
+        //
+        // Unless a toggle answered while this was in flight. Then this snapshot predates it and
+        // painting it would undo, on screen only, a permission the server has already stored —
+        // so re-read instead. A re-read rather than simply skipping the paint, because a save
+        // is the one request that can RENAME headings: the rows themselves may be wrong here,
+        // not just the ticks.
+        if (!paintFields(body.fields, fieldsAt)) repaintFields(savingId);
+        showVisibilityState(stillTyping ? COPY.visibilityStale : "", false);
+
         return refreshList();
       })
       .catch(function (err) {
@@ -339,6 +413,193 @@
         state.saving = false;
         setBusy(el.saveButton, false);
         el.saveButton.textContent = COPY.saveIdle;
+      });
+  }
+
+  /* ── what a candidate can see (#18) ──────────────────────────────────────────────────── */
+
+  /**
+   * The sections of the SAVED note, each with a checkbox.
+   *
+   * It describes the saved note deliberately: a heading typed but not saved has no key on the
+   * server, so there is nothing to tick it against. When the note goes dirty the live region
+   * says so (`visibilityStale`) rather than letting the list quietly describe something else.
+   * Underneath, it is fail-closed regardless — an unsaved heading cannot be flagged at all.
+   */
+  function showVisibilityState(text, isError) {
+    el.visibilityState.textContent = text;
+    el.visibilityState.classList.toggle("is-error", Boolean(isError));
+    el.visibilityState.classList.toggle("is-shown", Boolean(text));
+  }
+
+  function renderFields(fields) {
+    var list = fields || [];
+
+    // Same bug as the rail: rebuilding destroys the element the keyboard was on and drops
+    // focus to <body>. Remember the key and put focus on its replacement.
+    var active = document.activeElement;
+    var focusedKey = active && active.dataset && active.dataset.key ? active.dataset.key : null;
+    var refocus = null;
+
+    el.visibilityList.textContent = "";
+    el.visibilityList.hidden = list.length === 0;
+    el.visibilityEmpty.hidden = list.length > 0;
+    if (!list.length) {
+      el.visibilityEmpty.textContent = COPY.visibilityEmpty;
+      return;
+    }
+
+    list.forEach(function (field) {
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = Boolean(field.candidate_visible);
+
+      var name = document.createElement("span");
+      name.className = "visibility-name";
+      // textContent, never innerHTML: headings are agency-authored text and this is the one
+      // place they are rendered.
+      name.textContent = field.heading;
+
+      var meta = document.createElement("span");
+      meta.className = "visibility-meta";
+
+      if (field.key === null) {
+        // A duplicated heading cannot be told apart from its twin, here or in the database, so
+        // it is not tickable. It is still listed, because the recruiter can see it in the
+        // textarea and a section silently missing from this list reads as "already handled".
+        // Real `disabled`, not aria-disabled: the house rule about aria-disabled is for a
+        // transient busy state on a focused control, and this is a static "there is nothing to
+        // press here" whose reason is in the row's own text.
+        box.disabled = true;
+        meta.textContent = COPY.visibilityDuplicate;
+      } else {
+        box.dataset.key = field.key;
+        if (field.key === focusedKey) refocus = box;
+        meta.textContent = COPY.sectionMeta(field.chars);
+      }
+
+      var label = document.createElement("label");
+      label.appendChild(box);
+      label.appendChild(name);
+      label.appendChild(meta);
+
+      var item = document.createElement("li");
+      item.appendChild(label);
+      el.visibilityList.appendChild(item);
+    });
+
+    if (refocus) refocus.focus();
+  }
+
+  /**
+   * Paint the list, unless newer truth has already been painted.
+   *
+   * `seen` is the value of `state.fieldsVersion` captured BEFORE the request that produced
+   * `fields` went out. If it has moved, something more recent has already been drawn and this
+   * response is stale — it must not paint, whatever its own identity guard says.
+   *
+   * Returns whether it painted, so a losing caller can decide to re-read instead of silently
+   * dropping the answer.
+   */
+  function paintFields(fields, seen) {
+    if (state.fieldsVersion !== seen) return false;
+    renderFields(fields);
+    state.fieldsVersion += 1;
+    return true;
+  }
+
+  /**
+   * Ask the server what it actually holds now, and paint that.
+   *
+   * The answer for a response that lost the recency race. Re-reading rather than keeping the
+   * loser's snapshot matters most on the save path: a save can RENAME headings, so the stale
+   * answer is not merely out of date about which boxes are ticked, it can be out of date about
+   * which rows exist. It captures its own version at request time, so it plays by the same
+   * rule it was called to repair.
+   */
+  function repaintFields(clientId) {
+    var seen = state.fieldsVersion;
+    return api("/api/clients/" + encodeURIComponent(clientId))
+      .then(function (body) {
+        if (state.selected !== clientId) return;
+        paintFields(body.fields, seen);
+      })
+      .catch(function () {
+        // Whatever message is on screen stands. This path exists to correct a stale PAINT, and
+        // failing to correct it leaves the previous paint — which was itself a server answer.
+      });
+  }
+
+  /**
+   * Tick or untick one section. This mirrors saveAgency, not save: it saves the moment it is
+   * made, has its own live region, and puts the control back from server truth on failure.
+   *
+   * It must not touch state.dirty in either direction. Setting it would make beforeunload warn
+   * about a change that was already stored; clearing it would throw away the warning the note's
+   * unsaved text still needs.
+   */
+  function toggleField(box, key, wanted) {
+    // Captured before the guard, not after. A heading slug is not unique across clients —
+    // `## Their process` is this screen's own worked example, so two clients sharing a slug is
+    // the ordinary case. Keyed on the slug alone, a slow toggle on client A silently swallowed
+    // the same-named toggle on client B: the native checkbox has already flipped by the time
+    // `change` fires, the early return sent no request and put nothing back, and A's answer
+    // bails on `savingId` without re-rendering B. B was then showing a permission that was
+    // never stored, until a reload.
+    var savingId = state.selected;
+    var guard = savingId + "|" + key;
+    if (state.togglingKeys[guard]) {
+      // The native checkbox has ALREADY flipped by the time `change` fires, so returning here
+      // without touching it leaves the screen showing a value nothing is going to store. Put
+      // back what the in-flight request is writing — which is what its answer will paint
+      // anyway — so the discarded tap leaves no trace instead of a silent lie.
+      //
+      // The window this closes is not theoretical: a 1.5s PUT plus an impatient second tap
+      // showed "not shared" for ~1.4s on a section being stored as shared, then snapped. A
+      // hung fetch stretches that to minutes.
+      box.checked = !wanted;
+      return;
+    }
+
+    state.togglingKeys[guard] = true;
+
+    // Same rule as save: whatever is painted when this answer lands wins over this answer if it
+    // is newer. Two toggles resolving out of order would otherwise leave the loser's snapshot
+    // on screen, showing a tick the server does not hold.
+    var fieldsAt = state.fieldsVersion;
+
+    var patch = { visibility: {} };
+    patch.visibility[key] = wanted;
+
+    api("/api/clients/" + encodeURIComponent(savingId), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+      .then(function (body) {
+        if (state.selected !== savingId) return;
+        // Re-rendered from what the server stored, never from the checkbox that was clicked —
+        // and only if nothing newer has been painted since this toggle was sent.
+        if (!paintFields(body.fields, fieldsAt)) repaintFields(savingId);
+        // "Saved" must not overwrite the stale-list warning. The note can be dirty while a
+        // toggle succeeds, and the list is still describing the note as it was saved — which is
+        // the more important of the two things to be saying.
+        showVisibilityState(state.dirty ? COPY.visibilityStale : COPY.visibilitySaved, false);
+      })
+      .catch(function (err) {
+        if (state.selected !== savingId) return;
+        // Put the control back immediately, then re-read, so the screen never shows a
+        // permission that was not stored.
+        box.checked = !wanted;
+        showVisibilityState(messageFor(err, COPY.visibilityFailed), true);
+        // The recovery read captures its own version at ITS request time, not this toggle's —
+        // it is asking what the server holds now, which is exactly the newest truth available.
+        // This is the site that gets missed: it is inside the `.catch`, so the happy path never
+        // exercises it, and it is the one place the screen has nothing else to go on.
+        return repaintFields(savingId);
+      })
+      .then(function () {
+        delete state.togglingKeys[guard];
       });
   }
 
@@ -420,6 +681,14 @@
   el.saveButton.addEventListener("click", save);
   el.note.addEventListener("input", function () {
     if (!state.dirty) markDirty();
+  });
+
+  // One delegated listener, because the list is rebuilt on every save and every toggle. A
+  // listener per row would be re-attached each time and leak the ones before it.
+  el.visibilityList.addEventListener("change", function (event) {
+    var box = event.target;
+    if (!box || box.type !== "checkbox" || !box.dataset.key) return;
+    toggleField(box, box.dataset.key, box.checked);
   });
 
   el.deleteButton.addEventListener("click", function () {

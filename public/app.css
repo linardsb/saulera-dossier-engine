@@ -415,6 +415,81 @@ a {
 /* Removal sits well away from Save, past its own stretch of whitespace. */
 .editor-remove { margin-top: var(--space-12); }
 
+/* ── the visibility list ───────────────────────────────────────────────────────────────── */
+/* #18. Native checkbox, native label, no custom switch — this file styles no form control it
+   does not have to. The whole component is the .radio-row label pattern below, which already
+   solved the tap-target floor; nothing here re-solves it. */
+
+/* Same fieldset reset as .radio-group: the browser's border and padding are an artefact, not a
+   decision. The space above is a zone break — this describes the saved note, so it must not
+   read as part of the save row it sits under. */
+.visibility {
+  border: 0;
+  margin: var(--space-12) 0 0;
+  padding: 0;
+}
+
+.visibility-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* `display: flex` above is an AUTHOR rule, and the UA's `[hidden] { display: none }` is not, so
+   the author rule wins whatever the specificity — which made `el.visibilityList.hidden = true`
+   in clients.js a silent no-op. It hid nothing today only because the list is empty whenever it
+   is set, so the bug was invisible rather than absent. */
+.visibility-list[hidden] { display: none; }
+
+/* center, exactly as .radio-row label does. baseline was tried and measured wrong: the row is
+   44px tall and the heading wraps at 360px, so aligning to the first text baseline dropped the
+   checkbox to the bottom of a two-line row. min-width: 0 lets a long heading wrap inside the
+   row instead of widening the column. */
+.visibility-list label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+  font-size: var(--text-body);
+  min-width: 0;
+}
+
+/* flex-shrink: 0 keeps the box square when the heading beside it is long. */
+.visibility-list input[type="checkbox"] { flex-shrink: 0; }
+
+/* A section heading is agency-authored and need contain no spaces at all — the same reasoning
+   as .editor-head h2, and the same fix. min-width: 0 lets it actually shrink. */
+.visibility-name {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* The row's quiet half: how much is in the section, or why it cannot be shared. Caption size,
+   which is the floor — nothing on this screen goes below it. margin-left: auto pushes it to
+   the row's end so the checkboxes and headings stay in one readable column. */
+.visibility-meta {
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  margin-left: auto;
+  text-align: right;
+}
+
+/* A disabled row is a statement, not a dead control: the reason is in .visibility-meta beside
+   it, so the row only needs to stop looking pressable. */
+.visibility-list input[type="checkbox"]:disabled { cursor: default; }
+.visibility-list label:has(input:disabled) { color: var(--text-muted); }
+
+/* Matches .rail-empty: an empty state is an invitation, in the same voice. */
+.visibility-empty {
+  color: var(--text-muted);
+  font-size: var(--text-body);
+  max-width: 60ch;
+  margin: 0;
+}
+
 /* ── the agency strip ──────────────────────────────────────────────────────────────────── */
 
 /* The one hairline on the page. Whitespace alone cannot say "this is configuration, not

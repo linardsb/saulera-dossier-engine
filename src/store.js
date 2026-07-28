@@ -13,6 +13,7 @@
 // Every user value is a bound parameter; nothing is ever interpolated into a SQL string.
 
 import { RENDERERS } from "./render/index.js";
+import { parseNoteFields } from "./note-fields.js";
 
 export const NAME_MAX = 120;
 
@@ -27,6 +28,12 @@ export const SEND_FORMATS = ["email_body", "attachment", "ats_field"];
 // The two invite delivery kinds (#17, decision 3). `pack_generated` is deliberately not here:
 // packs are recorded by recordEvent, and the schema's DDL default writes their kind.
 export const INVITE_EVENT_KINDS = ["invite_sent", "invite_opened"];
+
+// A bound on ONE visibility request (#18). The editor sends a single key per toggle, but a
+// 100,000-character note could in principle carry thousands of headings, and setFieldVisibility
+// issues one statement per key. This caps the work a single request can ask for; it is not a
+// cap on how many sections a client may have shared over time.
+export const VISIBILITY_KEYS_MAX = 50;
 
 /**
  * A store failure with the HTTP shape already decided, so the Function layer maps rather than
@@ -179,28 +186,73 @@ export async function createClient(db, { name, note } = {}) {
  * deliberate clear, which on the surface that *is* the product is the worst kind of bug.
  *
  * `updated_at` is set explicitly because a column default applies only on INSERT.
+ *
+ * Saving the note also prunes its candidate-visibility permissions (#18) — see below.
  */
 export async function updateClient(db, id, patch = {}) {
   const columns = [];
   const values = [];
+  let note = null; // the CLEANED note, when one is being saved — see the prune below
   // A fixed allow-list. A caller-supplied key never reaches the SQL string.
   if (Object.hasOwn(patch, "name")) {
     columns.push("name = ?");
     values.push(cleanName(patch.name));
   }
   if (Object.hasOwn(patch, "note")) {
+    note = cleanNote(patch.note);
     columns.push("note = ?");
-    values.push(cleanNote(patch.note));
+    values.push(note);
   }
   if (!columns.length) {
     throw new StoreError("missing_fields", 400, "update: nothing to change");
   }
 
   const client = await getClient(db, id); // 404 before writing, not after
+
+  // A heading that no longer exists must not keep its permission (#18). Rename a section while
+  // its permission is stored, retype the old name six months later, and without this the
+  // section is already shared with nobody having ticked it. Clearing the note drops every
+  // permission, which is the same rule at its limit.
+  //
+  // THE PRUNE RUNS BEFORE THE UPDATE, AND THE ORDER IS THE POINT. D1 gives this path no
+  // transaction, so a failure part-way through leaves whichever statements already ran. Run the
+  // UPDATE first and that half-state is: the note now has NEW headings while permissions for
+  // the OLD ones survive — the armed form of the leak above, waiting for someone to retype a
+  // heading. Run the prune first and the half-state is a note that still has its old headings
+  // with some permissions already revoked. One direction over-shares, the other over-hides, and
+  // this is a module where a bug of omission must hide.
+  //
+  // The behaviour change that buys: a save that fails at the UPDATE has still revoked
+  // permissions for headings that are, from the recruiter's point of view, still in the note.
+  // They see the save fail, their text is still on screen, and the ticks they have to re-tick
+  // are the ones for sections they were editing. That is the acceptable side of this trade.
+  //
+  // Note this is the note-save path only. A name-only update issues neither the SELECT nor a
+  // DELETE, because pruning is a fact about the note's headings.
+  //
+  // The prune diffs in JavaScript and deletes one bound key at a time. The obvious shape — one
+  // DELETE whose WHERE clause excludes a generated `(?, ?, …)` list of surviving keys — was
+  // rejected: it binds one parameter per parsed heading against D1's per-query parameter cap,
+  // so a heavily-headed note would fail the save path for the product's compounding asset, on
+  // the recruiter's own text. This shape is bounded by stored permissions — few, and
+  // recruiter-created — and has no dynamic SQL at all, which is a stronger property than the
+  // UPDATE below.
+  if (note !== null) {
+    const kept = new Set(parseNoteFields(note).map((f) => f.key).filter(Boolean));
+    const stale = (await listVisibleKeys(db, client.id)).filter((key) => !kept.has(key));
+    for (const key of stale) {
+      await db
+        .prepare("DELETE FROM note_visibility WHERE client_id = ? AND field_key = ?")
+        .bind(client.id, key)
+        .run();
+    }
+  }
+
   await db
     .prepare(`UPDATE clients SET ${columns.join(", ")}, updated_at = datetime('now') WHERE id = ?`)
     .bind(...values, client.id)
     .run();
+
   return getClient(db, client.id);
 }
 
@@ -217,6 +269,124 @@ export async function deleteClient(db, id) {
   const client = await getClient(db, id); // not_found before deleting, same as updateClient
   await db.prepare("DELETE FROM clients WHERE id = ?").bind(client.id).run();
   return { ok: true, name: client.name };
+}
+
+// ── the note's candidate-visibility allow-list ─────────────────────────────────────────
+//
+// #18, architecture decision 2. Presence is permission: a row in note_visibility means the
+// recruiter ticked that heading, and no row means hidden. There is no boolean to invert, so an
+// empty table is the fail-closed default for every note that already exists.
+//
+// The gate itself is src/note-fields.js's `visibleFields()`. These functions only decide what
+// may be stored; nothing here renders or sends anything to a candidate.
+
+/**
+ * The heading slugs this client has shared. Deliberately narrower than getClient, in exactly
+ * the spirit of requireClient below: one column, and never a JOIN to clients.
+ *
+ * A permissions read has no business carrying the note. The note is business-context personal
+ * data naming hiring managers, and this is a path that only needs to know which strings were
+ * ticked.
+ */
+export async function listVisibleKeys(db, clientId) {
+  const { results } = await db
+    .prepare("SELECT field_key FROM note_visibility WHERE client_id = ? ORDER BY field_key")
+    .bind(String(clientId ?? ""))
+    .all();
+  return (results ?? []).map((row) => row.field_key);
+}
+
+/**
+ * A client, plus what its note's sections are and which of them a candidate may see.
+ *
+ * The section BODY text is deliberately absent. The recruiter is reading the note in the
+ * textarea two inches above this list, so a second copy of the same personal data on the wire
+ * buys nothing; `chars` gives the row its "how much is in here" line instead, in the idiom of
+ * clients.js's rowMeta. #22 has a real send-preview surface and can decide differently there.
+ *
+ * A duplicate heading keeps its `key: null` and still travels, because the recruiter can see
+ * that section in the textarea — the UI has to say why it cannot be ticked rather than let it
+ * silently go missing.
+ *
+ * `client` keeps exactly its existing shape. public/app.js reads this endpoint too: a sibling
+ * key is additive, a changed `client` is not.
+ */
+export async function clientWithFields(db, id) {
+  const client = await getClient(db, id);
+  const visible = new Set(await listVisibleKeys(db, client.id));
+  const fields = parseNoteFields(client.note).map((field) => ({
+    key: field.key,
+    heading: field.heading,
+    chars: field.chars,
+    candidate_visible: field.key !== null && visible.has(field.key),
+  }));
+  return { client, fields };
+}
+
+/**
+ * Tick and untick sections. `patch` is `{ [field_key]: boolean }`.
+ *
+ * @returns the same shape as clientWithFields, so a caller always re-renders from server truth
+ *   rather than from the control it just clicked.
+ */
+export async function setFieldVisibility(db, id, patch = {}) {
+  // Object.entries, never for…in: a body of {"__proto__": true} arrives here as parsed JSON,
+  // and entries sees own keys only. The `known` check below would reject it anyway — belt and
+  // braces on the one function whose entire job is a permission.
+  const entries = Object.entries(patch ?? {});
+
+  if (!entries.length) {
+    // The same rule as updateClient: nothing to change is an error, not a silent no-op.
+    throw new StoreError("missing_fields", 400, "visibility: nothing to change");
+  }
+  if (entries.length > VISIBILITY_KEYS_MAX) {
+    throw new StoreError(
+      "too_long",
+      400,
+      `visibility: more than ${VISIBILITY_KEYS_MAX} keys in one request`,
+    );
+  }
+
+  // Every value must be a real boolean, and this is checked before the client exists — the
+  // recordEvent order, so a request that gets both wrong names the malformed field instead of
+  // hiding it behind a 404. `"false"` is a string and is truthy; a coerced truthy value on this
+  // path is a section shared that nobody ticked.
+  for (const [key, value] of entries) {
+    if (typeof value !== "boolean") {
+      throw new StoreError("missing_fields", 400, `visibility: ${key} must be true or false`);
+    }
+  }
+
+  const client = await getClient(db, id); // 404 before writing, as updateClient does
+
+  // The one place the note is legitimately read on a visibility path: the keys are validated
+  // against it. filter(Boolean) drops the null keys of duplicate headings, so a section whose
+  // name appears twice cannot be flagged at all.
+  //
+  // A key that is not a current heading is rejected rather than stored, because an allow-list
+  // entry for a heading that does not exist is a permission waiting for a name: write
+  // `## Salary` six months later and it would already be shared.
+  const known = new Set(parseNoteFields(client.note).map((f) => f.key).filter(Boolean));
+  for (const [key] of entries) {
+    if (!known.has(key)) {
+      throw new StoreError("unknown_field", 400, `visibility: ${key} is not a heading in this note`);
+    }
+  }
+
+  // Sequential single statements, and deliberately not D1's multi-statement batch API:
+  // test/helpers/fake-d1.js does not implement it, and a store the test fake cannot drive is a
+  // store with untested SQL.
+  //
+  // INSERT OR IGNORE so ticking an already-ticked section is a no-op rather than a conflict to
+  // reason about. created_at keeps its DDL default: the database's clock, not the caller's.
+  for (const [key, wanted] of entries) {
+    const statement = wanted
+      ? db.prepare("INSERT OR IGNORE INTO note_visibility (client_id, field_key) VALUES (?, ?)")
+      : db.prepare("DELETE FROM note_visibility WHERE client_id = ? AND field_key = ?");
+    await statement.bind(client.id, key).run();
+  }
+
+  return clientWithFields(db, client.id);
 }
 
 // ── agency ─────────────────────────────────────────────────────────────────────────────
