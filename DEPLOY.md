@@ -45,7 +45,7 @@ Build settings:
 | Setting | Value |
 |---|---|
 | Framework preset | None |
-| Build command | *(leave empty)* |
+| Build command | `npm ci` |
 | Build output directory | `public` |
 | Root directory | `/` |
 
@@ -56,9 +56,13 @@ no dependencies. This repo has `@anthropic-ai/sdk`, so `node_modules/` exists at
 time; a root output directory would push dependency source into the published asset set,
 against a Pages cap of 20,000 files. `public/` removes the whole class of problem.
 
-**Why the build command is empty.** There is nothing to build — `public/` is static files.
-Pages still runs an install step because it sees a `package.json`; that is harmless and
-produces no output in the published asset set. It stays harmless because wrangler is **not** a
+**Why the build command is `npm ci` and not empty.** `public/` is still static files with
+nothing to build — but with **no** build command, Pages **skips the install step entirely**
+("No build command specified. Skipping build step."), and the Functions bundler then cannot
+resolve `@anthropic-ai/sdk`, which `functions/api/generate.js` imports. That is not a
+hypothesis: build `97b7c323` failed exactly this way on 28 Jul 2026, and setting the command
+to `npm ci` fixed it in the next build. `npm ci` installs from the lockfile and produces no
+output in the published asset set. It stays harmless because wrangler is **not** a
 devDependency: the npm scripts pin it through `npx wrangler@4.114.0`, so the CI install never
 pulls platform-specific `workerd` binaries the deployment does not run.
 
