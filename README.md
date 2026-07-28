@@ -187,6 +187,19 @@ fork.
 review-to-sendable was reading time. Re-time this on the first real pack in week one — the
 spike was synthetic and self-reviewed.
 
+**A candidate sees nothing from the client note unless a recruiter ticks it.** (28 Jul 2026,
+#18.) A *section* is one of the note's own markdown headings — the recruiter writes
+`## Their process` and that becomes a thing that can be shared; nothing else in this ticket
+invents fields. Permission is stored as presence: a row in `note_visibility` (a client id and
+a heading slug, no note text) means shared, and no row means hidden, so an empty table is the
+fail-closed default for every note already written. Rename a heading and its permission is
+dropped, and retyping the old name later does not bring it back. Two sections with the same
+name are both unshareable, because a permission that could belong to either could transfer
+between them. The gate is `visibleFields()` in `src/note-fields.js`: candidate-facing code
+calls it and never reads `client.note`, so forgetting the filter hides a fact rather than
+leaking one. The submission pack is unaffected — it still reads the whole note, because the
+client is who the note is about.
+
 ## Standing constraints
 
 - **No candidate data store.** Candidate, CV and pack are transient — passed in, used, written

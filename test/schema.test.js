@@ -128,14 +128,20 @@ test("every ALTER TABLE in the migrations is an ADD COLUMN this test could read"
 
 // ── the tables that exist, and the two regimes that govern them ────────────────────────
 
-const ENGINE_TABLES = ["agency", "clients", "events"];
+// note_visibility (#18) is an ENGINE table, not a portal one: a row is a client id and a
+// heading slug from the agency's own note, so it holds no candidate data and no note text and
+// §5.6's boundary has not moved. It is deliberately inside the regime that BANS candidate
+// shapes rather than the one that cages them — the candidate-shaped regex below runs over it,
+// which is why the column is `field_key` and not `candidate_visible`. Presence is permission,
+// so an empty table is the fail-closed default for every note that already exists.
+const ENGINE_TABLES = ["agency", "clients", "events", "note_visibility"];
 const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invite", "otp", "question"];
 
-test("the schema declares exactly the engine's three tables and the portal's seven", () => {
+test("the schema declares exactly the engine's four tables and the portal's seven", () => {
   assert.deepEqual(
     [...byName.keys()].sort(),
     [...ENGINE_TABLES, ...PORTAL_TABLES].sort(),
-    "an eleventh table means a boundary moved without a decision. The engine's three carry " +
+    "a twelfth table means a boundary moved without a decision. The engine's four carry " +
       "no candidate data (architecture §5.6); the portal's seven are candidate data inside " +
       "decision 13's retention cage. A new table must pick a regime, in the open.",
   );
@@ -176,6 +182,10 @@ const EXPECTED_COLUMNS = {
   // AC4, amended by #17: {client, timestamp, duration, kind} and nothing else. kind is the
   // one deliberate widening (decision 3, 23) and its vocabulary is locked further down.
   events: ["client_id", "created_at", "duration_ms", "id", "kind"],
+  // #18. Three columns and no fourth: no note text, no section body, no candidate anything.
+  // There is deliberately no `visible` boolean — presence IS permission, so there is no
+  // default to get the wrong way round and no NULL to interpret.
+  note_visibility: ["client_id", "created_at", "field_key"],
   invite: ["client_id", "email", "expires_at", "id", "interview_at", "opened_at", "sent_at", "status", "token_hash"],
   candidate_role: ["brief_json", "cv_text", "ethos_text", "id", "invite_id", "jd_text"],
   competency: ["id", "importance", "label", "role_id", "source_quote", "stage", "success_rate"],
@@ -203,7 +213,12 @@ test("every table's columns are exactly the locked list", () => {
 // Every foreign key a portal table declares, and the parent it must cascade from. The chain
 // bottoms out at invite, which itself cascades from clients — so deleting a client, purging
 // an expired invite and delete-now all erase whole scopes through the same mechanism.
+//
+// note_visibility is the one engine table here. It cascades from clients for the same reason
+// events does: deleting a client must take its permissions with it by the schema, not by a
+// second statement in deleteClient. It either works for both or is already broken.
 const CASCADE_CHAIN = {
+  note_visibility: { client_id: "clients" },
   invite: { client_id: "clients" },
   candidate_role: { invite_id: "invite" },
   competency: { role_id: "candidate_role" },
@@ -213,7 +228,7 @@ const CASCADE_CHAIN = {
   otp: { invite_id: "invite" },
 };
 
-test("every portal foreign key declares ON DELETE CASCADE toward invite", () => {
+test("every foreign key in the chain declares ON DELETE CASCADE toward its parent", () => {
   for (const [table, fks] of Object.entries(CASCADE_CHAIN)) {
     const body = bodyOf.get(table) ?? "";
     for (const [column, parent] of Object.entries(fks)) {
@@ -268,6 +283,17 @@ test("only hashes rest: invite carries token_hash, otp carries code_hash, never 
   const otp = byName.get("otp") ?? [];
   assert.ok(otp.includes("code_hash"), "otp holds the code's hash");
   assert.ok(!otp.includes("code"), "the raw one-time code must never rest");
+});
+
+test("note_visibility holds exactly {client, field, timestamp} and nothing else", () => {
+  assert.deepEqual(
+    [...(byName.get("note_visibility") ?? [])].sort(),
+    ["client_id", "created_at", "field_key"],
+    "#18: the allow-list stores which heading of the agency's own note a candidate may see. " +
+      "A fourth column — a note excerpt 'for debugging', a candidate email, a copy of the " +
+      "section body — is exactly the descope this test exists to fail on, and it would put " +
+      "personal data in a table whose entire claim is that it holds none.",
+  );
 });
 
 // ── the two things the product needs to be there ───────────────────────────────────────

@@ -194,6 +194,21 @@ const LIST = {
 };
 const AGENCY = { agency: { name: "", send_format: "email_body", renderer: "appendix" } };
 
+// #18's note sections. A's first section is already shared; B shares nothing, which is what
+// makes "B's rows changed" visible if a response ever lands under the wrong client.
+const A_FIELDS = [
+  { key: "their-process", heading: "Their process", chars: 412, candidate_visible: true },
+  { key: "practical", heading: "Practical", chars: 88, candidate_visible: false },
+];
+// B deliberately shares a slug with A. `## Their process` is this screen's own worked example
+// (the scaffold line, and clients.js's empty-state copy), so two clients with the same heading
+// is the ordinary case — and a re-entrancy guard keyed on the slug alone silently swallowed B's
+// toggle while A's was in flight.
+const B_FIELDS = [
+  { key: "their-process", heading: "Their process", chars: 120, candidate_visible: false },
+  { key: "how-they-hire", heading: "How they hire", chars: 120, candidate_visible: false },
+];
+
 /** The routes every probe starts from. */
 function baseRoutes(extra = []) {
   return [
@@ -206,15 +221,15 @@ function baseRoutes(extra = []) {
       method: "GET",
       match: `^/api/clients/${A}$`,
       status: 200,
-      body: { client: { id: A, name: LIST.clients[0].name, note: "A's note" } },
+      body: { client: { id: A, name: LIST.clients[0].name, note: "A's note" }, fields: A_FIELDS },
     },
     {
       method: "GET",
       match: `^/api/clients/${B}$`,
       status: 200,
-      body: { client: { id: B, name: LIST.clients[1].name, note: "B's note" } },
+      body: { client: { id: B, name: LIST.clients[1].name, note: "B's note" }, fields: B_FIELDS },
     },
-    { method: "PUT", match: "^/api/clients/", status: 200, body: { client: {} } },
+    { method: "PUT", match: "^/api/clients/", status: 200, body: { client: {}, fields: [] } },
   ];
 }
 
@@ -553,13 +568,207 @@ async function probeM10() {
   await page.close();
 }
 
+async function probeV18() {
+  // #18, R7. The visibility toggle is an auto-save on a per-row control, which is the easiest
+  // place on this screen to reintroduce the header comment's decision 4 — and here a response
+  // applied under the wrong id does not merely show the wrong text, it writes a PERMISSION to
+  // a different client's note. So: select A, tick a section, select B before the PUT resolves,
+  // then let it resolve.
+  //
+  // A's PUT is slow and B's GET is fast, so the PUT's answer arrives while B owns the screen.
+  const page = await openScreen({
+    routes: baseRoutes([
+      {
+        method: "PUT", match: `^/api/clients/${A}$`, status: 200, delay: 500,
+        // What A's server would say: `practical` is now shared too. If this is ever applied
+        // while B is on screen, B's list gets A's sections.
+        body: {
+          client: { id: A, name: LIST.clients[0].name, note: "A's note" },
+          fields: [
+            { key: "their-process", heading: "Their process", chars: 412, candidate_visible: true },
+            { key: "practical", heading: "Practical", chars: 88, candidate_visible: true },
+          ],
+        },
+      },
+      { method: "GET", match: `^/api/clients/${B}$`, status: 200, delay: 20,
+        body: { client: { id: B, name: LIST.clients[1].name, note: "B's note" }, fields: B_FIELDS } },
+    ]),
+  }, { query: `?client=${A}` });
+  await page.eval(SETTLE(250));
+
+  // Tick A's "Practical", then move to B before the PUT comes back.
+  await page.eval(`
+    (function () {
+      var box = document.querySelector('#visibility-list input[data-key="practical"]');
+      box.checked = true;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+  await page.eval(SETTLE(40));
+  await page.eval(CLICK_ROW(B));
+  await page.eval(SETTLE(800)); // long enough for A's 500ms PUT to land under B
+
+  const r = await page.eval(`
+    (function () {
+      var rows = [].map.call(document.querySelectorAll("#visibility-list input"), function (i) {
+        return { key: i.dataset.key || null, checked: i.checked };
+      });
+      var names = [].map.call(document.querySelectorAll(".visibility-name"), function (n) {
+        return n.textContent;
+      });
+      return {
+        head: document.getElementById("editor-head").textContent,
+        rows: rows,
+        names: names,
+        puts: window.__probe.calls.filter(function (c) { return c.method === "PUT"; }).length,
+      };
+    })()`);
+
+  const isB = r.head === LIST.clients[1].name;
+  const onlyBsRows =
+    r.rows.length === B_FIELDS.length &&
+    r.rows.every((row, i) => row.key === B_FIELDS[i].key);
+  const nothingTicked = r.rows.every((row) => row.checked === false);
+  check(
+    "V18", "a toggle answered after the client changed writes nothing to the new client",
+    isB && onlyBsRows && nothingTicked,
+    `head=${JSON.stringify(r.head)} · rows=${JSON.stringify(r.rows)} · ` +
+      `names=${JSON.stringify(r.names)} · PUTs=${r.puts}`,
+  );
+  await page.close();
+}
+
+async function probeV18slug() {
+  // The re-entrancy guard must be per CLIENT and per slug, not per slug. A's `their-process`
+  // toggle is left in flight; B has a section with the same slug. A guard keyed on the slug
+  // alone returns early on B's click — and because the native checkbox has already flipped, and
+  // A's answer bails on savingId without re-rendering B, B is left showing a permission that
+  // was never stored.
+  const page = await openScreen({
+    routes: baseRoutes([
+      // A's PUT never resolves inside this probe's window, so its guard is still held when B
+      // is clicked. That is the whole point.
+      { method: "PUT", match: `^/api/clients/${A}$`, status: 200, delay: 30_000,
+        body: { client: { id: A }, fields: A_FIELDS } },
+      { method: "PUT", match: `^/api/clients/${B}$`, status: 200, delay: 20,
+        body: {
+          client: { id: B, name: LIST.clients[1].name, note: "B's note" },
+          fields: [
+            { key: "their-process", heading: "Their process", chars: 120, candidate_visible: true },
+            { key: "how-they-hire", heading: "How they hire", chars: 120, candidate_visible: false },
+          ],
+        } },
+      { method: "GET", match: `^/api/clients/${B}$`, status: 200, delay: 20,
+        body: { client: { id: B, name: LIST.clients[1].name, note: "B's note" }, fields: B_FIELDS } },
+    ]),
+  }, { query: `?client=${A}` });
+  await page.eval(SETTLE(250));
+
+  const CLICK = `
+    (function () {
+      var box = document.querySelector('#visibility-list input[data-key="their-process"]');
+      box.click();
+      return true;
+    })()`;
+
+  await page.eval(CLICK);          // A's toggle: in flight, and stays there
+  await page.eval(SETTLE(40));
+  await page.eval(CLICK_ROW(B));
+  await page.eval(SETTLE(300));
+  await page.eval(CLICK);          // B's toggle, same slug
+  await page.eval(SETTLE(400));
+
+  const r = await page.eval(`
+    (function () {
+      var box = document.querySelector('#visibility-list input[data-key="their-process"]');
+      return {
+        checked: box ? box.checked : null,
+        puts: window.__probe.calls
+          .filter(function (c) { return c.method === "PUT"; })
+          .map(function (c) { return c.path.slice(c.path.lastIndexOf("/") + 1); }),
+        state: document.getElementById("visibility-state").textContent,
+      };
+    })()`);
+
+  // The screen may only show it ticked because the server was actually told.
+  const askedB = r.puts.filter((id) => id === B).length === 1;
+  check(
+    "V18s", "a toggle on one client is not swallowed by an in-flight toggle of the same slug on another",
+    askedB && r.checked === true,
+    `PUTs=${JSON.stringify(r.puts)} (must contain B once) · B's box checked=${r.checked} · ` +
+      `state=${JSON.stringify(r.state)}`,
+  );
+  await page.close();
+}
+
+async function probeV18dup() {
+  // A duplicated heading arrives with key: null. It must still be listed — the recruiter can
+  // see it in the textarea — but it must not be tickable, and the row has to say why.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "GET", match: `^/api/clients/${A}$`, status: 200,
+        body: {
+          client: { id: A, name: LIST.clients[0].name, note: "A's note" },
+          fields: [
+            { key: null, heading: "Notes", chars: 30, candidate_visible: false },
+            { key: null, heading: "Notes", chars: 40, candidate_visible: false },
+            { key: "practical", heading: "Practical", chars: 88, candidate_visible: false },
+          ],
+        } },
+    ]),
+  }, { query: `?client=${A}` });
+  await page.eval(SETTLE(250));
+
+  const r = await page.eval(`
+    (function () {
+      var boxes = [].map.call(document.querySelectorAll("#visibility-list input"), function (i) {
+        return { key: i.dataset.key || null, disabled: i.disabled };
+      });
+      var metas = [].map.call(document.querySelectorAll(".visibility-meta"), function (n) {
+        return n.textContent;
+      });
+      return { boxes: boxes, metas: metas, rows: document.querySelectorAll("#visibility-list li").length };
+    })()`);
+
+  const explained = r.metas.filter((m) => m.indexOf("Two sections have this name") === 0).length;
+  check(
+    "V18d", "a duplicated heading is listed, unflaggable, and says why",
+    r.rows === 3 && r.boxes[0].disabled && r.boxes[1].disabled && !r.boxes[2].disabled &&
+      explained === 2,
+    `rows=${r.rows} · boxes=${JSON.stringify(r.boxes)} · metas=${JSON.stringify(r.metas)}`,
+  );
+  await page.close();
+}
+
+async function probeV18tap() {
+  // The same CRAFT floor M10 measures, on the row this ticket adds.
+  const page = await openScreen({ routes: baseRoutes() }, { query: `?client=${A}`, viewport: 360 });
+  await page.eval(SETTLE(250));
+  const r = await page.eval(`
+    (function () {
+      var row = document.querySelector("#visibility-list label");
+      return {
+        h: row ? Math.round(row.getBoundingClientRect().height) : null,
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      };
+    })()`);
+  check(
+    "V18t", "the visibility row meets the 44px floor and does not scroll the page at 360px",
+    r.h >= 44 && r.scrollWidth <= r.innerWidth,
+    `row=${r.h}px (floor 44) · viewport=${r.innerWidth} scrollWidth=${r.scrollWidth}`,
+  );
+  await page.close();
+}
+
 /* ── run ─────────────────────────────────────────────────────────────────────────────── */
 
 const server = await serveStatic();
 const chrome = await startChrome();
 try {
   for (const probe of [probeH1, probeH2, probeH3add, probeH3back, probeM9,
-                       probeM3, probeM4, probeM7, probeM8, probeM10, probeH6]) {
+                       probeM3, probeM4, probeM7, probeM8, probeM10, probeH6,
+                       probeV18, probeV18slug, probeV18dup, probeV18tap]) {
     await probe();
   }
 } finally {

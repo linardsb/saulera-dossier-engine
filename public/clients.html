@@ -85,6 +85,20 @@
           <span class="save-state" id="save-state" role="status"></span>
         </div>
 
+        <!-- Below Save because it describes the SAVED note, and above the delete block so the
+             two most opposite actions on the screen stay non-adjacent. The list itself is built
+             in clients.js from what the API returns; the legend and the hint render before any
+             of that, so the rule is on screen even while the list is loading. -->
+        <fieldset class="visibility" id="visibility">
+          <legend class="field">What a candidate can see</legend>
+          <p class="field-hint">Nothing in this note reaches a candidate unless you tick it
+            here. Tick only what would help someone get ready for the interview, and never
+            anything you would not say to their face.</p>
+          <p class="visibility-empty" id="visibility-empty" hidden></p>
+          <ul class="visibility-list" id="visibility-list"></ul>
+          <p class="save-state" id="visibility-state" role="status"></p>
+        </fieldset>
+
         <!-- Removal, away from Save on purpose: the two most opposite actions on the screen
              should not be neighbours. The confirm in clients.js names the client and what
              leaves with it. -->
