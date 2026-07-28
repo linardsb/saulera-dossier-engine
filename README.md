@@ -209,8 +209,11 @@ back up.
 - `public/` — the one screen (`index.html`, `app.js`), the note editor (`clients.html`,
   `clients.js`), `tokens.css`, the default token layer, `app.css`, the components built from
   it, and `_headers`
-- `scripts/setup-d1.py` and `scripts/dev.py` — binding the databases and the local dev loop
-- `wrangler.toml` — the Pages project name and compatibility date
+- `scripts/setup-d1.py` and `scripts/dev.py` — binding the databases and the local dev loop.
+  There is deliberately no `wrangler.toml` (28 Jul 2026): with one present the CI build
+  replaces the project's deployment config with the file's contents and wipes the D1 binding
+  on every deploy. Compatibility date and `nodejs_compat` live in the project config, set the
+  same way the bindings are; `DEPLOY.md` §1 records the incident
 
 **Config — per agency, never merged upstream:**
 

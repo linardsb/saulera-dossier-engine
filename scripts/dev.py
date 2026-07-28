@@ -164,10 +164,18 @@ def main():
 
     binding, uuid = DATABASES[LOCAL_ENV][1], uuids[LOCAL_ENV]
     print(f"serving public/ with {binding}={uuid} on http://localhost:8788", flush=True)
+    # Compatibility date and flags on the command line, because there is no wrangler.toml to
+    # carry them any more (28 Jul 2026): a wrangler.toml with `pages_build_output_dir` makes
+    # the CI build treat the FILE as the configuration source and replace the project's
+    # deployment config with it — wiping the D1 binding setup-d1.py sets, every deploy. The
+    # date and flags now live in the project config (set by the same API the bindings use),
+    # and locally they are passed here. nodejs_compat is for @anthropic-ai/sdk in
+    # functions/api/generate.js.
     os.execvpe(
         "npx",
         ["npx", WRANGLER, "pages", "dev", "public",
-         "--d1", f"{binding}={uuid}", "--persist-to", STATE],
+         "--d1", f"{binding}={uuid}", "--persist-to", STATE,
+         "--compatibility-date=2026-07-27", "--compatibility-flag=nodejs_compat"],
         env,
     )
 

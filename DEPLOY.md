@@ -85,8 +85,16 @@ preview build of #5.
 tells you what to export if it cannot. Every command in this file pins the wrangler version,
 because bare `npx wrangler` resolves to different versions on different Node versions.
 
-**The project name is load-bearing in one place.** `wrangler.toml`'s `name` must match the
-Pages project exactly or the build fails. Read it off the dashboard rather than assuming.
+**There is no `wrangler.toml`, deliberately (28 Jul 2026).** There used to be one carrying
+the project name, `pages_build_output_dir` and the compatibility fields — and its presence
+made every CI build treat the FILE as the configuration source and **replace the project's
+deployment config with it**, silently wiping the D1 binding that `setup-d1.py` sets (builds
+`98b86ef1` and `723453d6` both did this; the symptom is `not_configured` from every `/api/*`
+right after a successful deploy). Build output, compatibility date and `nodejs_compat` now
+live in the project config next to the bindings, set once per agency through the same API;
+local dev passes the same values on the command line in `scripts/dev.py`. Do not reintroduce
+the file without also moving the D1 binding into it — which Decision 3 forbids, so: do not
+reintroduce the file.
 
 Smoke test — both must be `200` (or `302` to Access once step 2–3 are done):
 
@@ -293,7 +301,8 @@ the dashboard.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `503 {"error":"not_configured"}` from any `/api/*` | the `DB` binding did not resolve | re-run `scripts/setup-d1.py` and read its confirming GET; if it reports the binding present and the deployment still answers 503, bind it in the dashboard under Settings → Bindings and redeploy |
+| `503 {"error":"not_configured"}` from any `/api/*` | the `DB` binding did not resolve | re-run `scripts/setup-d1.py` and read its confirming GET, then redeploy — bindings apply to the NEXT deployment; if it reports the binding present and the deployment still answers 503, bind it in the dashboard under Settings → Bindings and redeploy |
+| `not_configured` appearing right AFTER a successful deploy | a `wrangler.toml` with `pages_build_output_dir` is back in the repo, and the build replaced the project config with the file's (which carries no binding) | delete the file (see section 1), re-run `scripts/setup-d1.py`, redeploy |
 | `503 {"error":"not_migrated"}` from any `/api/*` | the binding resolved, but that database has no tables | `npm run db:remote` for production, `npm run db:preview` for previews. They are separate databases and separate operations, and both have been run |
 | `200` returning `index.html` instead of JSON | `functions/` was not picked up | confirm it is at the repo root and the project root directory is `/`; the build log should say `Found Functions directory at /functions` |
 | the build fails with a module error | a Function could not bundle its `../../src/` imports | move the shared modules to `functions/_lib/` and re-point the imports; the tests can import from anywhere |
