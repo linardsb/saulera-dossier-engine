@@ -19,13 +19,16 @@
  * assert this file's export surface, and an IIFE has no export surface to assert. A module script
  * needs no build step and no polyfill, and nothing else in public/ changes.
  *
- * ONE RULE IN THE WALKER: an unknown name is reported to the console and skipped. Nesting, props
- * and vocabulary are `assertBrief`'s job and already ran server-side, so re-checking them here
- * would duplicate a schema this file cannot import (see BRIEF_BLOCK_NAMES). The throw-versus-warn
- * split is deliberate rather than inconsistent: a shape bug in front of a recruiter should stop a
- * Send, and the same bug in front of a candidate who can fix nothing should degrade the page
- * rather than blank it. src/prep/schema.js:212-224 and src/prep/verify.js:10-14 draw the same
- * line from the other side.
+ * ONE RULE IN THE WALKER: a block that cannot reach the screen is reported to the console and
+ * skipped, and the rest of the page still renders. Three things trip it — a name REGISTRY does
+ * not hold, a constructor that throws, and children handed to a constructor that does not take
+ * them — and none of the three is allowed to happen in silence. Nesting, props and vocabulary
+ * are `assertBrief`'s job and already ran server-side, so re-checking them here would duplicate
+ * a schema this file cannot import (see BRIEF_BLOCK_NAMES). The throw-versus-warn split is
+ * deliberate rather than inconsistent: a shape bug in front of a recruiter should stop a Send,
+ * and the same bug in front of a candidate who can fix nothing should degrade the page rather
+ * than blank it. src/prep/schema.js:212-224 and src/prep/verify.js:10-14 draw the same line from
+ * the other side.
  *
  * Every constructor builds its own subtree with createElement and text nodes, never an
  * HTML-parsing assignment — public/app.js:869's rule, held for the same reason: this is model
@@ -207,12 +210,28 @@ function provenanceNode(doc, competency) {
   return wrap;
 }
 
-/** The panel equivalent, over `{source_field_key, failed_field_key}`. A verified entry names
- *  where it came from in the candidate's words; the field key itself is an internal slug
- *  (#18's) and never reaches the screen. */
+/**
+ * Whether a panel entry is our guess rather than the client's note, over
+ * `{source_field_key, failed_field_key}`.
+ *
+ * ONE predicate, read by both the mark and the caption. Two copies of it disagreed on the
+ * degenerate branch, and the caption's copy failed OPEN: an `entry &&` guard made a falsy entry
+ * *sourced*, captioning a guess "From our notes on this client". Fail closed is the house rule
+ * (provenanceNode:195) and one expression is how it stays true at both ends.
+ *
+ * There is deliberately no guard for a non-object entry. It throws, the walker's catch skips the
+ * whole block, and the candidate sees no panel at all rather than a nameless row wearing an
+ * Unverified mark — CompetencyMap:265-266 makes the same call about an empty row.
+ */
+function panelUnsourced(entry) {
+  return "failed_field_key" in entry || !text(entry.source_field_key).trim();
+}
+
+/** How that renders. A sourced entry names where it came from in the candidate's words; the field
+ *  key itself is an internal slug (#18's) and never reaches the screen. */
 function panelSourceNode(doc, entry) {
-  const failed = entry && ("failed_field_key" in entry || !text(entry.source_field_key).trim());
-  return el(doc, "p", "prep-caption", failed ? COPY.panelUnverifiedNote : COPY.panelSourced);
+  const copy = panelUnsourced(entry) ? COPY.panelUnverifiedNote : COPY.panelSourced;
+  return el(doc, "p", "prep-caption", copy);
 }
 
 /* ── the five blocks #19 emits ─────────────────────────────────────────────────────────── */
@@ -276,7 +295,7 @@ function PanelBrief(doc, props, ctx, id) {
   body.appendChild(el(doc, "p", "prep-lede", props.intro));
 
   for (const person of Array.isArray(props.panel) ? props.panel : []) {
-    const unsourced = "failed_field_key" in person || !text(person.source_field_key).trim();
+    const unsourced = panelUnsourced(person);
 
     const entry = el(doc, "div", "claim prep-entry");
     if (unsourced) entry.classList.add("claim-unverified");
@@ -517,15 +536,18 @@ export const REGISTRY = Object.freeze({
  * Walk a `{name, props, children}` payload and mount it.
  *
  * Mirrors the traversal `assertBrief` already ran server-side (src/prep/schema.js:254-295), so
- * the two read as one system, and applies exactly one rule of its own: a name that is not in
- * REGISTRY is reported to the console and skipped. Nothing is injected and no placeholder is
- * rendered in its place.
+ * the two read as one system, and applies exactly one rule of its own: a block that cannot be
+ * rendered — a name that is not in REGISTRY, or a constructor that throws on its props — is
+ * reported to the console and skipped, and the walk carries on. Nothing is injected and no
+ * placeholder is rendered in its place.
  *
  * @param payload  a stored brief: `{ blocks, competencies }`
  * @param mount    the element to render into; its previous contents are replaced
  * @param ctx      `{ doc, competencies, onRung }`, all optional
  * @returns `{ rendered, skipped, unresolved }` — a count and the offending names, so the caller
- *          can show an honest empty state rather than a blank page.
+ *          can show an honest empty state rather than a blank page. Children dropped by a
+ *          constructor that does not nest are NOT in `skipped`: the parent rendered and still
+ *          counts, so the caller has a page to show. The console is where that one lands.
  */
 export function renderBlocks(payload, mount, ctx = {}) {
   const doc = ctx.doc ?? globalThis.document;
@@ -558,16 +580,47 @@ export function renderBlocks(payload, mount, ctx = {}) {
       }
 
       const id = `${prefix}-${index}`;
-      parent.appendChild(
-        build(doc, (block && block.props) || {}, {
-          competencies,
-          onRung: ctx.onRung,
-          children: (block && block.children) || [],
-          unresolved,
-          render,
-        }, id),
-      );
-      rendered += 1;
+      const children = (block && block.children) || [];
+
+      // A getter, so the walker learns whether the constructor TOOK its children without holding
+      // a list of which names nest. That fact already lives in src/prep/schema.js:281-292 and in
+      // CompetencyMap itself; a third copy here would be the one that rots, and it would make
+      // this walker know names, which is the one thing it does not do.
+      let tookChildren = false;
+      const blockCtx = {
+        competencies,
+        onRung: ctx.onRung,
+        get children() {
+          tookChildren = true;
+          return children;
+        },
+        unresolved,
+        render,
+      };
+
+      try {
+        parent.appendChild(build(doc, (block && block.props) || {}, blockCtx, id));
+        rendered += 1;
+      } catch (err) {
+        // An unknown name and a malformed prop are the same event to a candidate, so they get the
+        // same handling. `mount.textContent = ""` has already run and earlier blocks are already
+        // on screen, so a throw escaping here would leave a half-rendered brief under the red
+        // "we could not load your prep" line — two contradictory statements at once, which is
+        // worse than either. src/prep/schema.js is what stops this reaching a recruiter's Send.
+        console.warn(`prep registry: ${name} threw while rendering; skipped`, err);
+        skipped.push(text(name));
+        continue;
+      }
+
+      // Nine of the ten constructors take no children, and `assertBrief` rejects them there — but
+      // only on the brief path. The session names (#23/#24/#25) have no schema behind them yet,
+      // and a child that vanishes with no count, no warning and nothing in `skipped` is the exact
+      // silence the rule above exists to prevent, arriving through a different door.
+      if (!tookChildren && children.length) {
+        console.warn(
+          `prep registry: ${name} does not nest; ${children.length} child block(s) skipped`,
+        );
+      }
     }
   }
 

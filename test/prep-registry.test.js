@@ -11,7 +11,7 @@
 //    2. the source scans: nothing parses HTML, nothing reaches browser storage
 //    3. the real stored payload renders, landmarks and all
 //    4. the session specimens render
-//    5. an unknown name is skipped and leaves no trace
+//    5. a block that cannot render — an unknown name, a throw, dropped children — degrades
 //    6. provenance renders honestly, and a failed quote does not reach the candidate
 //    7. nothing anywhere carries a rank
 //    8. the help ladder's rungs are disclosures
@@ -309,7 +309,7 @@ test("HelpLadder.structure is headings, never a finished answer", () => {
   }
 });
 
-/* ── group 5: a name outside the vocabulary ────────────────────────────────────────────── */
+/* ── group 5: a block that cannot render ───────────────────────────────────────────────── */
 
 test("an unknown block name is skipped, reported, and leaves no trace", () => {
   const payload = stored();
@@ -335,6 +335,93 @@ test("an unknown name nested in children is skipped the same way", () => {
   assert.ok(warnings.some((w) => w.includes("AnswerCard")));
   assert.ok(!html.includes("AnswerCard"));
   assert.ok(!html.includes("a finished answer"));
+});
+
+test("a block whose constructor throws is skipped rather than allowed to blank the page", () => {
+  // registry.js:22-28's rule, reached by a malformed PROP rather than by an unknown name. A null
+  // panel entry throws inside PanelBrief; before the walker's guard the throw escaped renderBlocks
+  // entirely, and brief.js:79-82 then printed "We could not load your prep" underneath a page that
+  // was already half-rendered — two contradictory statements on screen at once.
+  const payload = stored();
+  payload.blocks.find((b) => b.name === "PanelBrief").props.panel.push(null);
+
+  const { result, mount, warnings } = renderCapturingWarnings(payload);
+
+  assert.deepEqual(result.skipped, ["PanelBrief"]);
+  assert.equal(result.rendered, countBlocks(payload.blocks) - 1);
+  assert.ok(
+    warnings.some((w) => w.includes("PanelBrief") && w.includes("threw")),
+    "the throw was swallowed rather than reported",
+  );
+  // The degrade is one block wide. Everything either side of it is still on the page.
+  assert.ok(textOf(mount).includes("What this role is really about"), "an earlier block was lost");
+  assert.ok(textOf(mount).includes("The practical details"), "a later block never rendered");
+  // And the block that threw left nothing behind: the constructor builds its subtree and the
+  // walker appends it afterwards, so a throw means nothing was appended at all.
+  assert.ok(!textOf(mount).includes("Who you are likely to meet"), "half a panel reached the page");
+});
+
+test("a child that throws degrades the child and leaves its parent standing", () => {
+  // The granularity claim behind where that guard sits: inside the per-block loop, so a nested
+  // block's throw is caught by its OWN iteration. `assertBrief` would reject this payload — a
+  // PanelBrief does not nest — but the session path (#23/#24/#25) has no assertBrief in front of
+  // it, and this walker is the contract those tickets inherit.
+  const payload = {
+    blocks: [
+      {
+        name: "CompetencyMap",
+        props: { intro: "What they keep asking about", competency_ids: ["c1"] },
+        children: [
+          { name: "PanelBrief", props: { intro: "Who you will meet", panel: [null] } },
+          { name: "StoryBankCard", props: { prompt: "A time you shipped late", skeleton: ["Situation"] } },
+        ],
+      },
+    ],
+    competencies: [
+      { id: "c1", label: "Shipping under pressure", verified: true, source_quote: "ships on time" },
+    ],
+  };
+
+  const { result, mount, warnings } = renderCapturingWarnings(payload);
+
+  assert.deepEqual(result.skipped, ["PanelBrief"]);
+  assert.equal(result.rendered, 2, "a bad child took its parent or its sibling down with it");
+  assert.ok(warnings.some((w) => w.includes("PanelBrief") && w.includes("threw")));
+  assert.ok(textOf(mount).includes("Shipping under pressure"), "the parent block did not render");
+  assert.ok(textOf(mount).includes("A time you shipped late"), "the sibling child did not render");
+});
+
+test("exactly one constructor takes children, and the nine that do not say so out loud", () => {
+  // Derived over the whole registry rather than asserted about CompetencyMap by name. Two things
+  // this catches that a single warning check would not: a child dropped in silence by any of the
+  // nine (no warning, no `skipped` entry, `rendered` still counting the parent — so brief.js:76's
+  // empty state never fires either), and the day #23 makes a SECOND name nest without telling the
+  // walker. The walker holds no list of names; this is where that stays honest.
+  const consumers = [];
+
+  for (const name of Object.keys(REGISTRY)) {
+    const payload = {
+      blocks: [
+        {
+          name,
+          props: {},
+          children: [{ name: "StoryBankCard", props: { prompt: "A nested story", skeleton: [] } }],
+        },
+      ],
+      competencies: [],
+    };
+    const { html, warnings } = renderCapturingWarnings(payload);
+
+    if (html.includes("A nested story")) consumers.push(name);
+    else {
+      assert.ok(
+        warnings.some((w) => w.includes(name) && w.includes("does not nest")),
+        `${name} dropped a child block in silence`,
+      );
+    }
+  }
+
+  assert.deepEqual(consumers, ["CompetencyMap"]);
 });
 
 test("a competency id that resolves to nothing is reported and renders no empty row", () => {
@@ -471,6 +558,49 @@ test("a panel entry whose field key failed shows the word and never the key", ()
   assert.ok(html.includes("From our notes on this client"), "the sourced entry names its source");
   // #18's slug is an internal key. A candidate has no use for it and no way to read it.
   assert.ok(!html.includes("their-process"), "an internal field key reached the candidate's screen");
+});
+
+test("the panel's mark and its caption cannot disagree about where an entry came from", () => {
+  // ONE predicate behind both (registry.js:panelUnsourced). There were two, and they disagreed on
+  // the degenerate branch: the caption's copy carried an `entry &&` guard and so failed OPEN,
+  // captioning a guess "From our notes on this client" — a mark saying our guess and a caption
+  // saying the client's note, on the same row. No input below changes behaviour today; what this
+  // pins is that the two ends are computed from the same expression and cannot drift apart again.
+  const payload = {
+    blocks: [
+      {
+        name: "PanelBrief",
+        props: {
+          intro: "Who you will meet",
+          panel: [
+            { who: "Governance lead", what_they_probe: "Record-keeping", source_field_key: "their-process" },
+            { who: "Whitespace key", what_they_probe: "How you decide", source_field_key: "   " },
+            { who: "Missing key", what_they_probe: "How you plan", what_else: "" },
+            {
+              who: "Failed key",
+              what_they_probe: "How you prioritise",
+              source_field_key: "",
+              failed_field_key: "their-processes",
+            },
+          ],
+        },
+      },
+    ],
+    competencies: [],
+  };
+
+  const { mount } = render(payload);
+  const rows = findAll(mount, (n) => n.classes.includes("prep-entry"));
+  assert.equal(rows.length, 4);
+
+  for (const row of rows) {
+    const marked = serialize(row).includes("mark-unverified");
+    const sourced = textOf(row).includes("From our notes on this client");
+    assert.equal(marked, !sourced, `${textOf(row)}: the mark and the caption tell different stories`);
+  }
+
+  // Not vacuous: one row is genuinely sourced and three are genuinely not.
+  assert.equal(rows.filter((r) => serialize(r).includes("mark-unverified")).length, 3);
 });
 
 test("no field key from the stored payload reaches the page either", () => {
