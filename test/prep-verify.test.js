@@ -159,7 +159,59 @@ test("verifyBrief does not mutate the payload it was handed", () => {
 
 test("briefSummary counts what the recruiter is being asked to stand behind", () => {
   const { payload: out } = run();
-  assert.deepEqual(briefSummary(out), { sourced: 2, unverified: 1, total: 3 });
+  assert.deepEqual(briefSummary(out), {
+    sourced: 2,
+    unverified: 1,
+    total: 3,
+    panel_sourced: 2,
+    panel_unsourced: 0,
+    panel_total: 2,
+  });
+});
+
+test("briefSummary moves with the note half too, not only the competencies", () => {
+  // The reason this matters: #22 wires its Send gate to this summary. A summary derived purely
+  // from `competencies` is byte-identical between a clean brief and one with EVERY panel
+  // attribution hallucinated — so the button goes green on exactly the defect verifyBrief was
+  // added to catch. This is the assertion that makes that impossible.
+  const clean = briefSummary(run().payload);
+
+  const p = payload();
+  for (const entry of p.blocks[2].props.panel) entry.source_field_key = "never-shared";
+  const dirty = briefSummary(run(p).payload);
+
+  assert.notDeepEqual(dirty, clean, "an all-hallucinated panel must not summarise as a clean one");
+  assert.deepEqual(
+    { sourced: dirty.sourced, unverified: dirty.unverified, total: dirty.total },
+    { sourced: clean.sourced, unverified: clean.unverified, total: clean.total },
+    "and the competency counts are untouched — the note half is what moved",
+  );
+  assert.equal(dirty.panel_sourced, 0);
+  assert.equal(dirty.panel_unsourced, 2);
+  assert.equal(dirty.panel_total, 2, "demote, don't drop, holds in the counts as well");
+});
+
+test("re-verifying an already-verified payload changes nothing", () => {
+  // The re-verify path is real — the script's own, and #22 re-verifying a payload out of storage.
+  // verifyPack is idempotent because it early-returns on an already-demoted claim; verifyBrief's
+  // panel half has to be too, or the second pass overwrites failed_field_key with the blank it
+  // wrote on the first and the diagnostic is gone at the moment it is being read.
+  const p = payload();
+  p.blocks[2].props.panel[0].source_field_key = "their-processes";
+
+  const pass1 = verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const pass2 = verifyBrief(pass1.payload, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+
+  assert.equal(
+    pass2.payload.blocks[2].props.panel[0].failed_field_key,
+    "their-processes",
+    "the key the model invented survives the second pass",
+  );
+  assert.equal(pass2.failures.filter((f) => f.kind === "panel_source").length, 0, "not re-reported");
+  assert.deepEqual(briefSummary(pass2.payload), briefSummary(pass1.payload), "and the gate holds");
+  // The competency half is already idempotent for free: source_quote is preserved, so the same
+  // quote fails the same way and failed_quote is rewritten with the same value.
+  assert.deepEqual(pass2.payload.competencies, pass1.payload.competencies);
 });
 
 test("a brief with nothing extractable summarises as zero rather than crashing", () => {
@@ -169,6 +221,9 @@ test("a brief with nothing extractable summarises as zero rather than crashing",
     sourced: 0,
     unverified: 0,
     total: 0,
+    panel_sourced: 0,
+    panel_unsourced: 0,
+    panel_total: 0,
   });
   const { payload: out, failures } = verifyBrief(
     { role_title: "", blocks: [], competencies: [], questions: [] },

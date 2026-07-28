@@ -19,6 +19,8 @@
  *   node scripts/gen-brief.js --brief <brief.md> --cv <cv.md> --fields <visible-fields.json> \
  *                             --client "<name>" --interview 2026-08-12 [--out out/]
  *
+ * Exit codes: 2 is a bad invocation or an unreadable input, 1 is a brief that is NOT SENDABLE.
+ *
  * `--fields` is #18's visibleFields(note, visibleKeys) output, as JSON. Deliberately not `--note`:
  * this path never sees the whole note, and giving it a flag that took one would be the leak.
  */
@@ -40,13 +42,17 @@ const cvPath = arg("cv");
 const fieldsPath = arg("fields");
 const clientName = arg("client");
 const interviewAt = arg("interview");
-const outDir = arg("out", ".");
+// out/, not the repo root. brief.json is derived from a real CV, a real client brief and the
+// client's privileged visible slice, and this tree is shared with other sessions — a default that
+// drops candidate-derived output next to the source files is one `git add -A` from committing it.
+// scripts/pack.mjs:43 makes the same move, deriving its default from its input's directory.
+const outDir = arg("out", "out");
 
 if (!briefPath || !cvPath || !fieldsPath || !clientName || !interviewAt) {
   console.error(
     "usage: node scripts/gen-brief.js --brief <brief.md> --cv <cv.md> \\\n" +
       "                                --fields <visible-fields.json> --client \"<name>\" \\\n" +
-      "                                --interview <YYYY-MM-DD> [--out <dir>]",
+      "                                --interview <YYYY-MM-DD> [--out <dir>, default out/]",
   );
   process.exit(2);
 }
@@ -70,13 +76,26 @@ try {
   process.exit(2);
 }
 
+// Read OUTSIDE the try, as scripts/pack.mjs:58-59 does. Inside it, a missing file's ENOENT is
+// caught by the handler below and exits 1 — this script's contract for "a claim did not verify" —
+// when every other input error here exits 2. A typo'd path must not read as an unsendable brief.
+let briefText;
+let cvText;
+try {
+  briefText = read(briefPath);
+  cvText = read(cvPath);
+} catch (err) {
+  console.error(`cannot read ${err.path ?? "an input file"}: ${err.message}`);
+  process.exit(2);
+}
+
 let result;
 try {
   result = await generateBrief(new Anthropic(), {
     clientName,
     visibleFields,
-    brief: read(briefPath),
-    cv: read(cvPath),
+    brief: briefText,
+    cv: cvText,
     interviewAt,
   });
 } catch (err) {
@@ -113,6 +132,12 @@ for (const c of payload.competencies) {
       `${questionsBy.get(c.id) ?? 0} questions, importance ${c.importance}`,
   );
 }
+// The note half of §3, alongside the JD half above. Printing only the competencies would show a
+// clean run for a brief whose every panel attribution was invented.
+console.log(
+  `panel claims: ${provenance.panel_sourced} sourced, ` +
+    `${provenance.panel_unsourced} unsourced — ${provenance.panel_total} total`,
+);
 console.log(`questions: ${payload.questions.length}`);
 
 // The only way to tell the breakpoint actually cached. 0 on a first run is expected — the schema

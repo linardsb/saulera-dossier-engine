@@ -55,6 +55,12 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
     if (block.name !== "PanelBrief" || !Array.isArray(block.props?.panel)) return block;
 
     const panel = block.props.panel.map((entry, panelIndex) => {
+      // Idempotent, the way verifyPack is (provenance.js:55, `source_type === "unverified"`).
+      // A demoted entry carries source_field_key: "", which `keys` never holds — so without this
+      // a second pass re-demotes it and overwrites failed_field_key with the blank, destroying
+      // the diagnostic on exactly the path that needs it most: a payload re-verified out of
+      // storage, where the original key is the only record of what the model claimed.
+      if ("failed_field_key" in entry) return entry;
       if (keys.has(entry.source_field_key)) return entry;
 
       failures.push({
@@ -74,13 +80,36 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
   return { payload: { ...payload, blocks, competencies }, failures };
 }
 
-/** Counts for the script's output and for #22's send gate. */
+/**
+ * Counts for the script's output and for #22's send gate — BOTH halves of §3, which is what
+ * makes it usable as that gate. Counting only competencies would let a brief with every panel
+ * attribution hallucinated summarise byte-identically to a clean one, and a Send button wired to
+ * it would go green on the failure this whole mechanism exists to catch.
+ *
+ * `sourced`/`unverified`/`total` keep meaning competencies; the panel counts are additive, so a
+ * caller reading only the JD half is unaffected.
+ *
+ * These are read out of the PAYLOAD rather than off `failures` deliberately. The panel demotion
+ * above is idempotent, so re-verifying a stored payload emits no `panel_source` failure at all
+ * while the competency half still re-fails — on that path `failures` is a complete gate for the
+ * JD half and an empty one for the note half, and the payload is the only thing that still knows.
+ */
 export function briefSummary(payload) {
   const competencies = payload.competencies ?? [];
   const sourced = competencies.filter((c) => c.verified).length;
+
+  const panel = (payload.blocks ?? []).flatMap((b) =>
+    b?.name === "PanelBrief" && Array.isArray(b.props?.panel) ? b.props.panel : [],
+  );
+  // The demotion marker, not the blanked key: it is what survives a second pass.
+  const panelUnsourced = panel.filter((e) => "failed_field_key" in e).length;
+
   return {
     sourced,
     unverified: competencies.length - sourced,
     total: competencies.length,
+    panel_sourced: panel.length - panelUnsourced,
+    panel_unsourced: panelUnsourced,
+    panel_total: panel.length,
   };
 }

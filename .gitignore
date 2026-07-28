@@ -3,3 +3,7 @@ node_modules/
 .wrangler/
 .dev.vars
 .dev.vars.*
+
+# Generation output. Candidate-derived — a real CV, a real brief, the client's visible slice.
+out/
+brief.json

@@ -256,12 +256,27 @@ export function assertBrief(brief) {
     if (!BLOCK_NAMES.includes(b.name)) {
       throw new Error(`brief: ${where}.name is ${b.name}, which is not in the vocabulary`);
     }
+    // A child is a StoryBankCard leaf — `children.items` is a single $ref to that def and the
+    // comment at :15 says so. This is the runtime half of that claim, and it has to sit HERE
+    // rather than beside the nesting rule below: every other block carries no `children`, so a
+    // nested PanelBrief returns at the "does not nest" branch and never reaches a later guard.
+    if (nested && b.name !== "StoryBankCard") {
+      throw new Error(
+        `brief: ${where} is a ${b.name} nested inside children, where only StoryBankCard leaves live`,
+      );
+    }
     if (!b.props || typeof b.props !== "object") throw new Error(`brief: ${where}.props`);
     if (b.name === "CompetencyMap") {
       resolve(`${where}.props.competency_ids`, b.props.competency_ids);
     }
     if (b.name === "StoryBankCard") {
       resolve(`${where}.props.covers_competency_ids`, b.props.covers_competency_ids);
+    }
+    // Not props validation in general (that is the decoder's, and widening it here would be
+    // scope): `verifyBrief` reaches the note half of §3 through this exact array, and skips the
+    // check silently when it is not one. A skipped provenance check is the failure nobody sees.
+    if (b.name === "PanelBrief" && !Array.isArray(b.props.panel)) {
+      throw new Error(`brief: ${where}.props.panel must be an array`);
     }
     // Only CompetencyMap nests, and only one level deep — the schema is non-recursive by
     // construction and this is the runtime half of that.
@@ -271,7 +286,6 @@ export function assertBrief(brief) {
       }
       return;
     }
-    if (nested) throw new Error(`brief: ${where} is a CompetencyMap nested inside children`);
     if (!Array.isArray(b.children)) throw new Error(`brief: ${where}.children must be an array`);
     for (const [i, child] of b.children.entries()) {
       checkBlock(child, `${where}.children[${i}]`, true);

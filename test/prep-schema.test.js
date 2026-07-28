@@ -75,6 +75,40 @@ test("children on a block that does not nest is rejected", () => {
   assert.match(messageOf(() => assertBrief(deep)), /nested inside children/);
 });
 
+test("a child that is in the vocabulary but is not a StoryBankCard is rejected", () => {
+  // The gap a CompetencyMap-only nesting guard leaves. `children.items` is a single $ref to
+  // StoryBankCard, so the decoder cannot emit this — but assertBrief exists precisely because a
+  // rule living only in the schema is an untested claim about a third party's decoder, and the
+  // payload does not always arrive from it (the script's re-verify path, #22 re-verifying a
+  // stored payload). A PanelBrief that lands in here carries source attributions that
+  // verifyBrief never descends to check, and #21 renders it happily — attribution and all.
+  for (const name of BLOCK_NAMES.filter((n) => n !== "StoryBankCard")) {
+    const p = payload();
+    p.blocks[1].children[0] = { name, props: {} };
+    assert.match(
+      messageOf(() => assertBrief(p)),
+      new RegExp(`blocks\\[1\\]\\.children\\[0\\] is a ${name} nested inside children`),
+      `a nested ${name} must be rejected`,
+    );
+  }
+});
+
+test("a PanelBrief whose panel is not an array is rejected", () => {
+  // verifyBrief:55 reaches the note half of §3 through `props.panel` and returns the block
+  // untouched when it is not an array — so without this the provenance check is SKIPPED rather
+  // than failed, which is the version of the failure nobody sees.
+  const p = payload();
+  const i = p.blocks.findIndex((b) => b.name === "PanelBrief");
+  assert.ok(i > -1, "the fixture must carry a PanelBrief for this to test anything");
+
+  p.blocks[i].props.panel = { who: "a lone object, not a list" };
+  assert.match(messageOf(() => assertBrief(p)), new RegExp(`blocks\\[${i}\\]\\.props\\.panel`));
+
+  const missing = payload();
+  delete missing.blocks[i].props.panel;
+  assert.match(messageOf(() => assertBrief(missing)), /props\.panel must be an array/);
+});
+
 test("a competency with an empty or missing source_quote is rejected", () => {
   // The brief half of architecture §3 rests entirely on this quote existing. A competency with
   // no quote is not an unverified competency — it is one with no provenance mechanism at all.

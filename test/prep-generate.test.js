@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { generateBrief, MAX_TOKENS } from "../src/prep/generate.js";
 import { BRIEF_SCHEMA } from "../src/prep/schema.js";
-import { MODEL, FALLBACK_BETA } from "../src/generate.js";
+import { MODEL, EFFORT, FALLBACK_BETA } from "../src/generate.js";
 import { StoreError } from "../src/store.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -105,7 +105,11 @@ test("structured outputs carry the brief schema itself, not a copy", async () =>
   // Identity, not deep equality: a copy would drift from the schema the walker in
   // prep-schema.test.js guards, and the guard would then be defending nothing that ships.
   assert.equal(config.format.schema, BRIEF_SCHEMA, "the schema is prep/schema.js's");
-  assert.ok(config.effort, "effort is the lever before max_tokens is (generate.js:39-45)");
+  // Pinned to the constant, not merely truthy: effort is the one parameter here with a direct
+  // latency and cost consequence — "the lever before the pack shrinks" (generate.js:39-45) — and
+  // it is imported so a silent drop to "low" cannot pass the way any non-empty string would.
+  assert.equal(config.effort, EFFORT, "effort is the pack call's constant — one definition");
+  assert.equal(EFFORT, "high");
 });
 
 test("the refusal fallback is opted into, with its matched beta header", async () => {
@@ -160,7 +164,14 @@ test("a fabricated competency quote comes back demoted, marked, and not dropped"
   );
   assert.equal(result.failures.length, 1);
   assert.equal(result.failures[0].reason, "quote not found in the brief");
-  assert.deepEqual(result.provenance, { sourced: 2, unverified: 1, total: 3 });
+  assert.deepEqual(result.provenance, {
+    sourced: 2,
+    unverified: 1,
+    total: 3,
+    panel_sourced: 2,
+    panel_unsourced: 0,
+    panel_total: 2,
+  });
 });
 
 test("a panel claim naming a field key that was not handed in is demoted too", async () => {

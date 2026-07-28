@@ -111,6 +111,27 @@ test("each field carries its key, so a note-derived claim can be checked against
   }
 });
 
+test("a quotation mark in a heading does not break out of the attribute", () => {
+  // A recruiter writing `## What they mean by "autonomy"` is writing ordinary prose, not an
+  // attack — the note is the agency's own text. What breaks is the CACHED PREFIX: an attribute
+  // closed early malforms the one block that has to stay well-formed and byte-identical across
+  // every candidate for this client. Built on its own field so the shared FIELDS fixture, which
+  // the ordering and caching tests read, stays untouched.
+  const text = visibleNoteBlock("Ashdown Park Community Healthcare", [
+    { key: "their-language", heading: 'What they mean by "autonomy"', level: 2, text: "Not solo." },
+  ]);
+
+  assert.ok(
+    text.includes('heading="What they mean by &quot;autonomy&quot;"'),
+    "the quote is escaped rather than closing the attribute",
+  );
+  assert.equal(
+    text.match(/<field [^>]*>/g).length,
+    1,
+    "and the field is still one well-formed opening tag",
+  );
+});
+
 test("fields are rendered in the order given, never sorted or deduped", () => {
   // A derived order would make the cached prefix unstable between saves, and a prefix that
   // changes silently stops caching rather than erroring.

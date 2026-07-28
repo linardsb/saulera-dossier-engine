@@ -60,6 +60,12 @@ In a clinical staffing context these are not stylistic preferences. A candidate 
 room having rehearsed a fabricated answer, or having been told they are ready when nobody can
 know that, is carrying our mistake into their own interview.`;
 
+// Headings are recruiter-written markdown H2s, so a quotation mark in one is ordinary prose —
+// `## What they mean by "autonomy"` closes the attribute early and malforms the field. Not a
+// security boundary (the note is the agency's own text), but this block IS the cached prefix, and
+// it has to be well-formed and byte-stable across every candidate for that client.
+const attr = (s) => String(s ?? "").replaceAll('"', "&quot;");
+
 /**
  * The privileged half, already filtered: what this agency knows about this client that the
  * candidate is allowed to see.
@@ -78,7 +84,7 @@ export const visibleNoteBlock = (clientName, fields = []) =>
   `Here is what our agency knows about ${clientName} that the recruiter has marked shareable ` +
   `with this candidate:\n\n<client_knowledge>\n` +
   fields
-    .map((f) => `<field key="${f.key}" heading="${f.heading}">\n${f.text}\n</field>`)
+    .map((f) => `<field key="${f.key}" heading="${attr(f.heading)}">\n${f.text}\n</field>`)
     .join("\n\n") +
   `\n</client_knowledge>`;
 
