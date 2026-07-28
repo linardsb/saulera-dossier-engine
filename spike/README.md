@@ -44,8 +44,21 @@ Whitespace is normalised for *display* only, never for the value the verifier re
 
 | Measurement | Value | How |
 |---|---|---|
-| Generation latency | *(pending — needs `run.js` and a key)* | Printed by `run.js`. Deferred to #6. |
+| Round trip, copy-prompt to pack-on-screen | *(pending — recorded per pack from week one)* | Measured by the browser on `/` and stored in `events.duration_ms`. Read it back at `GET /api/events`. |
 | Review to sendable | *(pending — yours to time)* | Open `out/pack-appendix.txt`, time yourself editing it to something you would actually send. Honestly, including the corrections. |
+
+**The first row changed name, and that is not cosmetic.** It used to read *generation latency*,
+pending `run.js` and an API key. That number is not coming: #6 shipped as a two-route seam
+around the recruiter's own Claude session rather than as a model call from Pages, so there is no
+call on this deployment to time. What is measured instead is the **round trip** — the recruiter
+presses "Copy the prompt", goes to Claude, comes back, presses "Read the pack". It includes the
+trip, the model's thinking and the paste back; it excludes typing the inputs and reading the
+finished pack.
+
+It is a different number and a better one. PRD §6 condition 2 is *"under ten minutes from inputs
+to sendable pack, including the recruiter's review"*, and model latency was only ever a component
+of that. Report it as **round trip**, never as generation latency. `run.js` and its API path are
+untouched and still work with a key — that door is open, it is just not this deployment's path.
 
 ## The decision rules (architecture §7)
 

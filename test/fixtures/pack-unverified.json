@@ -1,0 +1,36 @@
+{
+  "candidate_ref": "C-4472 <script>alert(1)</script>",
+  "role_title": "Registered Nurse — \"bank\" & agency cover",
+  "headline": "Six years ward experience, though the shift pattern & start date both need confirming.",
+  "evidence": [
+    {
+      "requirement": "Six years post-registration",
+      "text": "Six years post-registration across medical and surgical wards.",
+      "source_quote": "Staff Nurse, Ward 12 (General Surgery), 2020-2026\n  Staff Nurse, Ward 4 (Acute Medical), 2019-2020",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "Cannulation competency",
+      "text": "Likely cannulation competent given the acute medical background, but it is not stated anywhere.",
+      "source_quote": "",
+      "source_type": "unverified"
+    }
+  ],
+  "process_fit": [
+    {
+      "text": "The ward manager may want a same-day start, which this candidate has not been asked about.",
+      "source_quote": "",
+      "source_type": "unverified"
+    }
+  ],
+  "gaps": [
+    {
+      "text": "No evidence of ITU experience & the brief lists it as essential.",
+      "source_quote": "",
+      "source_type": "unverified"
+    }
+  ],
+  "open_questions": [
+    "Confirm cannulation competency before sending — it is claimed here but not sourced."
+  ]
+}

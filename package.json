@@ -5,6 +5,7 @@
   "description": "Generated, evidence-anchored candidate submission packs for small recruitment agencies",
   "scripts": {
     "test": "node --test test/*.test.js",
+    "pack": "node scripts/pack.mjs",
     "spike": "node spike/local.js",
     "spike:tamper": "node spike/local.js --tamper",
     "dev": "python3 scripts/dev.py",

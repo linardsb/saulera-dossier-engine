@@ -1,0 +1,12 @@
+# Response headers for every route (#8). Cloudflare Pages reads this file from the build
+# output directory, which wrangler.toml points at ./public.
+#
+# No Content-Security-Policy here, deliberately. A CSP is the header worth having on a screen
+# that renders model output, and it is also the one that breaks a deployment in a way nobody
+# notices until a recruiter cannot copy a pack. It needs its own ticket and its own smoke pass.
+# The three below cost nothing and cannot break a working page.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY

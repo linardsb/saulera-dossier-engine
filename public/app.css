@@ -367,6 +367,240 @@ a {
 
 .agency .select { max-width: 280px; }
 
+/* ── the one screen: three acts ────────────────────────────────────────────────────────── */
+/* #8. The rail above is /clients' rail unchanged; everything below is this screen's own. */
+
+/* The column holding pasted briefs, CVs and replies. min-width: 0 keeps a grid item from being
+   sized by its widest child, which is the real Safari and Chrome blowout — same reason .editor
+   carries it at line 183. */
+.stage { min-width: 0; }
+
+.rail-link { font-size: var(--text-body); margin: 0; }
+
+/* Rhythm BETWEEN the acts is --space-12 and within them --space-4, so the pacing of the flow is
+   whitespace rather than dividers. There is not one rule between these three sections. */
+.act + .act { margin-top: var(--space-12); }
+
+/* The one authored moment: an act arriving. Opacity only, and gated behind a class the
+   transition adds rather than sitting on the element, because CHECKLIST forbids an entrance on
+   anything rebuilt per render and this file cannot tell the two cases apart on its own. */
+.act {
+  opacity: 1;
+  transition: opacity var(--duration-2) var(--ease-out);
+}
+
+.act.is-entering { opacity: 0; }
+
+/* Same treatment as .rail-head, deliberately: the act numbering and the rail label are one
+   grammar, not two. The number is real information here, so it is in the text and not a
+   decorative glyph. */
+.act-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.act-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.act-head-row .act-head { margin-bottom: 0; }
+
+.act-note {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+  max-width: 60ch;
+}
+
+.act-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+
+/* ── act 1: the inputs ─────────────────────────────────────────────────────────────────── */
+
+.input-pair {
+  display: grid;
+  gap: var(--space-6);
+}
+
+@media (min-width: 860px) {
+  .input-pair { grid-template-columns: 1fr 1fr; }
+}
+
+/* Both columns hold pasted prose with long unbreakable lines. Same trap as .stage. */
+.input-col { min-width: 0; }
+
+.file-row { margin-top: var(--space-2); }
+
+.file-label {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+/* The file button is drawn by the engine and cannot be restyled to the token set, so the rule
+   here only guarantees the hit area and stops a long filename widening the column. */
+.file-input {
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  color: var(--text-primary);
+  min-height: var(--tap-target);
+  max-width: 100%;
+}
+
+.fallback { margin-top: var(--space-6); }
+
+/* ── act 2: the wait ───────────────────────────────────────────────────────────────────── */
+
+/* Real seconds, monospaced with tabular figures so the count does not jitter the row it sits
+   in. Honest by construction: there is no percentage to invent, because the work is happening
+   in another application. */
+.elapsed {
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── act 3: the pack, the signature surface ────────────────────────────────────────────── */
+
+.pack-summary {
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+}
+
+.renderer-note {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+}
+
+/* Prose a client will read, so it takes CRAFT's 65-75ch measure and the 16px body size rather
+   than the 14px the surrounding chrome uses. */
+.pack {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+  font-size: var(--text-note);
+  max-width: 68ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pack-role { font-size: var(--text-h3); margin: 0 0 var(--space-1); }
+
+.pack-meta {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+.pack-headline { margin: 0 0 var(--space-8); }
+
+.pack-section { margin-bottom: var(--space-8); }
+.pack-section:last-child { margin-bottom: 0; }
+
+.pack-section-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+/* The signature element: a claim sitting beside the verbatim line it came from. All of this
+   screen's boldness is spent here, because that pairing is the product's thesis. */
+.claim { margin-bottom: var(--space-6); }
+.claim:last-child { margin-bottom: 0; }
+
+.claim-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.claim-text { margin: 0; min-width: 0; }
+
+.claim-requirement { font-weight: 600; }
+
+/* A hairline that encodes grouping whitespace cannot: it ties the quote to the claim above it.
+   CRAFT allows a rule for exactly that and for nothing else. */
+.claim-source {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border);
+}
+
+/* The provenance mark. Three signals, never colour alone: the WORD, the colour, and on the two
+   unverified states a left border on the whole claim. A recruiter who cannot distinguish the
+   colours still reads "Unverified". */
+.mark {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mark-cv,
+.mark-note { color: var(--verified); }
+.mark-unverified { color: var(--unverified); }
+.mark-failed { color: var(--failed); }
+
+/* On a narrow screen the mark stops sitting beside the claim and sits under it.
+   "Quote not found" is about 120px of unbreakable text, and beside a claim inside a 282px pack
+   it left the claim roughly twenty characters a line. Measured at 390px before this rule. The
+   reading order is unchanged because the mark already follows the claim in the DOM. */
+@media (max-width: 600px) {
+  .claim-head { display: block; }
+  .mark { display: block; margin-top: var(--space-1); }
+}
+
+.claim-unverified {
+  border-left: var(--space-1) solid var(--unverified);
+  padding-left: var(--space-4);
+}
+
+.claim-failed {
+  border-left: var(--space-1) solid var(--failed);
+  padding-left: var(--space-4);
+}
+
+/* What the model thought it was citing, kept so a bad pack is diagnosable rather than merely
+   rejected. This is the line that turns "something is wrong" into "that quote is not in the CV". */
+.claim-failed-quote {
+  font-size: var(--text-body);
+  color: var(--failed);
+  margin: var(--space-2) 0 0;
+}
+
+.pack-questions {
+  margin: 0;
+  padding-left: var(--space-6);
+  font-size: var(--text-note);
+}
+
+.pack-questions li { margin-bottom: var(--space-2); }
+
 /* ── reduced motion ────────────────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
