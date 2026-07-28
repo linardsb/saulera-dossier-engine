@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Sign in · Interview prep</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* Page-scoped rules, tokens only, so an agency branding swap carries this page with it.
+     Everything structural is already in app.css: .card, .btn, .input, .field and the focus
+     ring. What is added here is the narrow column and the one element this page spends its
+     boldness on, the code field. */
+  .signin { max-width: 52ch; }
+  .signin p { font-size: var(--text-note); }
+  .signin form { margin: 0; }
+
+  /* Each act carries a heading a screen reader can navigate by, while the page shows one
+     task at a time and needs no visible second-level heading. Defined here rather than in
+     app.css because this is the only page in the deployment that has wanted it. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The two acts are paced by whitespace rather than a rule. Asking for a code and typing it
+     are separate moments, and the gap is what says so. */
+  .act + .act { margin-top: var(--space-12); }
+  .act[hidden] { display: none; }
+
+  .act-lede { margin: 0 0 var(--space-6); color: var(--text-muted); }
+
+  /* The signature element. Six digits is the whole task in act 2, so the field is the largest
+     thing on the page: mono so the columns line up, tracked wide so a candidate reading from
+     their phone can check digit by digit against the email. Sized in ch so the box fits its
+     content at any root size rather than at a guessed pixel width. */
+  .code-input {
+    font-family: var(--font-mono);
+    font-size: var(--text-h2);
+    letter-spacing: 0.4em;
+    /* 6 digits plus the trailing letter-space, and the padding the shared .input rule adds. */
+    width: calc(7.4em + var(--space-6));
+    /* Right padding cancels the trailing letter-space so the digits sit centred in the box. */
+    padding-right: 0;
+    text-align: center;
+  }
+
+  .actions { margin-top: var(--space-4); }
+
+  /* The state line under each act: what just happened, and what to do about it. Reserved by
+     `min-height` so the layout does not jump when a message arrives. */
+  .state {
+    margin: var(--space-3) 0 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-body);
+    color: var(--text-muted);
+    min-height: var(--space-5);
+  }
+  .state[data-tone="error"] { color: var(--danger); }
+
+  /* The notice a dead magic link lands on. --surface rather than a coloured panel: it is
+     information, not an alarm, and the candidate did nothing wrong. */
+  .notice {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: var(--space-4);
+    margin: 0 0 var(--space-8);
+  }
+  .notice p { margin: 0; }
+
+  .footnote {
+    margin-top: var(--space-12);
+    font-size: var(--text-body);
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<!-- A candidate-facing page: the topbar carries the portal's own name and no recruiter
+     navigation. The recruiter screens are a different audience and a different door. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Interview prep</span>
+  </div>
+</header>
+
+<main class="signin">
+
+  <div class="page-head">
+    <h1>Sign in to your prep</h1>
+    <p class="page-sub">Your prep is private to you. Signing in keeps it that way.</p>
+  </div>
+
+  <!-- Filled in from ?e= by login.js, from a fixed list of messages. Empty and hidden until
+       then, so a candidate arriving straight from the login link sees no stray alarm. -->
+  <div class="notice" id="notice" hidden>
+    <p id="notice-text"></p>
+  </div>
+
+  <!-- Act 1: ask for a code. -->
+  <section class="act" id="act-email" aria-labelledby="act-email-head">
+    <h2 class="sr-only" id="act-email-head">Ask for a sign-in code</h2>
+    <p class="act-lede">Enter the email address your invite was sent to and we will send you a
+      6-digit code. We will not send you a link to click.</p>
+    <form id="form-email" novalidate>
+      <label class="field" for="email">Email address</label>
+      <input class="input" type="email" id="email" name="email" autocomplete="email"
+             inputmode="email" spellcheck="false" required>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit" id="send">Send me a code</button>
+      </div>
+      <p class="state" id="email-state" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <!-- Act 2: spend it. Hidden until a code has been asked for, so the page shows one task at
+       a time. -->
+  <section class="act" id="act-code" aria-labelledby="act-code-head" hidden>
+    <h2 class="sr-only" id="act-code-head">Enter your sign-in code</h2>
+    <p class="act-lede" id="sent-note"></p>
+    <form id="form-code" novalidate>
+      <label class="field" for="code">6-digit code</label>
+      <!-- inputmode numeric and autocomplete one-time-code together are what make a phone
+           offer the code straight from the notification. maxlength 7 rather than 6 so a
+           pasted '123 456' survives long enough to be stripped to digits. -->
+      <input class="input code-input" type="text" id="code" name="code" inputmode="numeric"
+             autocomplete="one-time-code" maxlength="7" spellcheck="false" required>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit" id="verify">Sign in</button>
+      </div>
+      <p class="state" id="code-state" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <p class="footnote">
+    Not sure why you are here? <a href="/prep/privacy">Read what we hold about you and how to
+    delete it</a>.
+  </p>
+
+</main>
+
+<script src="/prep/login.js"></script>
+</body>
+</html>

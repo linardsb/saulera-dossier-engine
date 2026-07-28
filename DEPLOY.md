@@ -186,6 +186,64 @@ partial billing. Irrelevant at 2–10 people; worth knowing before you invite a 
 
 ---
 
+## 3b. Access — the candidate-portal bypass · ✅ DONE 28 Jul 2026 (#20)
+
+That 50-user cliff is the whole reason this section exists. An agency invites more candidates
+in a quarter than Access bills for, so **architecture decision 12 rules Access out for
+candidates** and a rotating invite token is their door instead. Decision 18 then says both
+audiences live on one deployment. This is how those two hold together.
+
+**Two more applications, beside the two above — not instead of them:**
+
+| Application | Domain | Policy |
+|---|---|---|
+| `<project> — portal (prod)` | `<project>.pages.dev/prep` | Bypass → Everyone |
+| `<project> — portal (previews)` | `*.<project>.pages.dev/prep` | Bypass → Everyone |
+
+Both levels, for the same reason the gated pair needs two: a wildcard does not cover the apex.
+The policy body is `{"decision": "bypass", "include": [{"everyone": {}}]}`, sent inline with
+the application. `scripts/setup-access.py` creates all four and is idempotent, so re-running
+it prints four `= … already exists` lines and changes nothing.
+
+**Why this works — the precedence rule.** From the Cloudflare Access docs on application
+paths: *"When multiple rules are set for a common root path, the more specific rule takes
+precedence… no rule is inherited from `dashboard.com/eng`."* So `/prep/*` matches the bypass
+application and serves publicly, while `/`, `/clients.html` and `/api/*` still match the
+hostname-level application and still redirect to Access.
+
+**Verified live on this deployment, 28 Jul 2026** (propagation was immediate):
+
+| Path | Result |
+|---|---|
+| `/prep/privacy`, `/prep/login` | **200, served directly** |
+| `/` , `/clients.html`, `/api/events` | 302 → `cloudflareaccess.com` |
+| `/prepx`, `/prep-secret`, `/preparation` | **302 → Access** |
+
+That third row is the one worth keeping: the bypass matches the `/prep` **path segment**, not
+the string prefix, so no sibling route leaks out with the portal. (`/Prep/privacy` also
+bypasses — matching is case-insensitive. Nothing sensitive lives at a case-variant path.)
+
+```bash
+P=https://<project>.pages.dev
+curl -s -o /dev/null -w 'portal:  %{http_code}\n' "$P/prep/privacy"    # 200
+curl -s -o /dev/null -w 'clients: %{http_code}\n' "$P/clients.html"    # 302
+```
+
+Both halves have to hold at once, which is why `.claude/verify-deploy.sh` asserts the pair
+rather than either alone. Everything 302 means every candidate is locked out; everything 200
+means the recruiter's tool is published.
+
+⚠ **`public/404.html` is load-bearing here.** With no 404 page Pages falls back to
+`index.html` at status 200 for any unmatched path. While the whole hostname sat behind Access
+that cost nothing. The moment `/prep/*` became public, that fallback served the recruiter's
+tool shell to anyone requesting `/prep/anything` — observed live before the file shipped. Do
+not delete it.
+
+⚠ **Do not re-toggle** Pages → Settings → General → *Enable access policy*. The two gated
+applications are untouched by any of this; the bypass pair is added beside them.
+
+---
+
 ## 4. Verify the door actually closes · ✅ DONE 27 Jul 2026
 
 This is the acceptance test, not the dashboard screenshot. An unauthenticated request to
@@ -325,7 +383,7 @@ the dashboard.
 
 ---
 
-## 5b. Secrets · one, `ANTHROPIC_API_KEY`
+## 5b. Secrets · two, `ANTHROPIC_API_KEY` and `RESEND_API_KEY`
 
 **Superseded 28 Jul 2026 by the owner: the model call from Pages is back.** This section used
 to end "if it ever comes back, this section is the one that changes, and it changes to say
@@ -357,6 +415,35 @@ the tool degrades to the seam instead of going down.
 The deployment also has a **binding**, added in section 5. A binding is not a secret: it
 is a reference to a resource in the same account, it carries no credential, and it is set as
 project configuration rather than as an encrypted variable.
+
+### `RESEND_API_KEY` — the candidate's sign-in code (#20, decision 10)
+
+The prep portal emails a 6-digit code to a candidate who has lost their invite link. That is
+the only mail this deployment sends today; `src/prep/email.js` is the only code that sends it,
+by `fetch` to `https://api.resend.com/emails` with no SDK.
+
+1. Create the key at `resend.com` → API Keys, with **Sending access** only.
+2. `npx wrangler pages secret put RESEND_API_KEY --project-name saulera-dossier-engine`,
+   both environments. Local dev: add it to `.dev.vars` beside the model key.
+3. Optional plain variable **`PREP_MAIL_FROM`** (Settings → Variables and secrets → type
+   *Variable*, not Secret) to send under the agency's own name. Default:
+   `Interview prep <prep@saulera.com>`.
+
+⚠ **The sending domain must be verified in Resend, or every send answers 403.** This is the
+single most likely first failure and it is a DNS job, not a code one: add Resend's SPF and
+DKIM records to whichever domain `PREP_MAIL_FROM` uses. It can never be `pages.dev` — that
+domain cannot carry SPF or DKIM, so mail from it is unauthenticated.
+
+**Until the secret is set, nothing is broken and nothing is loud.** `POST /prep/auth/otp`
+still answers `202`, deliberately: that endpoint answers the same thing for every address so
+it cannot be used to enumerate an agency's candidate list, and a missing mail key must not
+become the one input that changes the answer. The signal is in the deployment log
+(`not_configured`, then `resend send failed with status …`), not in the response. So after
+setting the key, **do one real send** before believing the path works — the unit tests stub
+the transport by design and pass whether or not Resend would accept a single message.
+
+The magic link still works with no mail key at all: #22 sends the invite, and this key is only
+the returning-login path.
 
 ---
 
@@ -395,12 +482,46 @@ done
 # all four: 302 to cloudflareaccess.com. A 200 on any /api/* is a failure — the API is public.
 ```
 
+The candidate portal is the mirror image: `/prep/*` must answer **200 unauthenticated**, and
+a `302` there is the failure. Both halves at once are #20's AC4 (section 3b):
+
+```bash
+P=https://<project>.pages.dev
+for u in /prep/privacy /prep/login; do
+  curl -s -o /dev/null -w "$u: %{http_code}\n" "$P$u"; done   # both 200, no redirect
+curl -s -o /dev/null -w "/prep/nonsense: %{http_code}\n" "$P/prep/nonsense"   # 404, not 200
+for u in /prepx /prep-secret /preparation; do
+  curl -s -o /dev/null -w "$u: %{http_code}\n" "$P$u"; done   # all 302 — the segment, not the prefix
+```
+
+`.claude/verify-deploy.sh <project> <preview-host>` runs the whole pair and exits non-zero on
+either half.
+
+Portal, unauthenticated (no Access login, no cookie):
+
+- [ ] `/prep/privacy` renders the retention notice, styled, at 200
+- [ ] `/prep/login` renders the sign-in page at 200
+- [ ] `/prep/nonsense` renders the plain 404 page, and **not** the recruiter's tool shell
+- [ ] `/prep/` with no cookie lands on `/prep/login` **in a browser**. Note this bounce is
+      client-side: the session cookie is `HttpOnly`, so the page has to ask
+      `/prep/auth/session` and redirect from JS. A `curl` sees `200` and the bare landing
+      markup, which is not a failure — that page holds no candidate data, and #21 is where
+      content behind the door starts calling `requireSession` server-side
+- [ ] A magic link signs in and lands on `/prep/`; the **same link a second time** goes to
+      `/prep/login?e=invalid`
+- [ ] `POST /prep/auth/otp` answers `202` for a real address **and** an invented one, with an
+      identical body — a difference here is an email-enumeration hole
+- [ ] The code email arrives, carries six digits, and contains **no link** (needs 5b's
+      `RESEND_API_KEY` and a verified sending domain)
+- [ ] Six wrong codes: five answer `401`, the sixth `429`
+
 Access — re-verify after any change to the applications or the policy:
 
 - [ ] `https://<project>.pages.dev/` in a private window → Access login page
 - [ ] Allowed email → PIN arrives (check Spam/Promotions) → the site renders
 - [ ] A preview hostname also shows the login page
-- [ ] Zero Trust → Applications shows exactly two for this project, both Allow / one-time PIN
+- [ ] Zero Trust → Applications shows exactly **four** for this project: two Allow /
+      one-time PIN at the hostnames, and two Bypass / Everyone at the `/prep` paths (3b)
 
 ---
 
