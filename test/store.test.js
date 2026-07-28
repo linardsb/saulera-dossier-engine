@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 
 import { fakeD1 } from "./helpers/fake-d1.js";
 import {
+  INVITE_EVENT_KINDS,
   NAME_MAX,
   NOTE_MAX,
   SEND_FORMATS,
@@ -34,6 +35,7 @@ import {
   listClients,
   newClientId,
   recordEvent,
+  recordInviteEvent,
   updateAgency,
   updateClient,
 } from "../src/store.js";
@@ -128,6 +130,9 @@ test("listClients selects LENGTH(note) and never the note itself", async () => {
     /\bc?\.?note\b/i,
     "the bare note column must not appear outside LENGTH()",
   );
+  // #17 widened events with invite delivery kinds. The list's packs count is PRD §7's
+  // primary metric, and an unfiltered JOIN would silently inflate it with invites.
+  assert.match(sql, /e\.kind = 'pack_generated'/, "the packs metric must not count invite events");
 });
 
 test("listClients returns an empty array rather than undefined on an empty database", async () => {
@@ -228,20 +233,25 @@ test("recordEvent binds the client and the duration and nothing else", async () 
 });
 
 test("no SQL on the whole event path mentions a name, a candidate, a cv or a note", async () => {
-  const db = fakeD1([{ id: CLIENT.id }, null]);
+  const db = fakeD1([{ id: CLIENT.id }, null, { id: CLIENT.id }, null]);
   await recordEvent(db, { clientId: CLIENT.id, durationMs: 1 });
+  await recordInviteEvent(db, { clientId: CLIENT.id, kind: "invite_sent" });
   await eventCounts(db);
 
   // EVERY call, not the ones whose SQL happens to say "events". The filter here used to be
   // /events/i.test(c.sql), which excluded recordEvent's own existence check by construction —
   // and that check was `SELECT id, name, note, … FROM clients`. The assertion's name was true
   // of the statements it looked at and false of the path it claimed to cover.
-  assert.ok(db.calls.length >= 3, "the event path should have issued the calls being checked");
+  //
+  // The closed kind vocabulary ('pack_generated' et al) is stripped before matching: those
+  // literals are the schema's own CHECK-locked words, not candidate data, and eventCounts
+  // legitimately names them. Everything OUTSIDE that vocabulary still fails on sight.
+  assert.ok(db.calls.length >= 5, "the event path should have issued the calls being checked");
   for (const call of db.calls) {
     assert.doesNotMatch(
-      call.sql,
+      call.sql.replace(/'(pack_generated|invite_sent|invite_opened)'/g, "''"),
       /\bname\b|candidate|\bcv\b|\bnote\b|\bpack_|role|brief/i,
-      `AC4: the counter records {client, timestamp, duration} and nothing else — ${call.sql}`,
+      `AC4: the counter records {client, timestamp, duration, kind} and nothing else — ${call.sql}`,
     );
   }
 });
@@ -279,15 +289,65 @@ test("a malformed duration is named even when the client is also wrong", async (
   );
 });
 
-test("eventCounts totals the per-client rows", async () => {
-  const db = fakeD1([[{ client_id: "a", packs: 6 }, { client_id: "b", packs: 2 }]]);
+test("eventCounts totals packs alone, even when invite counts are non-zero", async () => {
+  const db = fakeD1([[
+    { client_id: "a", packs: 6, invites_sent: 4, invites_opened: 3 },
+    { client_id: "b", packs: 2, invites_sent: 9, invites_opened: 0 },
+  ]]);
   const counts = await eventCounts(db);
-  assert.equal(counts.total, 8);
+  // 8, not 24: PRD §7's primary metric is packs generated versus submissions made, and
+  // invite delivery telemetry inflating it would make the sales number a lie.
+  assert.equal(counts.total, 8, "total must sum packs only, never the invite counts");
   assert.deepEqual(counts.per_client.map((r) => r.client_id), ["a", "b"]);
+  assert.deepEqual(
+    Object.keys(counts.per_client[0]).sort(),
+    ["client_id", "invites_opened", "invites_sent", "packs"],
+    "the per-client row carries the three counts and the client id, nothing else",
+  );
 });
 
 test("eventCounts on an empty table is zero, not null", async () => {
   assert.deepEqual(await eventCounts(fakeD1([[]])), { total: 0, per_client: [] });
+});
+
+// ── invite delivery events, which must stay exactly as narrow as decision 3 ────────────
+
+test("recordInviteEvent rejects an unknown or missing kind before touching the database", async () => {
+  // 'pack_generated' is deliberately in the reject list: packs are recordEvent's to write,
+  // and a caller reaching for this function to record one is holding the wrong tool.
+  for (const kind of [undefined, null, "", "opened", "pack_generated", "invite_deleted"]) {
+    const db = fakeD1([]);
+    assert.equal(
+      await codeOf(() => recordInviteEvent(db, { clientId: CLIENT.id, kind })),
+      "missing_fields",
+      `kind ${JSON.stringify(kind)} should be rejected`,
+    );
+    assert.equal(db.calls.length, 0, "an invalid kind must fail before any SQL is issued");
+  }
+});
+
+test("recordInviteEvent binds the client and the kind, and the duration is the literal 0", async () => {
+  const db = fakeD1([{ id: CLIENT.id }, null]);
+  await recordInviteEvent(db, { clientId: CLIENT.id, kind: "invite_sent" });
+
+  const insert = db.calls.find((c) => /^INSERT INTO events/i.test(c.sql));
+  assert.ok(insert, "an INSERT should have been issued");
+  assert.match(
+    insert.sql,
+    /\(client_id, duration_ms, kind\)/,
+    "exactly the three columns — no invite id, no email, ever (decision 3)",
+  );
+  assert.deepEqual(insert.args, [CLIENT.id, "invite_sent"]);
+  // The timestamp is the database's here too — same rule as recordEvent.
+  assert.doesNotMatch(insert.sql, /created_at/i);
+});
+
+test("recordInviteEvent refuses an unknown client, same as recordEvent", async () => {
+  assert.equal(
+    await codeOf(() => recordInviteEvent(fakeD1([null]), { clientId: "nope", kind: "invite_opened" })),
+    "not_found",
+  );
+  assert.deepEqual(INVITE_EVENT_KINDS, ["invite_sent", "invite_opened"]);
 });
 
 // ── the agency row ─────────────────────────────────────────────────────────────────────

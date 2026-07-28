@@ -1,18 +1,20 @@
-// #5 AC3 and AC4 — the boundary, as a failing test rather than a promise.
+// #5 AC3 and AC4, and — since #17 — the boundary moved deliberately rather than eroded.
 //
-// "There is no candidate table" is the strongest sentence this product says out loud, and it
-// is said to a clinical staffing client. "The event counter records {client, timestamp,
-// duration} and nothing else" is the mechanism behind the epic's primary metric, and #5 names
-// it as the first thing that gets silently descoped.
+// "There is no candidate table" was the strongest sentence this product said out loud, and it
+// was said to a clinical staffing client. #17 changes it in the open: the prep portal stores
+// candidate data at rest for the first time, but only inside an invite-scoped cage — every
+// portal table reaches `invite` through ON DELETE CASCADE, so one `DELETE FROM invite` erases
+// a candidate's entire footprint, and a 30-day post-interview purge plus a delete-now endpoint
+// exercise that statement (architecture decision 13).
 //
-// Neither survives on prose. #6 is about generation and #8 is about a screen, and in both,
-// `events` is a side concern somebody widens "just to make debugging easier" — a candidate_ref
-// column added in thirty seconds, breaching the one boundary architecture §5.6 calls expensive
-// to unpick. So this file parses the migration and fails the suite instead.
+// Neither regime survives on prose, so this file is a lockfile: it parses the migrations and
+// locks every table's exact columns, the cascade chain, the `attempt.mode` honesty CHECK and
+// the closed `events.kind` vocabulary. Widening any of it is a schema change to make in the
+// open — change the assertion deliberately and say why in the PR.
 //
 // It parses the FILE, not the live database: `wrangler d1 migrations apply` creates its own
-// `d1_migrations` bookkeeping table, so an "exactly three tables" assertion against
-// sqlite_master would fail for a reason that has nothing to do with the boundary.
+// `d1_migrations` bookkeeping table, so an exact-tables assertion against sqlite_master would
+// fail for a reason that has nothing to do with the boundary.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -27,14 +29,13 @@ const migrations = join(root, "migrations");
 //
 // This read one hardcoded file, which left the guard blind on the only path by which the
 // boundary would actually move. An applied migration is never edited, so a NEW migration file
-// is how `events` gets a fifth column or a fourth table appears; a `0002_probe.sql` adding a
-// candidates table passed the whole suite. The header of 0001 and README both promise this test
-// fails when a later ticket widens the schema, and against a single file neither was true.
+// is how `events` gets a sixth column or an eleventh table appears; a `0003_probe.sql` adding
+// a table must fail this suite, not pass it.
 const files = readdirSync(migrations).filter((f) => f.endsWith(".sql")).sort();
 const sql = files.map((f) => readFileSync(join(migrations, f), "utf8")).join("\n");
 
-// Comments are stripped before anything is matched, because the header comment legitimately
-// contains the words "candidate" and "pack" while explaining why no such table exists.
+// Comments are stripped before anything is matched, because the header comments legitimately
+// contain the words "candidate" and "pack" while explaining the boundary.
 const code = sql.replace(/--[^\n]*/g, "");
 
 /** Every `CREATE TABLE name (...)` in the file, as `{ name, body }`. */
@@ -80,12 +81,27 @@ function columns(body) {
 
 const parsed = tables(code);
 const byName = new Map(parsed.map((t) => [t.name, columns(t.body)]));
+const bodyOf = new Map(parsed.map((t) => [t.name, t.body]));
+
+// The one other statement shape the parser reads: `ALTER TABLE <t> ADD COLUMN <c> …`. That is
+// the sanctioned way an applied table widens (applied migrations are never edited), and #17's
+// `events.kind` is the precedent. Any other ALTER form stays invisible, which the self-guard
+// below turns into a failure rather than silence. The added column is folded into `byName` so
+// the exact-column locks see the table as SQLite will.
+const alterStatements = code.match(/ALTER\s+TABLE[^;]*/gi) ?? [];
+const alters = [];
+for (const statement of alterStatements) {
+  const m = statement.match(/ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)([^;]*)/i);
+  if (!m) continue; // absent from `alters`, so the self-guard test fails loudly
+  alters.push({ table: m[1], column: m[2], rest: m[3] });
+  byName.get(m[1])?.push(m[2]);
+}
 
 // ── the parser's own blind spots, which are failures and not silence ───────────────────
 //
 // Both assertions below guard the assertions after them. A statement the parser cannot read is
-// ABSENT from `byName`, so it passes "exactly agency, clients and events" instead of failing
-// it — silence that looks identical to compliance.
+// ABSENT from `byName`, so it passes the exact-tables lock instead of failing it — silence
+// that looks identical to compliance.
 
 test("every CREATE TABLE in the migrations is one this test could read", () => {
   assert.equal(
@@ -98,58 +114,160 @@ test("every CREATE TABLE in the migrations is one this test could read", () => {
   );
 });
 
-test("the schema is only ever added to by CREATE TABLE, which this test parses", () => {
+test("every ALTER TABLE in the migrations is an ADD COLUMN this test could read", () => {
   assert.equal(
+    alters.length,
     (code.match(/ALTER\s+TABLE/gi) ?? []).length,
-    0,
-    "ALTER TABLE is invisible to a CREATE TABLE parser. `ALTER TABLE events ADD COLUMN " +
-      "candidate_ref TEXT` is exactly the AC4 breach this file exists to catch, and it also " +
-      "evades the Level 1 candidate|resume grep because neither word appears. #6 and #8 are " +
-      "the tickets that will want to widen events — if a column genuinely has to be added, " +
-      "that is a decision to make in the open: rebuild the table in the migration, or change " +
-      "this assertion deliberately and say why in the PR.",
+    "an ALTER TABLE the parser could not read is invisible to the assertions below. " +
+      "`ALTER TABLE <t> ADD COLUMN <c> …` is the one sanctioned form — #17 widened events " +
+      "that way, deliberately and in the open. RENAME, DROP COLUMN and every other form " +
+      "change the schema where no assertion can see it. If you need one, teach the parser " +
+      "that form — do not delete this check.",
   );
 });
 
-// ── the tables that exist, and the ones that must not ──────────────────────────────────
+// ── the tables that exist, and the two regimes that govern them ────────────────────────
 
-test("the schema declares exactly agency, clients and events", () => {
+const ENGINE_TABLES = ["agency", "clients", "events"];
+const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invite", "otp", "question"];
+
+test("the schema declares exactly the engine's three tables and the portal's seven", () => {
   assert.deepEqual(
     [...byName.keys()].sort(),
-    ["agency", "clients", "events"],
-    "a fourth table means the no-candidate-data boundary moved. Architecture §5.6: candidate, " +
-      "CV and pack are transient — passed in, used, written nowhere.",
+    [...ENGINE_TABLES, ...PORTAL_TABLES].sort(),
+    "an eleventh table means a boundary moved without a decision. The engine's three carry " +
+      "no candidate data (architecture §5.6); the portal's seven are candidate data inside " +
+      "decision 13's retention cage. A new table must pick a regime, in the open.",
   );
 });
 
-test("no table or column is candidate-shaped", () => {
+test("no engine table or column is candidate-shaped", () => {
+  // #17 moved the no-candidate-data boundary deliberately: the portal tables ARE candidate
+  // data, governed by decision 13's retention cage (cascade + 30-day purge + delete-now)
+  // instead of by absence. The ENGINE tables keep the original rule unchanged — the pack
+  // pipeline still writes no candidate data anywhere, and `events` in particular must never
+  // grow a candidate-shaped column, which is exactly what this regex would catch.
   const forbidden = /candidate|^cv$|resume|\bpack\b|brief/i;
-  for (const [table, cols] of byName) {
+  for (const table of ENGINE_TABLES) {
     assert.ok(
       !forbidden.test(table),
-      `table ${table} is candidate-shaped. Candidate, CV and pack are transient by design ` +
-        `(architecture §5.6); this is the one boundary that is expensive to unpick.`,
+      `table ${table} is candidate-shaped. Candidate, CV and pack are transient in the engine ` +
+        `by design (architecture §5.6); this is the one boundary that is expensive to unpick.`,
     );
-    for (const col of cols) {
+    for (const col of byName.get(table) ?? []) {
       assert.ok(
         !forbidden.test(col),
-        `${table}.${col} is candidate-shaped. Candidate, CV and pack are transient by design ` +
-          `(architecture §5.6); this is the one boundary that is expensive to unpick.`,
+        `${table}.${col} is candidate-shaped. Candidate, CV and pack are transient in the ` +
+          `engine by design (architecture §5.6); candidate data belongs only inside the ` +
+          `portal's invite-scoped cage.`,
       );
     }
   }
 });
 
-// ── the counter, which is the criterion most likely to erode ───────────────────────────
+// ── every table's exact shape, locked ──────────────────────────────────────────────────
+//
+// Column lists are sorted and exact, so a drive-by column — a candidate_ref on events, a
+// score on attempt, a plaintext token on invite — fails here by name.
 
-test("events holds exactly {client, timestamp, duration} and nothing else", () => {
-  assert.deepEqual(
-    [...(byName.get("events") ?? [])].sort(),
-    ["client_id", "created_at", "duration_ms", "id"],
-    "AC4: the event counter records {client, timestamp, duration}. A fifth column — a " +
-      "candidate_ref for debugging, a role title, a pack id — is the descope this test exists " +
-      "to fail on.",
+const EXPECTED_COLUMNS = {
+  agency: ["id", "name", "renderer", "send_format", "updated_at"],
+  clients: ["created_at", "id", "name", "note", "updated_at"],
+  // AC4, amended by #17: {client, timestamp, duration, kind} and nothing else. kind is the
+  // one deliberate widening (decision 3, 23) and its vocabulary is locked further down.
+  events: ["client_id", "created_at", "duration_ms", "id", "kind"],
+  invite: ["client_id", "email", "expires_at", "id", "interview_at", "opened_at", "sent_at", "status", "token_hash"],
+  candidate_role: ["brief_json", "cv_text", "ethos_text", "id", "invite_id", "jd_text"],
+  competency: ["id", "importance", "label", "role_id", "source_quote", "stage", "success_rate"],
+  question: ["axis", "competency_id", "difficulty", "id", "text", "variant_of"],
+  attempt: ["competency_id", "created_at", "id", "mode", "note", "question_id", "rating"],
+  habit: ["active", "evidence_count", "first_seen", "id", "label", "role_id"],
+  otp: ["code_hash", "expires_at", "id", "invite_id"],
+};
+
+test("every table's columns are exactly the locked list", () => {
+  assert.deepEqual(Object.keys(EXPECTED_COLUMNS).sort(), [...ENGINE_TABLES, ...PORTAL_TABLES].sort());
+  for (const [table, expected] of Object.entries(EXPECTED_COLUMNS)) {
+    assert.deepEqual(
+      [...(byName.get(table) ?? [])].sort(),
+      expected,
+      `${table}'s columns moved. Architecture §4 is the shape record for the portal tables ` +
+        `and §5.3 for the engine's; a new column is a decision to make in the open, in a new ` +
+        `migration, with this lock changed in the same PR and the reason said out loud.`,
+    );
+  }
+});
+
+// ── the retention cage: one DELETE FROM invite takes the whole scope ───────────────────
+
+// Every foreign key a portal table declares, and the parent it must cascade from. The chain
+// bottoms out at invite, which itself cascades from clients — so deleting a client, purging
+// an expired invite and delete-now all erase whole scopes through the same mechanism.
+const CASCADE_CHAIN = {
+  invite: { client_id: "clients" },
+  candidate_role: { invite_id: "invite" },
+  competency: { role_id: "candidate_role" },
+  question: { competency_id: "competency", variant_of: "question" },
+  attempt: { competency_id: "competency", question_id: "question" },
+  habit: { role_id: "candidate_role" },
+  otp: { invite_id: "invite" },
+};
+
+test("every portal foreign key declares ON DELETE CASCADE toward invite", () => {
+  for (const [table, fks] of Object.entries(CASCADE_CHAIN)) {
+    const body = bodyOf.get(table) ?? "";
+    for (const [column, parent] of Object.entries(fks)) {
+      assert.match(
+        body,
+        new RegExp(`${column}[^,]*REFERENCES\\s+${parent}\\s*\\(\\s*id\\s*\\)\\s+ON\\s+DELETE\\s+CASCADE`, "i"),
+        `${table}.${column} must cascade from ${parent}. Decision 13's purge and delete-now ` +
+          `are one \`DELETE FROM invite\` statement each — a missing cascade leaves orphaned ` +
+          `candidate data behind the very mechanism that promises there is none.`,
+      );
+    }
+  }
+});
+
+test("attempt.mode is CHECK-typed to recall|nudged|revealed — the honesty rule, structural", () => {
+  const body = bodyOf.get("attempt") ?? "";
+  assert.match(
+    body,
+    /mode\s+TEXT\s+NOT\s+NULL\s+CHECK/i,
+    "SPEC State: mode is the field that makes the rest honest. Without the CHECK, #23 can " +
+      "write a fourth mode and a revealed answer can count as recall.",
   );
+  for (const mode of ["'recall'", "'nudged'", "'revealed'"]) {
+    assert.ok(
+      body.includes(mode),
+      `attempt.mode must admit ${mode}: the HelpLadder has exactly three rungs, and a ` +
+        `revealed answer must never raise success_rate.`,
+    );
+  }
+});
+
+test("the events kind vocabulary is closed to exactly the three kinds", () => {
+  const alter = alters.find((a) => a.table === "events" && a.column === "kind");
+  assert.ok(alter, "events.kind must arrive by the parsed ADD COLUMN form");
+  const check = alter.rest.match(/CHECK\s*\(([^)]*)/i);
+  assert.ok(check, "events.kind must carry a CHECK — an open vocabulary is how the counter drifts personal");
+  assert.deepEqual(
+    [...check[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort(),
+    ["invite_opened", "invite_sent", "pack_generated"],
+    "decision 3 and 23: the counter records pack generation and invite delivery, never " +
+      "behaviour. A fourth kind is a schema change to make in the open, exactly like #17's.",
+  );
+});
+
+test("only hashes rest: invite carries token_hash, otp carries code_hash, never the secret", () => {
+  // The columns are already locked exactly above; this names the property so a future rename
+  // cannot trade the hash for the plaintext without reading why. A stored raw token or code
+  // is a credential at rest — anyone with database access could impersonate a candidate.
+  const invite = byName.get("invite") ?? [];
+  assert.ok(invite.includes("token_hash"), "invite holds the token's hash");
+  assert.ok(!invite.includes("token"), "the raw magic-link token must never rest");
+  const otp = byName.get("otp") ?? [];
+  assert.ok(otp.includes("code_hash"), "otp holds the code's hash");
+  assert.ok(!otp.includes("code"), "the raw one-time code must never rest");
 });
 
 // ── the two things the product needs to be there ───────────────────────────────────────

@@ -228,6 +228,11 @@ d1 execute dossier-engine --remote "SELECT COUNT(*) FROM clients"
   -> 0
 ```
 
+Since `0002_portal.sql` (#17, 28 Jul 2026) the expected table list also carries the portal's
+seven: `attempt` · `candidate_role` · `competency` · `habit` · `invite` · `otp` · `question`.
+A database showing only the three engine tables has not had 0002 applied — run the migrate
+command below again.
+
 `d1_migrations` is wrangler's own bookkeeping table and `_cf_KV` is Cloudflare's. Neither is
 ours, which is why `test/schema.test.js` parses `migrations/*.sql` rather than `sqlite_master`.
 

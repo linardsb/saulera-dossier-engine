@@ -1,5 +1,6 @@
 node_modules/
 .DS_Store
 .wrangler/
+__pycache__/
 .dev.vars
 .dev.vars.*
