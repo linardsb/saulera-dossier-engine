@@ -6,9 +6,13 @@
 //   node spike/local.js            verify + render
 //   node spike/local.js --tamper   corrupt one quote first, to prove the check bites
 //
-// What this path does NOT measure: generation latency for the Function (architecture
-// §5.2 warns the ten minutes is partly a latency budget). That needs a key — measure it
-// in #6 with spike/run.js.
+// What this path does NOT measure, and the answer changed. It used to read "generation
+// latency for the Function — needs a key, measure it in #6 with spike/run.js". There is no
+// Function and no key: #6 shipped as a two-route seam around the recruiter's own Claude
+// session (the Amendment of 27 July 2026), so this deployment has no model call to time.
+// What replaced it is the ROUND TRIP — copy-prompt to pack-on-screen, browser-measured into
+// events.duration_ms. Architecture §5.2's point survives the rename: the ten minutes is
+// partly a latency budget. See spike/README.md, "Still to record".
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";

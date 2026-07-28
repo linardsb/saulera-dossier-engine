@@ -47,6 +47,13 @@ Whitespace is normalised for *display* only, never for the value the verifier re
 | Round trip, copy-prompt to pack-on-screen | *(pending — recorded per pack from week one)* | Measured by the browser on `/` and stored in `events.duration_ms`. Read it back at `GET /api/events`. |
 | Review to sendable | *(pending — yours to time)* | Open `out/pack-appendix.txt`, time yourself editing it to something you would actually send. Honestly, including the corrections. |
 
+**What closes the first row, and what does not.** It closes on the first real pack a recruiter
+produces in week one, read back from `GET /api/events`. It does **not** close by timing a
+generation here against `inputs/` — that would measure a machine with no alt-tab, no chat window
+and no human, and then sit in the row week one is meant to fill under a name that reads like the
+recruiter's number. If a floor is ever wanted before then, record it under its own name and never
+in this row. Both #6 and #8 carry this as residual for the same reason.
+
 **The first row changed name, and that is not cosmetic.** It used to read *generation latency*,
 pending `run.js` and an API key. That number is not coming: #6 shipped as a two-route seam
 around the recruiter's own Claude session rather than as a model call from Pages, so there is no
@@ -94,6 +101,9 @@ person who built the thing. A recruiter reviewing a real submission under deadli
 harder test, and the guardrail should be re-timed on the first real pack in week one
 rather than treated as settled forever.
 
-**Still outstanding:** generation latency. Needs a key; `run.js` is ready. Measured in
-#6. If it turns out to eat the ten minutes, **effort is the lever before the pack
+**Still outstanding:** ~~generation latency. Needs a key; `run.js` is ready. Measured in
+#6.~~ **Superseded 28 Jul 2026** — read "Still to record" above instead. There is no key
+and no model call on this deployment, so the number is the **round trip** and it is
+measured by the browser rather than by `run.js`. The rule below is unaffected by the
+rename: if it turns out to eat the ten minutes, **effort is the lever before the pack
 shrinks** — the density question does not reopen.

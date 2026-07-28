@@ -6,7 +6,12 @@
 //   npm install @anthropic-ai/sdk
 //   ANTHROPIC_API_KEY=sk-ant-... node spike/run.js
 //
-// Not needed to settle §7's decision rules. Run it when #6 needs a real number.
+// Not needed to settle §7's decision rules, and #6 no longer wants the number: it shipped as
+// a two-route seam around the recruiter's own Claude session (the Amendment of 27 July 2026),
+// so this deployment has no model call to time. The file stays because the API path is a door
+// kept shut rather than bricked up — it still works with a key. What it prints is this
+// machine's model latency, not the product's guardrail number; read "Still to record" in
+// spike/README.md before writing the result anywhere.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -67,4 +72,8 @@ console.log(`Generation latency: ${(latencyMs / 1000).toFixed(1)}s`);
 console.log(
   `Tokens: ${message.usage.input_tokens} in, ${message.usage.output_tokens} out`,
 );
-console.log("\nRECORD THIS, then time your review to sendable separately.");
+console.log(
+  "\nThat is this machine's model latency, not the round trip the guardrail is measured on.\n" +
+    "Record it under its own name if at all, never in spike/README.md's first row. Timing\n" +
+    "your review to sendable is still a separate number, and that row is still open.",
+);
