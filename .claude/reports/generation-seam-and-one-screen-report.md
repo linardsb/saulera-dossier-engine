@@ -36,7 +36,7 @@ Also fixed the palette bug that would have made the product's central marking il
 | The one screen's markup | `public/index.html` | UPDATE (replaced the shell) |
 | Act, claim, mark and pack components | `public/app.css` | UPDATE (appended) |
 | The screen's behaviour | `public/app.js` | CREATE |
-| Nine browser probes | `.claude/probes/one-screen.mjs` | CREATE |
+| Ten browser probes | `.claude/probes/one-screen.mjs` | CREATE |
 | Three response headers | `public/_headers` | CREATE |
 | Status, Model access, palette entry, engine list | `README.md` | UPDATE |
 | §5b, §6 smoke checklist, three deferrals re-scoped | `DEPLOY.md` | UPDATE |

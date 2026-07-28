@@ -309,6 +309,13 @@ const READ = `(function () {
     reply: v("reply"),
     brief: v("brief"),
     cv: v("cv"),
+    // Cleared in the copy chain's final .then(), which runs whether or not the response was
+    // still the recruiter's. Null therefore means "/api/prompt landed and was dealt with",
+    // which is how probe 1 tells a withheld write from a write that has not happened YET.
+    copyBusy: (function () {
+      var n = document.getElementById("copy-prompt");
+      return n ? n.getAttribute("aria-disabled") : null;
+    })(),
     briefReadOnly: document.getElementById("brief").readOnly,
     cvReadOnly: document.getElementById("cv").readOnly,
     packText: t("pack-body"),
@@ -358,17 +365,28 @@ async function probe1() {
   // way to write this — CLICK, SETTLE(60), CLICK_ROW(B) — silently stopped testing anything.
   //
   // `copyPrompt()` opens a real tab to claude.ai synchronously inside the click (app.js:501).
-  // In headless Chrome that popup's DNS and TLS happen before the click dispatch returns, so
-  // `Runtime.evaluate` for the click takes ~544ms rather than ~1ms. The next CDP call is issued
-  // after that, i.e. AFTER the 500ms response has already landed, and the switch then runs
-  // `load(B)` → `resetToInputs()` on a completed copy. The probe read that reset screen and
-  // called it a stale write: a red gate accusing correct code, and an intended race window of
-  // `routeDelay − clickRoundTrip` that depends on an external network fetch and can land either
-  // side of zero. Scheduling the timer BEFORE the click takes the CDP channel out of the race:
-  // it is overdue when the click's stall ends, so it fires ahead of the response either way.
+  // That does not stall the page — `window.open` returns in ~10ms — but it delays the CDP
+  // `Runtime.evaluate` REPLY for the click to ~544ms, and it backgrounds the page, after which
+  // Chrome clamps timers to ~1s buckets. The 500ms response therefore landed before the next
+  // CDP call could be issued, and the switch ran `load(B)` → `resetToInputs()` on a completed
+  // copy. The probe read that reset screen and called it a stale write: a red gate accusing
+  // correct code, and a race window of `routeDelay − clickReplyRoundTrip` that depends on an
+  // external network fetch and can land either side of zero.
   //
-  // A probe that quietly ceases to exercise its race is the defect class here, not a one-off,
-  // so `switchedInFlight` makes the precondition an assertion rather than an assumption.
+  // Scheduling from inside the page takes the CDP channel out of the race, and the guarantee is
+  // an ordering one rather than a margin: both timers live in this page, and the switch's due
+  // time (registration + 60ms) is always earlier than the response's (a strictly LATER
+  // registration, inside the click handler, + 500ms). Chrome fires expired timers in due-time
+  // order, so the switch precedes the response under any throttling — which matters, because in
+  // a backgrounded page both routinely fire a second late.
+  //
+  // A probe that quietly ceases to exercise its race is the defect class here, not a one-off, so
+  // the preconditions are asserted rather than assumed: `switchedInFlight` for "the switch was
+  // made while the copy was out", `copyBusy` for "the response then actually landed" (without
+  // it, a response still in flight at READ time looks identical to a correctly withheld write),
+  // and `url` for "the switch took" (without it, a switch that silently no-ops reads as a guard
+  // failure and points the next reader back at app.js:526 — the exact misdiagnosis this exists
+  // to prevent).
   const page = await openScreen({
     confirm: true,
     routes: baseRoutes([
@@ -397,10 +415,12 @@ async function probe1() {
   const inFlight = await page.eval("window.__probe.switchedInFlight");
   check(
     "1", "a /api/prompt landing after a client switch copies nothing and starts no clock",
-    inFlight === true && r.waitingHidden === true && r.clipboard.length === 0 &&
+    inFlight === true && r.url.includes(B) && r.copyBusy === null &&
+      r.waitingHidden === true && r.clipboard.length === 0 &&
       (r.elapsed ?? "") === "" && r.briefReadOnly === false,
-    `switch landed while the request was in flight=${inFlight} ` +
-      `(false or null = this probe tested nothing)\n` +
+    `switch landed while the request was in flight=${inFlight} · switch took=${r.url.includes(B)} ` +
+      `· response landed=${r.copyBusy === null} ` +
+      `(any of the three false = this probe tested nothing)\n` +
       `        act-waiting hidden=${r.waitingHidden} · clipboard writes=${r.clipboard.length} ` +
       `${JSON.stringify(r.clipboard.map((c) => c.text))}\n` +
       `        elapsed=${JSON.stringify(r.elapsed)} · brief frozen=${r.briefReadOnly} ` +
