@@ -44,8 +44,10 @@ Also fixed the palette bug that would have made the product's central marking il
 
 ## Tests added
 
-`npm test` is **161 passing, 0 failing on Node v20.20.2 and v24.11.0** (was 140 before; the six
-existing test files are untouched and all still pass).
+`npm test` is **219 passing, 0 failing on Node v20.20.2 and v24.11.0** (was 140 before; the six
+existing test files are untouched and all still pass). The four files below account for 161 of
+those; the remaining 58 are `test/extract.test.js`, added in a later commit to give
+`public/extract.js` coverage.
 
 - **`test/tokens.test.js`** — 17 tests. Parses `tokens.css`, computes WCAG relative luminance,
   asserts a floor for every pairing that renders, and requires the provenance three to be
@@ -84,9 +86,19 @@ Both gates were confirmed to fail before being trusted:
 no positive `tabindex`, no runtime SDK / key / `nodejs_compat`, `@anthropic-ai/sdk` in
 `devDependencies` only, and `node --check` passes on every JS file.
 
-**Levels 2 and 3** — 161/161 on Node v20 and v24.
+**Levels 2 and 3** — 219/219 on Node v20 and v24.
 
-**Level 5, browser probes** — `10/10 pass` (`node .claude/probes/one-screen.mjs`, needs Node ≥ 22):
+**Level 5, browser probes** — `10/10 pass` (`node .claude/probes/one-screen.mjs`, needs Node ≥ 22),
+plus `11/11` on `node .claude/probes/extract-docx.mjs`.
+
+> **Corrected after review of PR #14.** This section first recorded 161 tests and 10/10 probes and
+> then went stale by two commits. Worse, probe 1 was red at head for a reason that had nothing to
+> do with the code it guards: it issued the client switch as a separate CDP call *after* the click,
+> and `copyPrompt()` opens a real tab to claude.ai inside that click, so the round trip outlasted
+> the stubbed 500ms response and the switch landed too late to race it. The probe then read the
+> reset screen and reported a stale write. The switch is now scheduled from inside the page and
+> the probe asserts that it landed mid-flight, so it fails loudly rather than silently testing
+> nothing. The guard in `app.js:520-531` was correct throughout and is unchanged.
 
 1. `/api/prompt` landing after a client switch copies nothing, starts no clock, stays in act 1
 2. `/api/verify` landing after a client switch renders no pack
@@ -137,7 +149,8 @@ verified by curl and by driving real headless Chrome against it:
 3. **That promise rejects if the recruiter switches client mid-flight.** A promise-valued write
    is committed at click time, so without this the clipboard would end up holding the previous
    client's prompt with nothing on screen saying so, one paste away from the wrong trust.
-   Probe 1 covers it.
+   Probe 1 covers it — though only since the review of PR #14, which found that the probe's own
+   timing had stopped putting the switch inside the flight window. See the correction above.
 
 4. **A failed claim renders its quote once, not twice.** Caught by looking at a screenshot, not
    by a test. `verifyPack` demotes by copying `source_quote` into `failed_quote` and leaving
@@ -153,7 +166,9 @@ verified by curl and by driving real headless Chrome against it:
 6. **Three probes added beyond the plan's seven.** Probe 1 passes both when the stale write is
    correctly withheld *and* when the clipboard never works at all. Probe 8 is the negative
    control that tells those apart; probe 9 covers the refusal path; probe 10 covers 10a and 10b
-   below.
+   below. A third way for probe 1 to be uninformative surfaced in review — the switch arriving
+   after the response, so the race is never run — and that one it now asserts against itself
+   rather than relying on another probe to catch.
 
 10. **Three defects found in review after the first green run, all fixed and now covered by
     probe 10 or by the README itself:**
@@ -217,7 +232,7 @@ Two further items are yours to decide rather than mine:
 ## Issues encountered
 
 - **`npm test` on Node 24 needs the glob quoted.** `node --test test/` treats the directory
-  differently and reports a single failure; `node --test "test/*.test.js"` passes 161/161. The
+  differently and reports a single failure; `node --test "test/*.test.js"` passes 219/219. The
   committed `npm test` script relies on shell expansion and is correct on both. Nothing to fix,
   worth knowing before someone reports it.
 - **The probes need Node ≥ 22** for the global `WebSocket`. This machine defaults to v20.20.2,

@@ -352,6 +352,23 @@ async function primeInputs(page, id = A) {
 
 async function probe1() {
   // /api/prompt is slow. The recruiter switches client while it is in flight.
+  //
+  // THE SWITCH IS SCHEDULED FROM INSIDE THE PAGE, before the click, and the probe asserts it
+  // landed while the copy was still out. Both halves matter, and the reason is that the obvious
+  // way to write this — CLICK, SETTLE(60), CLICK_ROW(B) — silently stopped testing anything.
+  //
+  // `copyPrompt()` opens a real tab to claude.ai synchronously inside the click (app.js:501).
+  // In headless Chrome that popup's DNS and TLS happen before the click dispatch returns, so
+  // `Runtime.evaluate` for the click takes ~544ms rather than ~1ms. The next CDP call is issued
+  // after that, i.e. AFTER the 500ms response has already landed, and the switch then runs
+  // `load(B)` → `resetToInputs()` on a completed copy. The probe read that reset screen and
+  // called it a stale write: a red gate accusing correct code, and an intended race window of
+  // `routeDelay − clickRoundTrip` that depends on an external network fetch and can land either
+  // side of zero. Scheduling the timer BEFORE the click takes the CDP channel out of the race:
+  // it is overdue when the click's stall ends, so it fires ahead of the response either way.
+  //
+  // A probe that quietly ceases to exercise its race is the defect class here, not a one-off,
+  // so `switchedInFlight` makes the precondition an assertion rather than an assumption.
   const page = await openScreen({
     confirm: true,
     routes: baseRoutes([
@@ -360,17 +377,31 @@ async function probe1() {
     ]),
   });
   await primeInputs(page);
-  await page.eval(CLICK("copy-prompt"));
-  await page.eval(SETTLE(60));
-  await page.eval(CLICK_ROW(B));      // moved on, while /api/prompt is still out
-  await page.eval(SETTLE(800));
+  await page.eval(`
+    (function () {
+      window.__probe.switchedInFlight = null;
+      setTimeout(function () {
+        // Act 2 not yet shown and Copy still busy = the response has not been acted on, which
+        // is the only condition under which this probe tests the stale-write guard at all.
+        window.__probe.switchedInFlight =
+          document.getElementById("act-waiting").hidden === true &&
+          document.getElementById("copy-prompt").getAttribute("aria-disabled") === "true";
+        document.querySelector('.client-row[data-id="${B}"]').click();
+      }, 60);
+      return true;
+    })()`);
+  await page.eval(CLICK("copy-prompt"));   // moved on at +60ms, while /api/prompt is still out
+  await page.eval(SETTLE(1200));
 
   const r = await page.eval(READ);
+  const inFlight = await page.eval("window.__probe.switchedInFlight");
   check(
     "1", "a /api/prompt landing after a client switch copies nothing and starts no clock",
-    r.waitingHidden === true && r.clipboard.length === 0 && (r.elapsed ?? "") === "" &&
-      r.briefReadOnly === false,
-    `act-waiting hidden=${r.waitingHidden} · clipboard writes=${r.clipboard.length} ` +
+    inFlight === true && r.waitingHidden === true && r.clipboard.length === 0 &&
+      (r.elapsed ?? "") === "" && r.briefReadOnly === false,
+    `switch landed while the request was in flight=${inFlight} ` +
+      `(false or null = this probe tested nothing)\n` +
+      `        act-waiting hidden=${r.waitingHidden} · clipboard writes=${r.clipboard.length} ` +
       `${JSON.stringify(r.clipboard.map((c) => c.text))}\n` +
       `        elapsed=${JSON.stringify(r.elapsed)} · brief frozen=${r.briefReadOnly} ` +
       `(a stale prompt in the clipboard is one paste away from the wrong client)`,
