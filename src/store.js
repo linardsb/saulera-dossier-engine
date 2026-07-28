@@ -24,6 +24,10 @@ export const NOTE_MAX = 100_000;
 
 export const SEND_FORMATS = ["email_body", "attachment", "ats_field"];
 
+// The two invite delivery kinds (#17, decision 3). `pack_generated` is deliberately not here:
+// packs are recorded by recordEvent, and the schema's DDL default writes their kind.
+export const INVITE_EVENT_KINDS = ["invite_sent", "invite_opened"];
+
 /**
  * A store failure with the HTTP shape already decided, so the Function layer maps rather than
  * guesses. `code` is the lowercase snake_case vocabulary the saulera Functions established.
@@ -56,7 +60,7 @@ export async function listClients(db) {
               LENGTH(c.note) AS note_chars,
               COALESCE(COUNT(e.id), 0) AS packs
          FROM clients c
-         LEFT JOIN events e ON e.client_id = c.id
+         LEFT JOIN events e ON e.client_id = c.id AND e.kind = 'pack_generated'
         GROUP BY c.id
         ORDER BY c.name`,
     )
@@ -317,11 +321,43 @@ export async function recordEvent(db, { clientId, durationMs } = {}) {
   return { ok: true };
 }
 
-/** The metric: how many packs were generated, in total and per client. */
+/**
+ * One invite delivery event — the entire invite telemetry surface (#17, decision 3). No
+ * invite id, no email, ever: per-invite sent/opened state lives on `invite` and dies with
+ * it, so these rows stay non-personal and the counts survive a purge. Recorded server-side
+ * by #22's Send and open handlers, which import the store directly — the HTTP events
+ * endpoint cannot write these, deliberately.
+ *
+ * Duration 0: delivery telemetry has no duration, and the column stays NOT NULL.
+ */
+export async function recordInviteEvent(db, { clientId, kind } = {}) {
+  if (!INVITE_EVENT_KINDS.includes(kind)) {
+    throw new StoreError(
+      "missing_fields",
+      400,
+      `kind: must be one of ${INVITE_EVENT_KINDS.join(", ")}`,
+    );
+  }
+  await requireClient(db, clientId); // an event for an unknown client is a bug, not a row
+  await db
+    .prepare("INSERT INTO events (client_id, duration_ms, kind) VALUES (?, 0, ?)")
+    .bind(String(clientId), kind)
+    .run();
+  return { ok: true };
+}
+
+/**
+ * The metric: how many packs were generated, in total and per client, with the invite
+ * delivery counts alongside. `total` sums packs alone — PRD §7's primary metric is packs
+ * generated versus submissions made, and invite telemetry must not inflate it.
+ */
 export async function eventCounts(db) {
   const { results } = await db
     .prepare(
-      `SELECT client_id, COUNT(*) AS packs
+      `SELECT client_id,
+              COUNT(CASE WHEN kind = 'pack_generated' THEN 1 END) AS packs,
+              COUNT(CASE WHEN kind = 'invite_sent'    THEN 1 END) AS invites_sent,
+              COUNT(CASE WHEN kind = 'invite_opened'  THEN 1 END) AS invites_opened
          FROM events
         GROUP BY client_id`,
     )

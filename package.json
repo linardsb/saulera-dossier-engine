@@ -12,7 +12,9 @@
     "dev": "python3 scripts/dev.py",
     "db:local": "python3 scripts/dev.py --migrate-only",
     "db:preview": "python3 scripts/dev.py --migrate-remote preview",
-    "db:remote": "python3 scripts/dev.py --migrate-remote production"
+    "db:remote": "python3 scripts/dev.py --migrate-remote production",
+    "purge:preview": "python3 scripts/purge.py preview",
+    "purge:remote": "python3 scripts/purge.py production"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0"

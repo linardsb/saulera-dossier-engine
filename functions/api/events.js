@@ -1,5 +1,5 @@
 // POST /api/events { client_id, duration_ms } -> 201 { ok: true }
-// GET  /api/events                            -> { total, per_client: [{ client_id, packs }] }
+// GET  /api/events                            -> { total, per_client: [{ client_id, packs, invites_sent, invites_opened }] }
 //
 // AC4, and the runtime half of the mechanism that keeps it true. The schema test fails on a
 // fifth events column and the store test fails on events SQL that mentions a forbidden one;

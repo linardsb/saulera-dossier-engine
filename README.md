@@ -27,9 +27,11 @@ require an email one-time PIN; only `linardsberzins@gmail.com` is admitted. Two 
 applications, because a wildcard does not cover the apex — `scripts/setup-access.py`
 creates both. Verified: both hostnames answer `302` to `cloudflareaccess.com`.
 
-**The client knowledge store is built** (27 Jul 2026, #5). Three tables in D1, four `/api/*`
-routes over them, and a screen at **`/clients`** where the agency adds a client and edits its
-note. The non-personal event counter ships with it, so the epic's primary metric is a number
+**The client knowledge store is built** (27 Jul 2026, #5). Three engine tables in D1, four
+`/api/*` routes over them, and a screen at **`/clients`** where the agency adds a client and
+edits its note. Since 28 Jul 2026 (#17) the schema also carries the candidate portal's seven
+invite-scoped tables, hard-deleted whole 30 days after the interview by an automatic purge
+and a delete-now endpoint. The non-personal event counter ships with it, so the epic's primary metric is a number
 rather than a memory. Its D1 databases are created, bound and migrated on both environments,
 and it went live when #5 merged, because that is what put `functions/` on `main`.
 
@@ -110,11 +112,17 @@ Pages. Nothing is claimed here about provider-side retention in either arrangeme
 **Storage: Cloudflare D1, not KV.** (27 Jul 2026, #5.) Both handle a few packs a week from a
 two-to-ten-person agency, so throughput does not decide it. Two things do. First, *"there is no
 candidate table"* is the strongest sentence this product says out loud, and it is said to a
-clinical staffing client — with D1 there is one reviewable file, `migrations/0001_init.sql`,
-that can be pointed at and tested, where a KV namespace has no schema to show. `test/schema.test.js`
-parses every file in `migrations/` — not just the first, because a later migration is how a
-schema actually widens — and fails the suite on a fourth table, a fifth `events` column, any
-`ALTER TABLE`, or a `CREATE TABLE` written in a form its parser cannot read. Second, the
+clinical staffing client — with D1 there is a reviewable `migrations/` directory that can be
+pointed at and tested, where a KV namespace has no schema to show. That sentence is scoped to
+the **engine** since #17 (28 Jul 2026): the pack pipeline still writes no candidate data
+anywhere, while the prep portal's seven tables hold candidate data deliberately, inside an
+invite-scoped cage — every row cascades from `invite`, purged whole 30 days after the
+interview, deletable now by the candidate. `test/schema.test.js` is the lockfile for both
+regimes: it parses every migration — not just the first, because a later migration is how a
+schema actually widens — and fails the suite on any table's columns moving, a missing
+`ON DELETE CASCADE`, the `attempt.mode` honesty CHECK loosening, a widened `events.kind`
+vocabulary, or a `CREATE TABLE`/`ALTER TABLE` written in a form its parser cannot read.
+Second, the
 editor needs read-after-write: KV is eventually consistent, and an agency saving a note,
 reloading and seeing its old text would land that weakness on the exact surface that *is* the
 product. The counter settles what is left — `SELECT client_id, COUNT(*) … GROUP BY client_id`

@@ -10,3 +10,8 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
+
+# The candidate portal (#17): never in a search index. The meta tag on each page says the
+# same thing; the header covers responses that carry no markup.
+/prep/*
+  X-Robots-Tag: noindex
