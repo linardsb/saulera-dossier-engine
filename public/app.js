@@ -45,11 +45,12 @@
   var COPY = {
     copyIdle: "Copy the prompt and open Claude",
     copying: "Building the prompt…",
-    promptCopied: "Copied, and Claude is open in the other tab. Paste it there, then bring the " +
-                  "reply back here.",
+    promptCopied: "Copied, and Claude is open in the other tab. Paste it there. When it " +
+                  "answers, copy the whole reply and press ⌘V back on this page.",
     // The tab was blocked, so the recruiter has the prompt but nowhere obvious to put it. Say
     // where, rather than leaving "paste it into Claude" pointing at nothing.
-    promptCopiedNoTab: "Copied. Open Claude, paste it there, then bring the reply back here.",
+    promptCopiedNoTab: "Copied. Open Claude and paste it there. When it answers, copy the " +
+                       "whole reply and press ⌘V back on this page.",
     openClaude: "Open Claude",
     promptManual: "Your browser would not let this page use the clipboard. The prompt is " +
                   "below. Select it and copy it by hand.",
@@ -417,8 +418,29 @@
 
   function refreshList() {
     return api("/api/clients")
-      .then(function (body) { renderList(body.clients); })
+      .then(function (body) {
+        renderList(body.clients);
+        adoptOnlyClient(body.clients);
+      })
       .catch(function (err) { showState(el.railState, messageFor(err, COPY.listFailed), true); });
+  }
+
+  /**
+   * One client and none picked: pick it. The MVP is literally one client (PRD §6), so the
+   * common case should not open on a list of one asking to be clicked.
+   *
+   * replaceState, never pushState — the recruiter made no choice, so Back must not have to
+   * step through one. A deep link to a different id wins: state.selected is already set by
+   * the time the list lands, and the guard below does not fire. Re-entry is safe the same
+   * way: load() runs refreshList() again, but by then the client is selected.
+   */
+  function adoptOnlyClient(clients) {
+    if (clients.length !== 1 || state.selected !== null) return;
+    var only = clients[0];
+    var url = new URL(window.location.href);
+    url.searchParams.set("client", only.id);
+    window.history.replaceState({ client: only.id }, "", url);
+    load(only.id, only.name);
   }
 
   /**
@@ -436,7 +458,10 @@
     if (id) url.searchParams.set("client", id);
     else url.searchParams.delete("client");
     window.history.pushState({ client: id }, "", url);
-    load(id, name);
+    // After a picked client the next action is always a paste, so the caret goes where the
+    // paste goes. Click path only: a deep link or a Back must not steal focus from the rail.
+    // Chained after load() so it lands after renderList's row refocus, and wins.
+    load(id, name).then(function () { el.brief.focus(); });
   }
 
   function load(id, name) {
@@ -878,6 +903,10 @@
     if (!file) return;
 
     input.value = "";
+    readFile(file, textarea, stateNode);
+  }
+
+  function readFile(file, textarea, stateNode) {
     showState(stateNode, COPY.fileReading, false);
 
     window.DossierExtract.extractText(file).then(
@@ -901,6 +930,38 @@
     );
   }
 
+  /**
+   * A dropped file goes through the same extractor as the picker. The drag is only claimed
+   * when it carries files and the inputs are live: a text selection dragged into a textarea
+   * keeps the browser's own behaviour, and a drop during the wait cannot thaw the frozen
+   * inputs. Everywhere else on the page a stray drop keeps its native meaning too — claiming
+   * it at window level would swallow the recruiter's own habits.
+   */
+  function wireDrop(column, textarea, stateNode) {
+    var live = function (event) {
+      var types = event.dataTransfer ? event.dataTransfer.types : null;
+      var hasFiles = types && Array.prototype.indexOf.call(types, "Files") !== -1;
+      return Boolean(hasFiles) && state.phase === "inputs" && !textarea.readOnly;
+    };
+
+    column.addEventListener("dragover", function (event) {
+      if (!live(event)) return;
+      event.preventDefault();
+      column.classList.add("is-dragover");
+    });
+    column.addEventListener("dragleave", function () {
+      column.classList.remove("is-dragover");
+    });
+    column.addEventListener("drop", function (event) {
+      column.classList.remove("is-dragover");
+      if (!live(event)) return;
+      var file = event.dataTransfer.files && event.dataTransfer.files[0];
+      if (!file) return;
+      event.preventDefault();
+      readFile(file, textarea, stateNode);
+    });
+  }
+
   /* ── wiring ──────────────────────────────────────────────────────────────────────────── */
 
   el.copyPrompt.addEventListener("click", copyPrompt);
@@ -914,6 +975,26 @@
   });
   el.cvFile.addEventListener("change", function () {
     readFileInto(el.cvFile, el.cv, el.inputsState);
+  });
+
+  wireDrop(el.brief.closest(".input-col"), el.brief, el.inputsState);
+  wireDrop(el.cv.closest(".input-col"), el.cv, el.inputsState);
+
+  // One paste finishes the loop. During the wait, a paste anywhere on this page is the reply
+  // coming back, so it lands in the reply box wherever the caret happens to be — and when it
+  // carries a pack, the check runs without another click. "role_title" is a required pack
+  // field (src/pack.js), so any real reply contains it quoted; the server stays the only
+  // judge of what a pack is, this just presses the button. A paste that is not a pack fills
+  // the box and waits, which is exactly what the button path did. readPack() carries the
+  // busy, frozen-input and one-event-per-pack guards, so this adds no second verify path.
+  document.addEventListener("paste", function (event) {
+    if (state.phase !== "waiting") return;
+    var data = event.clipboardData;
+    var text = data ? data.getData("text/plain") : "";
+    if (!text || !text.trim()) return;
+    event.preventDefault();
+    el.reply.value = text;
+    if (text.indexOf('"role_title"') !== -1) readPack();
   });
 
   window.addEventListener("popstate", function () {

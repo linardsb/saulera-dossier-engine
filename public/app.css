@@ -614,6 +614,14 @@ a {
 
 .file-input::file-selector-button:hover { border-color: var(--text-primary); }
 
+/* The column answering a file dragged over it. Colour is not the only signal: the state is
+   entered by the recruiter's own drag, and the file label says "drop one on the box" in
+   words. --accent as a border is a fill use, never text. */
+.input-col.is-dragover .textarea {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
 .fallback { margin-top: var(--space-6); }
 
 /* ── act 2: the wait ───────────────────────────────────────────────────────────────────── */
