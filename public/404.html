@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Page not found</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .notfound { max-width: 52ch; }
+  .notfound p { font-size: var(--text-note); }
+</style>
+</head>
+<body>
+
+<!-- SECURITY-RELEVANT, NOT COSMETIC (#20).
+     With no 404 page, Cloudflare Pages falls back to index.html at status 200 for any path
+     that matches no asset and no Function. Before this ticket that fallback sat behind Access
+     and cost nothing. Now that /prep/* is publicly reachable by design, the same fallback
+     would serve the RECRUITER's tool shell to anyone who requested /prep/anything, which was
+     verified live on 28 Jul 2026. This file is what makes an unmatched path answer 404.
+
+     So: no navigation, no product name, no hint of what else is on this hostname. The favicon
+     is the only mark, and the tokens are the only styling, so an agency branding swap carries
+     this page with it. -->
+<main class="notfound">
+  <div class="page-head">
+    <h1>Page not found</h1>
+    <p class="page-sub">There is nothing at this address. Check the link you followed, or go
+      back to where you came from.</p>
+  </div>
+</main>
+
+</body>
+</html>

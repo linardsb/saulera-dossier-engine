@@ -192,7 +192,10 @@ const EXPECTED_COLUMNS = {
   question: ["axis", "competency_id", "difficulty", "id", "text", "variant_of"],
   attempt: ["competency_id", "created_at", "id", "mode", "note", "question_id", "rating"],
   habit: ["active", "evidence_count", "first_seen", "id", "label", "role_id"],
-  otp: ["code_hash", "expires_at", "id", "invite_id"],
+  // #20. `attempts` is the OTP cap's whole storage: the counter rides the row it caps, and
+  // dies with it. Still no `code` column and no email — the invite the row hangs off owns
+  // the identity, and this table owns only the guess count.
+  otp: ["attempts", "code_hash", "expires_at", "id", "invite_id"],
 };
 
 test("every table's columns are exactly the locked list", () => {

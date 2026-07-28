@@ -177,7 +177,7 @@ test("deleteInviteByTokenHash drops one whole scope and leaves the rest untouche
   const before = Object.fromEntries(PORTAL_TABLES.map((t) => [t, rowsOf(db, t)]));
 
   const result = await deleteInviteByTokenHash(d1Shape(db), await hashToken("token-B"));
-  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(result, { ok: true, deleted: 1 });
 
   for (const table of PORTAL_TABLES) {
     assert.deepEqual(
@@ -190,8 +190,13 @@ test("deleteInviteByTokenHash drops one whole scope and leaves the rest untouche
   assert.equal(countOf(db, "events"), 1);
 
   // Idempotent: the second call matches nothing and still answers ok — the candidate's
-  // state is clean either way, and a stale link must not make the delete button lie.
-  assert.deepEqual(await deleteInviteByTokenHash(d1Shape(db), await hashToken("token-B")), { ok: true });
+  // state is clean either way, and a stale link must not make the delete button lie. The
+  // `deleted: 0` beside it is the honest half, and only real SQL can show it: fake-d1
+  // reports changes 1 unconditionally, so this assertion is meaningless anywhere but here.
+  assert.deepEqual(
+    await deleteInviteByTokenHash(d1Shape(db), await hashToken("token-B")),
+    { ok: true, deleted: 0 },
+  );
 });
 
 // ── the honesty rule and the closed vocabulary, at the SQL level ───────────────────────

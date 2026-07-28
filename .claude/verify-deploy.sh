@@ -3,15 +3,19 @@
 #
 #   .claude/verify-deploy.sh [project-name] [preview-hostname]
 #
-# ACCESS IS DEFERRED (27 Jul 2026) — the deployment is public by decision, tasks 8-10 are
-# parked, AC4 is not met. So the Access rows report SKIPPED rather than failing. Nothing
-# here needs editing to turn the door back on: the script decides which phase it is in by
-# whether production redirects to cloudflareaccess.com, so the moment an Access application
-# exists it switches to the AC4 acceptance test on its own.
+# Access has been on since #12. The header here used to say "ACCESS IS DEFERRED (27 Jul 2026)"
+# and the script had been silently running its post-Access branch ever since; #17's plan left
+# the correction to #20, which is this.
 #
-# That test, when it applies: a 302 to cloudflareaccess.com on production, on a preview
-# hostname, and on the Function. Any 200 is a failure — a 200 on production with a 302 on
-# preview is the specific failure AC4 exists to catch, i.e. you stopped at task 8.
+# The script decides its own phase from whether production redirects to cloudflareaccess.com,
+# so the pre-Access branch below is kept for a fresh agency deployment standing itself up —
+# not because this one is in it.
+#
+# What the post-Access branch tests is now #20's AC4 rather than #12's: ONE hostname serving
+# TWO audiences with two different doors. The recruiter's routes must 302 to Access, and the
+# candidate's /prep/* routes must answer 200 without ever reaching it. Either half alone is a
+# false pass — a deployment where everything 302s has locked out every candidate, and one
+# where everything 200s has published the recruiter's tool.
 
 set -uo pipefail
 
@@ -61,11 +65,12 @@ if [ "$phase" = "pre" ]; then
   check "POST /api/health (no secret) " "503" "$code"
   check "  its body                   " '{"error":"not_configured"}' "$body"
 
-  # Task 7 predicts 405; the plan's AMENDMENT corrects that to 404; both are wrong for THIS
-  # project. A GET falls through to static asset handling, and with no 404.html in public/
-  # the fallback serves index.html at 200. saulera.com 404s only because it HAS a 404.html.
-  # Asserted as 200 to match reality — see the 27 Jul amendment.
-  check "GET /api/health (html shell) " "200" "$(curl -s -o /dev/null -w '%{http_code}' "$PROD/api/health")"
+  # Task 7 predicted 405 and the plan's AMENDMENT corrected it to 404; both were wrong while
+  # this project had no 404 page, because a GET falls through to static asset handling and
+  # the fallback served index.html at 200. #20 added public/404.html — it had to, since
+  # /prep/* is now public and that fallback would have served the recruiter's shell to the
+  # world — so 404 is finally the honest expectation.
+  check "GET /api/health (no such page)" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$PROD/api/health")"
 
   echo
   printf '  SKIP  %-34s Access deferred 27 Jul 2026 — public by decision\n' "task 10 / AC4: prod is 302"
@@ -100,8 +105,38 @@ else
       *) printf '  FAIL  %-34s -> %s\n' "  its redirect" "${prev_head#* }"; fail=1;; esac
   fi
 
+  # ── #20 AC4: the candidate's door, on the same hostname, open ────────────────────────
+  #
+  # This trio is the acceptance test as one executable statement. Two path-scoped Access
+  # applications carry a Bypass -> Everyone policy at <project>.pages.dev/prep, and Access
+  # resolves the more specific path first, so /prep/* serves publicly while everything else
+  # keeps redirecting. A 302 on either /prep row means the bypass did not take and every
+  # invited candidate is looking at a Cloudflare login for an account they do not have.
+  echo
+  check "GET /prep/privacy (public)   " "200" "$(curl -s -o /dev/null -w '%{http_code}' "$PROD/prep/privacy")"
+  check "GET /prep/login (public)     " "200" "$(curl -s -o /dev/null -w '%{http_code}' "$PROD/prep/login")"
+
+  # The recruiter's door, shut, on that same hostname. /clients.html rather than / because it
+  # is the screen that actually holds the agency's client knowledge.
+  clients_head=$(code_and_redirect "$PROD/clients.html")
+  check "GET /clients.html (gated)    " "302" "${clients_head%% *}"
+  case "${clients_head#* }" in *cloudflareaccess.com*) printf '  ok    %-34s -> cloudflareaccess.com\n' "  its redirect";;
+    *) printf '  FAIL  %-34s -> %s\n' "  its redirect" "${clients_head#* }"; fail=1;; esac
+
+  # The bypass must match the /prep path SEGMENT, not the string prefix. If any of these
+  # answers 200, a sibling route has leaked out from behind Access along with the portal.
+  for path in /prepx /prep-secret /preparation; do
+    check "GET $path (still gated)" "302" "$(curl -s -o /dev/null -w '%{http_code}' "$PROD$path")"
+  done
+
+  # And the fallback that made /prep/* dangerous in the first place: with public/404.html in
+  # place an unmatched path under the public prefix must 404, not serve the recruiter shell.
+  check "GET /prep/nonsense (404 page)" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$PROD/prep/nonsense")"
+
   echo
   echo "Access is applied at the edge — retry once after 60s before treating a 200 as real."
+  echo "A 302 on a /prep row: check the two bypass applications exist (scripts/setup-access.py)."
+  echo "A 200 on a gated row: the whole hostname is open. Stop and fix that first."
 fi
 
 echo

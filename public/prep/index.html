@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Your prep · Interview prep</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .prep { max-width: 60ch; }
+  .prep p { font-size: var(--text-note); }
+</style>
+</head>
+<body>
+
+<!-- #21 REPLACES THIS FILE. It is deliberately bare: #20 ships the door, and this page exists
+     to prove the door works and to give the magic link somewhere to land. The dashboard, the
+     brief and the drill UI are #21 and #24. Do not grow this page; replace it.
+
+     What it does have to keep when #21 rewrites it: the signed-out bounce below. Every page
+     under /prep that holds candidate content asks the server whether there is a session,
+     because the cookie is HttpOnly and no script here can read it. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Interview prep</span>
+  </div>
+</header>
+
+<main class="prep">
+  <div class="page-head">
+    <h1 id="head">Checking your sign-in…</h1>
+    <p class="page-sub" id="sub">One moment.</p>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // The session lives in an HttpOnly cookie, so the only way to ask "am I signed in?" is to
+  // ask the server. It answers 200 either way — see functions/prep/auth/session.js for why a
+  // 401 on the ordinary signed-out path would be the wrong answer.
+  fetch("/prep/auth/session", { headers: { accept: "application/json" } })
+    .then(function (response) { return response.json(); })
+    .then(function (body) {
+      if (!body.ok) {
+        window.location.replace("/prep/login");
+        return;
+      }
+      document.getElementById("head").textContent = "You are signed in";
+      document.getElementById("sub").textContent =
+        "Your prep brief will appear here.";
+    })
+    .catch(function () {
+      // A failed check is not a session. Fail closed, and let the login page explain itself.
+      window.location.replace("/prep/login");
+    });
+})();
+</script>
+</body>
+</html>
