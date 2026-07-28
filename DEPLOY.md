@@ -239,6 +239,37 @@ that cost nothing. The moment `/prep/*` became public, that fallback served the 
 tool shell to anyone requesting `/prep/anything` — observed live before the file shipped. Do
 not delete it.
 
+⚠ **What else went public with the pages.** The bypass removes the only authentication that
+stood in front of `/prep/*`, and two things behind it write to the database. Both were
+reachable before only by the authenticated owner. Neither is a defect in the routes; both are
+consequences of this section, so they are recorded here rather than in the code:
+
+- **The retention sweep is now publicly triggerable.** `functions/prep/_middleware.js` awaits
+  `purgeExpired` before `next()` on **every** `/prep/*` request, static assets included —
+  that is decision 13's design, because Pages has no cron. `purgeExpired` is a deliberate
+  full-table-scan `DELETE`: its `datetime(interview_at, '+30 days')` wrapper defeats the
+  `invite_by_interview` index on purpose. Anyone can now request `/prep/privacy` in a loop and
+  drive that scan. At invite-count scale with Cloudflare in front this is cheap, and the
+  alternative — gating the sweep — would break the lazy-purge design. Accepted, not overlooked.
+- **`POST /prep/auth/otp` is unauthenticated and unthrottled, and each call destroys the
+  candidate's live code.** `issueOtp` opens with `DELETE FROM otp WHERE invite_id = ?`, so
+  someone who knows a candidate's email address can request codes in a loop and invalidate
+  each one faster than a person can type six digits. The magic link is single-use by design,
+  so the OTP is the **only** way back in: this is a lockout of the recovery path, not a brute
+  force. Brute force is not the worry — ~139k requests for a coin-flip against a fresh random
+  code exhausts the Resend account long first.
+
+  The plan turned down rate limiting on the grounds that one-live-code-per-invite *"gives the
+  same protection with no new state."* **That premise is wrong** and should not be reused: it
+  bounds how many codes are *valid at once*; it bounds neither how many are *issued* nor the
+  total guess budget. `attempts` defaults to 0 on the fresh row, so requesting a new code
+  resets the counter — the cap is five guesses **per code**, not five per invite.
+
+**The counterweight, not yet applied:** one Cloudflare rate-limiting rule on `/prep/auth/*`
+keyed on client IP covers both bullets, and belongs beside the bypass apps in
+`scripts/setup-access.py`. No column, no cleanup, no code. Tracked as its own change — do not
+assume it is live because this section describes it.
+
 ⚠ **Do not re-toggle** Pages → Settings → General → *Enable access policy*. The two gated
 applications are untouched by any of this; the bypass pair is added beside them.
 
