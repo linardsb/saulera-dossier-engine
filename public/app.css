@@ -626,6 +626,13 @@ a {
 
 /* ── act 2: the wait ───────────────────────────────────────────────────────────────────── */
 
+/* Act 2's two modes (28 Jul 2026). Manual children hide while a pack is generating here and
+   after it arrives; the generating note shows only then. Display, not visibility: the reply
+   box must not hold layout space in a mode where it cannot be used. */
+#act-waiting .generating-only { display: none; }
+#act-waiting.is-generating .generating-only { display: block; }
+#act-waiting.is-generating .manual-only { display: none; }
+
 /* Real seconds, monospaced with tabular figures so the count does not jitter the row it sits
    in. Honest by construction: there is no percentage to invent, because the work is happening
    in another application. */

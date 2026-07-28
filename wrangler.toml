@@ -1,14 +1,16 @@
-# Pages Functions exist, for storage only (#5). They read and write the client knowledge store
-# in D1. There is still no model call from this deployment, no ANTHROPIC_API_KEY and no runtime
-# SDK — generation runs in Claude Code on the subscription; see "Model access" and "Pages
-# Functions" under Decisions in README.md.
+# Pages Functions: storage (#5), the two halves of the generation seam (#6 as amended, #8), and
+# — since 28 Jul 2026 — the one model call, POST /api/generate. The no-key decision was
+# superseded by the owner; see "Model access" under Decisions in README.md. `nodejs_compat` is
+# for @anthropic-ai/sdk, which imports Node built-ins: without the flag the bundle still builds
+# and the Function still loads — the first real model call is what throws.
 #
 # The D1 binding is deliberately not here. `DB` is bound per deployment through the Pages API by
 # scripts/setup-d1.py, because a database_id is per-agency *config* and this file is *engine* —
 # tracked upstream and pulled by every agency. An id here forks an engine file per agency and
 # conflicts on every pull. There is a one-way door in it too: once a field lives in this file
 # Cloudflare stops allowing that field to be edited in the dashboard, which is what would make
-# the choice expensive to reverse.
+# the choice expensive to reverse. ANTHROPIC_API_KEY is per-agency config for the same reason:
+# a Pages secret, never a value in this file.
 #
 # `name` must match the Pages project exactly or the build fails.
 
@@ -16,3 +18,4 @@ name = "saulera-dossier-engine"
 pages_build_output_dir = "./public"
 
 compatibility_date = "2026-07-27"
+compatibility_flags = ["nodejs_compat"]

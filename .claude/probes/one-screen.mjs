@@ -883,13 +883,118 @@ async function probe14() {
   await page.close();
 }
 
+async function probe15() {
+  // The primary route (28 Jul 2026): one click on Generate produces a rendered, verified pack
+  // with zero trips through /api/verify, the inputs frozen while it runs, and the same act 3
+  // as the manual route — including the copy action.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "POST", match: "^/api/generate$", status: 201, delay: 300, body: VERIFIED },
+    ]),
+  });
+  await primeInputs(page);
+  await page.eval(CLICK("generate"));
+  await page.eval(SETTLE(100));
+
+  const during = await page.eval(READ);
+  const mode = await page.eval(
+    `document.getElementById("act-waiting").classList.contains("is-generating")`);
+  await page.eval(SETTLE(500));
+
+  const r = await page.eval(READ);
+  const generateCalls = r.calls.filter((c) => c.path === "/api/generate").length;
+  const verifyCalls = r.calls.filter((c) => c.path === "/api/verify").length;
+  await page.eval(CLICK("copy-pack"));
+  await page.eval(SETTLE(200));
+  const after = await page.eval(READ);
+
+  check(
+    "15", "Generate runs the whole loop in the page: one POST, frozen inputs, pack, copy",
+    during.waitingHidden === false && during.briefReadOnly === true && mode === true &&
+      r.packHidden === false && r.claimCount === 2 && generateCalls === 1 &&
+      verifyCalls === 0 && after.clipboard.some((c) => c.text === "SUBMISSION PACK"),
+    `mid-flight: act 2 shown=${!during.waitingHidden} · inputs frozen=${during.briefReadOnly} ` +
+      `· generating mode=${mode}\n` +
+      `        pack rendered=${!r.packHidden} · claims=${r.claimCount} · ` +
+      `/api/generate=${generateCalls} · /api/verify=${verifyCalls}\n` +
+      `        pack copied=${JSON.stringify(after.clipboard.map((c) => c.text))}`,
+  );
+  await page.close();
+}
+
+async function probe16() {
+  // The deployment with no key yet. Generate must fail back to act 1 with the inputs kept and
+  // thawed, a message naming both remedies, and the manual route still working — day one of a
+  // fresh deployment is exactly this state.
+  const page = await openScreen({
+    routes: baseRoutes([
+      { method: "POST", match: "^/api/generate$", status: 503, body: { error: "no_model_key" } },
+    ]),
+  });
+  await primeInputs(page);
+  await page.eval(CLICK("generate"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  await page.eval(CLICK("copy-prompt"));
+  await page.eval(SETTLE(300));
+  const manual = await page.eval(READ);
+
+  check(
+    "16", "no_model_key falls back to act 1 with inputs kept, and the manual route still works",
+    r.waitingHidden === true && r.briefReadOnly === false &&
+      r.cv.includes("NMC registration current") &&
+      (r.inputsState ?? "").includes("no model key") &&
+      (r.inputsState ?? "").includes("your own Claude") &&
+      manual.waitingHidden === false && manual.clipboard.length === 1,
+    `back in act 1=${r.waitingHidden} · inputs thawed=${!r.briefReadOnly} · kept=${r.cv.includes("NMC")}\n` +
+      `        message=${JSON.stringify(r.inputsState)}\n` +
+      `        manual route after: act 2=${!manual.waitingHidden} · ` +
+      `prompt copied=${manual.clipboard.length}`,
+  );
+  await page.close();
+}
+
+async function probe17() {
+  // /api/generate is slow and the recruiter switches client mid-flight. The landing pack must
+  // render nothing — same stale-write class as probes 1 and 2, on the new route.
+  const page = await openScreen({
+    confirm: true,
+    routes: baseRoutes([
+      { method: "POST", match: "^/api/generate$", status: 201, delay: 500, body: VERIFIED },
+    ]),
+  });
+  await primeInputs(page);
+  await page.eval(`
+    (function () {
+      setTimeout(function () {
+        document.querySelector('.client-row[data-id="${B}"]').click();
+      }, 60);
+      return true;
+    })()`);
+  await page.eval(CLICK("generate"));   // switch fires at +60ms, response at +500ms
+  await page.eval(SETTLE(1200));
+
+  const r = await page.eval(READ);
+  check(
+    "17", "an /api/generate landing after a client switch renders no pack",
+    r.url.includes(B) && r.packHidden === true && r.claimCount === 0 &&
+      r.briefReadOnly === false && (r.elapsed ?? "") === "",
+    `url=${r.url} · act-pack hidden=${r.packHidden} · claims=${r.claimCount}\n` +
+      `        inputs thawed by the switch=${!r.briefReadOnly} · ` +
+      `clock cleared=${JSON.stringify(r.elapsed)} · confirms=${r.confirms}`,
+  );
+  await page.close();
+}
+
 /* ── run ─────────────────────────────────────────────────────────────────────────────── */
 
 const server = await serveStatic();
 const chrome = await startChrome();
 try {
   for (const probe of [probe1, probe2, probe3, probe4, probe5, probe6, probe7,
-                       probe8, probe9, probe10, probe11, probe12, probe13, probe14]) {
+                       probe8, probe9, probe10, probe11, probe12, probe13, probe14,
+                       probe15, probe16, probe17]) {
     await probe();
   }
 } finally {

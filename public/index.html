@@ -29,15 +29,16 @@
 
   <div class="page-head">
     <h1>Submission pack</h1>
-    <p class="page-sub">Three steps, one visit to Claude, and every claim in the finished pack
+    <p class="page-sub">Three steps, all on this page, and every claim in the finished pack
       shows its source.</p>
     <!-- The whole journey, visible before any of it happens. Acts 2 and 3 stay hidden until
-         reached, so without this map a first-time reader sees one numbered step and a button,
-         and the trip through Claude arrives as a surprise. Same chip grammar as the acts, so
-         the map and the flow read as one thing. -->
+         reached, so without this map a first-time reader sees one numbered step and a button.
+         Same chip grammar as the acts, so the map and the flow read as one thing. The map
+         describes the primary route; the Claude-tab route is the fallback and introduces
+         itself when chosen. -->
     <ol class="steps" aria-label="How this works">
-      <li><span class="act-num" aria-hidden="true">1</span>Pick a client and paste the brief and the CV</li>
-      <li><span class="act-num" aria-hidden="true">2</span>Take the prompt to Claude and bring back its reply</li>
+      <li><span class="act-num" aria-hidden="true">1</span>Pick a client and add the brief and the CV</li>
+      <li><span class="act-num" aria-hidden="true">2</span>Generate the pack and wait a minute or two</li>
       <li><span class="act-num" aria-hidden="true">3</span>Copy the pack once every claim is checked</li>
     </ol>
   </div>
@@ -97,8 +98,13 @@
           </div>
         </div>
 
+        <!-- Two routes to the same pack, primary first. Generate runs the model from this
+             deployment; the ghost button is the fallback through the recruiter's own Claude
+             session, kept visible rather than hidden behind a failure because a deployment
+             whose key is not set up yet still has to produce packs on day one. -->
         <div class="act-row">
-          <button class="btn btn-primary" type="button" id="copy-prompt">Copy the prompt and open Claude</button>
+          <button class="btn btn-primary" type="button" id="generate">Generate the pack</button>
+          <button class="btn" type="button" id="copy-prompt">Or copy the prompt and open Claude</button>
           <span class="save-state" id="inputs-state" role="status"></span>
         </div>
 
@@ -111,32 +117,44 @@
         </div>
       </section>
 
-      <!-- ── act 2 ────────────────────────────────────────────────────────────────────── -->
+      <!-- ── act 2 ────────────────────────────────────────────────────────────────────────
+           One section, two modes. Generating (.is-generating): the model call this deployment
+           made, an honest clock and nothing to do. Manual: the trip through the recruiter's
+           own Claude session, with the reply box. The heading word and the visible children
+           swap by mode; the clock and Start again are shared. ── -->
       <section class="act" id="act-waiting" aria-labelledby="waiting-head" hidden>
         <div class="act-head-row">
-          <h2 class="act-head" id="waiting-head"><span class="act-num" aria-hidden="true">2</span>In Claude</h2>
-          <!-- Honest seconds since the prompt was copied, not a percentage and not a spinner.
+          <h2 class="act-head" id="waiting-head"><span class="act-num" aria-hidden="true">2</span><span id="waiting-word">In Claude</span></h2>
+          <!-- Honest seconds since the work started, not a percentage and not a spinner.
                aria-hidden because it updates every second and a per-second live region is a
                screen reader denial of service. The act change is what gets announced, once. -->
           <span class="elapsed" id="elapsed" aria-hidden="true"></span>
         </div>
 
+        <!-- Generating mode only. No progress invented: the model reports nothing until it
+             answers, so the truthful things on screen are what is happening and the clock. -->
+        <p class="act-note generating-only">
+          The pack is being written, and every claim in it will be checked word for word
+          against the CV and your note before you see it. This usually takes a minute or two.
+          Leave this page open.
+        </p>
+
         <!-- The link repeats what the button already did, because the tab gets closed, blocked,
              or lost behind a window, and "paste the prompt into Claude" with no Claude in sight
              is where this flow used to dead-end. -->
-        <p class="act-note">
+        <p class="act-note manual-only">
           The prompt is on your clipboard and Claude is open in the other tab. Paste it there
           (⌘V). When it answers, copy the whole reply, come back, and press ⌘V anywhere on
           this page. The pack is checked the moment it lands.
           <a class="claude-link" href="https://claude.ai/new" target="_blank" rel="noopener">Open Claude again</a>
         </p>
 
-        <label class="field" for="reply">Claude's reply</label>
-        <textarea class="textarea" id="reply" name="reply" rows="10" spellcheck="false"
+        <label class="field manual-only" for="reply">Claude's reply</label>
+        <textarea class="textarea manual-only" id="reply" name="reply" rows="10" spellcheck="false"
                   placeholder="Paste the whole reply, including the JSON block."></textarea>
 
         <div class="act-row">
-          <button class="btn btn-primary" type="button" id="read-pack">Read the pack</button>
+          <button class="btn btn-primary manual-only" type="button" id="read-pack">Read the pack</button>
           <button class="btn" type="button" id="start-again">Start again</button>
           <span class="save-state" id="waiting-state" role="status"></span>
         </div>

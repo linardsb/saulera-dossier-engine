@@ -1,12 +1,14 @@
-/* The one screen (#8), and the recruiter's half of the generation seam (#6 as amended).
+/* The one screen (#8, and the 28 Jul 2026 model-access supersession).
  *
  * Vanilla, no framework, no build step — the same idiom as clients.js, which this file mirrors
  * closely enough that the two are one system rather than two.
  *
- * Three acts: paste the inputs and copy the prompt, go to Claude and come back with the reply,
- * read the verified pack and copy it. The model call happens in the recruiter's own Claude
- * session, so act 2 is a designed wait for work happening in another application rather than a
- * spinner over a request this deployment made.
+ * Three acts and two routes through them. Primary: add the inputs, generate the pack here
+ * (POST /api/generate — this deployment calls the model), read the verified pack and copy it.
+ * Fallback: copy the prompt, run it in the recruiter's own Claude session, paste the reply
+ * back. Act 2 is one section in two modes — an honest clock over our own request, or a
+ * designed wait for work happening in another application. Both routes end at the same
+ * verify-shaped body, so act 3 cannot tell them apart.
  *
  * Six behaviours here are decisions rather than implementation details:
  *
@@ -43,7 +45,23 @@
   "use strict";
 
   var COPY = {
-    copyIdle: "Copy the prompt and open Claude",
+    generateIdle: "Generate the pack",
+    generating: "Writing the pack…",
+    waitHeadGenerating: "Writing the pack",
+    waitHeadManual: "In Claude",
+    // Model-side failures name the other route, because the other route is the remedy that
+    // always exists: it needs no key and it is one button to the left.
+    noModelKey: "This deployment has no model key yet, so it cannot write the pack here. " +
+                "Copy the prompt and run it in your own Claude instead, and ask whoever set " +
+                "this up to add the key.",
+    modelRefused: "The model declined to write this pack. Try again, or copy the prompt and " +
+                  "run it in your own Claude.",
+    truncated: "The pack came back cut off. Try again, or copy the prompt and run it in " +
+               "your own Claude.",
+    generateFailed: "Could not write the pack. Your text is still here. Try again, or copy " +
+                    "the prompt and run it in your own Claude.",
+
+    copyIdle: "Or copy the prompt and open Claude",
     copying: "Building the prompt…",
     promptCopied: "Copied, and Claude is open in the other tab. Paste it there. When it " +
                   "answers, copy the whole reply and press ⌘V back on this page.",
@@ -97,10 +115,11 @@
     fileReading: "Reading the file…",
 
     // Named, because "you have a pack in progress" is not enough to decide by when the whole
-    // risk is sending one client's pack under another client's name.
+    // risk is sending one client's pack under another client's name. Route-neutral wording:
+    // on the generate route there is no reply to speak of.
     leavingClient: function (name) {
       return (name ? "You are part way through a pack for " + name + ". " : "You are part way " +
-        "through a pack. ") + "Switching client clears the reply and the pack.";
+        "through a pack. ") + "Switching client abandons it.";
     },
 
     marks: {
@@ -133,12 +152,14 @@
     cv: document.getElementById("cv"),
     briefFile: document.getElementById("brief-file"),
     cvFile: document.getElementById("cv-file"),
+    generate: document.getElementById("generate"),
     copyPrompt: document.getElementById("copy-prompt"),
     inputsState: document.getElementById("inputs-state"),
     fallback: document.getElementById("prompt-fallback"),
     promptText: document.getElementById("prompt-text"),
 
     actWaiting: document.getElementById("act-waiting"),
+    waitingWord: document.getElementById("waiting-word"),
     elapsed: document.getElementById("elapsed"),
     reply: document.getElementById("reply"),
     readPack: document.getElementById("read-pack"),
@@ -158,6 +179,10 @@
     selected: null,
     clientName: "",
     phase: "inputs",
+    // Which route the pack in progress is taking: "api" (this deployment calls the model) or
+    // "claude" (the recruiter's own session). Decides act 2's mode and nothing else — every
+    // guard keys off phase, so the two routes cannot drift apart in behaviour.
+    route: null,
     sent: null,
     startedAt: null,
     tick: null,
@@ -287,10 +312,16 @@
   function setPhase(next) {
     stopClock();
     state.phase = next;
+    // Act 2's mode. In phase "pack" the section stays on screen (see below), so the mode has
+    // to hold there too: after a generated pack it shows the final clock reading rather than
+    // an empty reply box that was never part of that route.
+    var generating = state.route === "api" && (next === "generating" || next === "pack");
+    el.actWaiting.classList.toggle("is-generating", generating);
+    el.waitingWord.textContent = generating ? COPY.waitHeadGenerating : COPY.waitHeadManual;
     showAct(el.actInputs, true); // act 1 stays readable while checking the pack, see below
-    showAct(el.actWaiting, next === "waiting" || next === "pack");
+    showAct(el.actWaiting, next === "generating" || next === "waiting" || next === "pack");
     showAct(el.actPack, next === "pack");
-    if (next === "waiting") startClock();
+    if (next === "waiting" || next === "generating") startClock();
     // Say so rather than only refusing. Act 2 stays on screen in phase "pack" so the recruiter
     // can still see what they pasted, which leaves a live-looking button that no longer does
     // anything — aria-disabled is how the rest of this screen says "not right now".
@@ -298,8 +329,8 @@
     // The arriving act comes to the reader. Act 3 otherwise renders two viewports down and
     // "nothing happened" is what a recruiter sees. Never on "inputs": that is the load and
     // reset path, where jumping the page is the bug. Smooth only when motion is welcome.
-    if (next === "waiting" || next === "pack") {
-      var arrived = next === "waiting" ? el.actWaiting : el.actPack;
+    if (next === "waiting" || next === "generating" || next === "pack") {
+      var arrived = next === "pack" ? el.actPack : el.actWaiting;
       arrived.scrollIntoView({
         block: "start",
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -336,6 +367,7 @@
 
   /** Back to act 1, keeping the brief and the CV. Losing a paste is the real error state. */
   function resetToInputs() {
+    state.route = null;
     setPhase("inputs");
     state.sent = null;
     state.startedAt = null;
@@ -621,11 +653,114 @@
    * recruiter checks the pack against it.
    */
   function enterWaiting(brief, cv) {
+    state.route = "claude";
     state.sent = { brief: brief, cv: cv };
     el.brief.readOnly = true;
     el.cv.readOnly = true;
     setPhase("waiting");
     el.reply.focus();
+  }
+
+  /* ── act 1 straight to act 3: the generate route ─────────────────────────────────────── */
+
+  /**
+   * The message for a generate failure. Not messageFor(): two of the shared codes read wrong
+   * on this route. A 502 no_pack here means the MODEL's output was not a pack — "copy the
+   * whole of Claude's reply" would describe a paste that never happened — and every model-side
+   * failure should name the fallback route, because the fallback is the remedy that always
+   * exists.
+   */
+  function generateMessageFor(err) {
+    if (err) {
+      if (err.code === "no_model_key") return COPY.noModelKey;
+      if (err.code === "model_refused") return COPY.modelRefused;
+      if (err.code === "truncated") return COPY.truncated;
+      if (err.code === "no_pack" || err.code === "bad_pack") return COPY.generateFailed;
+    }
+    return messageFor(err, COPY.generateFailed);
+  }
+
+  /**
+   * One click, one pack. POST /api/generate runs the model from this deployment, verifies
+   * every quote and renders — the response is shaped exactly like /api/verify's, so act 3
+   * cannot tell which route produced the pack.
+   *
+   * The inputs freeze for the same reason they do on the other route: the pack's quotes were
+   * checked against this exact text, and act 1 stays on screen for reading against the marks.
+   * On failure the screen returns to act 1 with the text kept and thawed — a failed generation
+   * must never cost the recruiter their paste (CHECKLIST: "a failed generation says what
+   * failed and keeps the pasted inputs on screen").
+   */
+  function generate() {
+    if (state.busy) return;
+
+    if (!state.selected) {
+      showState(el.inputsState, COPY.pickClient, true);
+      return;
+    }
+    if (!el.brief.value.trim()) {
+      showState(el.inputsState, COPY.needInputs, true);
+      el.brief.focus();
+      return;
+    }
+    if (!el.cv.value.trim()) {
+      showState(el.inputsState, COPY.needInputs, true);
+      el.cv.focus();
+      return;
+    }
+
+    var clientId = state.selected;
+    var brief = el.brief.value;
+    var cv = el.cv.value;
+    state.reqId += 1;
+    var reqId = state.reqId;
+    var mine = function () { return state.reqId === reqId && state.selected === clientId; };
+
+    state.busy = true;
+    setBusy(el.generate, true);
+    el.generate.textContent = COPY.generating;
+    el.fallback.hidden = true;
+    clearState(el.inputsState);
+
+    state.route = "api";
+    state.sent = { brief: brief, cv: cv };
+    el.brief.readOnly = true;
+    el.cv.readOnly = true;
+    setPhase("generating");
+
+    postJson("/api/generate", { client_id: clientId, brief: brief, cv: cv })
+      .then(function (body) {
+        if (!mine()) return;
+        renderPack(body);
+        state.clipboard = { text: body.text, html: body.html };
+        setPhase("pack");
+        showState(
+          el.packState,
+          body.event_recorded ? COPY.packReady : COPY.eventFailed,
+          !body.event_recorded
+        );
+        el.copyPack.focus({ preventScroll: true });
+      })
+      .catch(function (err) {
+        if (!mine()) return;
+        // Back to act 1, inputs thawed and kept. The wait ends here, honestly, rather than
+        // leaving a stopped clock over a request that already answered.
+        state.route = null;
+        state.sent = null;
+        el.brief.readOnly = false;
+        el.cv.readOnly = false;
+        setPhase("inputs");
+        var link = err && err.code === "note_empty" && state.selected
+          ? { href: "/clients?client=" + encodeURIComponent(state.selected),
+              text: COPY.noteEmptyLink }
+          : null;
+        showState(el.inputsState, generateMessageFor(err), true, link);
+      })
+      .then(function () {
+        state.busy = false;
+        setBusy(el.generate, false);
+        el.generate.textContent = COPY.generateIdle;
+      });
   }
 
   /* ── act 2 to act 3 ──────────────────────────────────────────────────────────────────── */
@@ -964,6 +1099,7 @@
 
   /* ── wiring ──────────────────────────────────────────────────────────────────────────── */
 
+  el.generate.addEventListener("click", generate);
   el.copyPrompt.addEventListener("click", copyPrompt);
   el.readPack.addEventListener("click", readPack);
   el.copyPack.addEventListener("click", copyPack);
