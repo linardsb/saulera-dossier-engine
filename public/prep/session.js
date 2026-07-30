@@ -28,6 +28,10 @@
 
 import { renderBlocks } from "./registry.js";
 
+/** turn.js:61's cap, mirrored so an over-length paste is refused here with honest copy instead
+ *  of bouncing off the route's 400 wearing retry advice that can never succeed. */
+const ANSWER_MAX = 20_000;
+
 /** Every visible string this file can produce, in one object — brief.js:25's idiom. Written
  *  for a first-time candidate: preparing, never evaluated. */
 export const COPY = {
@@ -56,8 +60,14 @@ export const COPY = {
   emptyGuard:
     "Type your answer first. If you have opened the structure, you can send without typing " +
     "and move on.",
+  tooLongGuard:
+    "That answer is longer than we can take — around 20,000 characters is the most. An " +
+    "interview answer is a few minutes of speech, so trim it to the part that matters.",
   turnFailed:
     "That did not go through. Your answer is back in the box below, so you can send it again.",
+  turnUnclear:
+    "We could not read what came back. Reload the page and it will bring you back to the " +
+    "right place — your answer is below in case you need it.",
   noFeedback: "Nothing to look at this time. The next question is below.",
   habitLine: "A pattern worth knowing about: ",
   coveredPrefix: "Covered so far: ",
@@ -81,9 +91,10 @@ function el(doc, tag, className, content) {
 /**
  * Every element under `root` carrying `name` as a class, in document order.
  *
- * Deliberately not an id lookup: the walker in registry.js generates the same `block-<n>` ids
- * for every render, so a log that keeps its history holds duplicates and an id lookup would
- * answer with the FIRST question's panels forever. Walking the entry just rendered cannot miss.
+ * Deliberately not an id lookup: the ids the walker generates are unique per render only
+ * because every renderBlocks call here seeds its own idPrefix, and the double's
+ * getElementById only knows the shell's ids anyway. Walking the entry just rendered cannot
+ * miss and depends on neither.
  * Works over both the real DOM and the test double: `children` is elements-only in a browser,
  * and the double's text nodes fall out on having no `className` and no `children` of their own.
  */
@@ -152,6 +163,12 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
     habits: [], // standing habits plus any announced this session
     inFlight: false, // one attempt at a time
   };
+
+  // Seeds each renderBlocks call's ids. The transcript accumulates entries and the hidden prime
+  // keeps its own, so every render needs ids of its own or aria-labelledby resolves to the
+  // first duplicate in the document — usually a heading the candidate cannot even see.
+  let entrySeq = 0;
+  const nextIdPrefix = () => `entry-${entrySeq++}`;
 
   /** The state line, in app.js's grammar. Assigned as a whole class string rather than
    *  toggled, so the document double's minimal class support can carry it. */
@@ -230,9 +247,14 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
     }
 
     clearState();
-    // Resume: attempts under the gap mean this session is still live — land where they left.
-    if (payload.turns_this_session > 0) enterDrill();
-    else renderPrime(brief);
+    // Resume: attempts under the gap mean this session is still live — land where they left,
+    // with the close on offer if this session's turns had already earned it.
+    if (payload.turns_this_session > 0) {
+      enterDrill();
+      if (payload.suggest_close) closeButton.hidden = false;
+    } else {
+      renderPrime(brief);
+    }
   }
 
   function renderPrime(brief) {
@@ -250,7 +272,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
         note: COPY.primeNote,
       },
     });
-    renderBlocks({ blocks, competencies: [] }, primeMount, { doc });
+    renderBlocks({ blocks, competencies: [] }, primeMount, { doc, idPrefix: "prime" });
 
     if (state.habits.length) {
       primeMount.appendChild(el(doc, "p", "prep-label", COPY.habitsHead));
@@ -313,7 +335,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
         competencies: [],
       },
       entry,
-      { doc, onRung: (rung) => openRung(rung) },
+      { doc, onRung: (rung) => openRung(rung), idPrefix: nextIdPrefix() },
     );
 
     // The registry appends the nudge rung first and the structure rung second; the panels
@@ -397,6 +419,12 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
       if (typeof answerBox.focus === "function") answerBox.focus();
       return;
     }
+    // The mirror of turn.js's other rule: over the cap, the server would 400 whatever we said.
+    if (answerText.length > ANSWER_MAX) {
+      showState(COPY.tooLongGuard, true);
+      if (typeof answerBox.focus === "function") answerBox.focus();
+      return;
+    }
 
     clearState();
     state.inFlight = true;
@@ -433,6 +461,12 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
     state.inFlight = false;
     sendButton.setAttribute("aria-disabled", "false");
 
+    // "Wrap up" was clicked while this was in flight: the close is composed and on screen, and
+    // a late outcome painting over it — a next question, an error line — would reopen a drill
+    // the candidate has left. The attempt itself already landed server-side, and the next
+    // visit's prime (the authoritative close) will count it.
+    if (state.phase === "closed") return;
+
     if (res && res.status === 401) {
       go("/prep/login");
       return;
@@ -447,16 +481,19 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
       }
     }
     if (!body) {
-      // The server guarantees a failed turn left no state, so a plain retry is safe: the
+      // The no-state guarantee holds for non-2xx only: a failed turn left nothing behind, so
+      // a plain retry is safe. A 2xx whose body would not read is different — the server may
+      // already hold the attempt, so the copy sends them through a reload (resume re-serves
+      // the true position) rather than inviting a second, double-counted send. Either way the
       // echo is withdrawn and the typed answer goes back where it was (login.js note 4).
       discard(you);
       answerBox.value = answerText;
-      showState(COPY.turnFailed, true);
+      showState(res && res.ok ? COPY.turnUnclear : COPY.turnFailed, true);
       return;
     }
 
     // The ladder was this question's; the transcript keeps the question, the answer and the
-    // feedback. Discarding it also retires its generated ids before the next ladder reuses them.
+    // feedback.
     discard(state.ladder);
     state.ladder = null;
 
@@ -478,7 +515,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
           competencies: [],
         },
         entry,
-        { doc },
+        { doc, idPrefix: nextIdPrefix() },
       );
       drillLog.appendChild(entry);
       // Move focus to the feedback heading. Negative tabindex only: focusable, never in the

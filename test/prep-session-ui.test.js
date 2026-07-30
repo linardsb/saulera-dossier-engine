@@ -680,3 +680,219 @@ test("every state the controller can enter has a non-empty string behind it", ()
     assert.ok(value.trim().length > 0, `COPY.${key} is empty`);
   }
 });
+
+/* ── group 8: the pr-37 review's findings — one test per fix, plus the unreached guards ── */
+
+/** boot(), with a hand between the controller and the bridge — for the tests that need one
+ *  response sabotaged while everything else stays real. */
+async function bootIntercepted({ d1, client, token, intercept, navigate }) {
+  const s = shell();
+  const urls = [];
+  const base = bridge({ d1, client, token, urls });
+  const controller = initSession({
+    doc: s.doc,
+    fetchImpl: (url, opts) => intercept(base, url, opts),
+    navigate,
+  });
+  await controller.ready;
+  return { ...s, controller, urls };
+}
+
+test("M1: a drilled page holds no duplicate ids, and every aria-labelledby resolves to exactly one heading", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  const client = fakeClient();
+  const s = await boot({ d1, client, token });
+  const { controller } = s;
+  controller.start();
+  await controller.openRung("nudged");
+  for (let i = 0; i < 2; i += 1) {
+    s.answer.value = "An answer, so the transcript accumulates rendered entries.";
+    await controller.submitAttempt();
+  }
+
+  // The hidden prime, two answered questions, two feedback notes and the live ladder are all
+  // in the tree at once — exactly the state where restarted ids used to collide.
+  const ids = findAll(s.body, (n) => n.attrs.id !== undefined).map((n) => n.attrs.id);
+  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+  assert.deepEqual(dupes, [], `duplicate ids in the document: ${dupes.join(", ")}`);
+  assert.ok(ids.some((id) => id.startsWith("prime-")), "prime rendered under its own prefix");
+  assert.ok(ids.filter((id) => id.startsWith("entry-")).length >= 3, "each log entry got its own prefix");
+
+  for (const node of findAll(s.body, (n) => n.attrs["aria-labelledby"] !== undefined)) {
+    const target = node.attrs["aria-labelledby"];
+    assert.equal(ids.filter((id) => id === target).length, 1, `${target} must name exactly one heading`);
+  }
+});
+
+test("L1: resume at suggest-close turns lands in drill with the close already on offer", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  const client = fakeClient();
+
+  const first = await boot({ d1, client, token });
+  first.controller.start();
+  for (let i = 0; i < 6; i += 1) {
+    first.answer.value = "An answer, toward the close suggestion.";
+    await first.controller.submitAttempt();
+  }
+  assert.equal(first.closeButton.hidden, false, "six turns earned the close");
+
+  const second = await boot({ d1, client, token });
+  assert.equal(second.actDrill.hidden, false, "landed in the drill");
+  assert.equal(second.closeButton.hidden, false, "the GET's suggest_close is honoured on resume");
+});
+
+test("L2: a 200 whose body will not read gets the reload copy, not an invitation to double-send", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  let sabotaged = false;
+  const s = await bootIntercepted({
+    d1,
+    client: fakeClient(),
+    token,
+    intercept: (base, url, opts) => {
+      if (!sabotaged && String(url) === "/prep/api/turn") {
+        sabotaged = true;
+        return Promise.resolve(new Response("not json", { status: 200 }));
+      }
+      return base(url, opts);
+    },
+  });
+  const { controller } = s;
+  controller.start();
+
+  const typed = "An answer whose outcome went missing mid-body.";
+  s.answer.value = typed;
+  await controller.submitAttempt();
+  assert.equal(textOf(s.stateLine), COPY.turnUnclear, "the ok-but-unreadable case gets its own copy");
+  assert.notEqual(textOf(s.stateLine), COPY.turnFailed);
+  assert.equal(s.answer.value, typed, "the typed answer is still theirs");
+  assert.equal(visibleYouEntries(s.log).length, 0, "the echo was withdrawn");
+});
+
+test("L3: an over-length answer is refused client-side with honest copy, nothing sent", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  const s = await boot({ d1, client: fakeClient(), token });
+  const { controller } = s;
+  controller.start();
+
+  const huge = "x".repeat(20_001);
+  s.answer.value = huge;
+  await controller.submitAttempt();
+  assert.equal(attemptCount(db), 0, "nothing reached the route");
+  assert.equal(textOf(s.stateLine), COPY.tooLongGuard);
+  assert.equal(s.answer.value, huge, "the paste is untouched, ready to trim");
+  assert.equal(visibleYouEntries(s.log).length, 0, "no echo for a refused send");
+});
+
+test("L4: a close during an in-flight attempt stands — the late outcome paints nothing", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  const s = await boot({ d1, client: fakeClient(), token });
+  const { controller } = s;
+  controller.start();
+
+  s.answer.value = "An answer overtaken by the wrap-up.";
+  const flight = controller.submitAttempt();
+  controller.closeSession();
+  const closeText = textOf(s.closeBody);
+  await flight;
+
+  assert.equal(controller.state.phase, "closed", "the late outcome did not reopen the drill");
+  assert.equal(s.actClose.hidden, false);
+  assert.equal(textOf(s.closeBody), closeText, "the composed close is untouched");
+  assert.equal(findAll(s.log, (n) => n.classes.includes("log-feedback")).length, 0, "no feedback painted behind it");
+  assert.equal(textOf(s.stateLine), "", "no error line over the close");
+  assert.equal(attemptCount(db), 1, "the attempt itself still landed server-side");
+});
+
+test("L5: a failed help fetch shows the retry copy, inflates no mode, and a reopen retries", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  let nudgeCalls = 0;
+  const client = fakeClient({
+    nudge: () => {
+      nudgeCalls += 1;
+      if (nudgeCalls === 1) throw new Error("boom");
+      return wrap({ nudge: NUDGE_TEXT });
+    },
+  });
+  const s = await boot({ d1, client, token });
+  const { controller } = s;
+  controller.start();
+
+  await controller.openRung("nudged");
+  assert.equal(textOf(controller.state.helpStates.nudge), COPY.helpFailed);
+  assert.equal(controller.state.highestRung, "recall", "a failed fetch reaches no rung");
+  assert.equal(controller.state.help.nudge, "idle", "the cache holds nothing to poison");
+
+  await controller.openRung("nudged");
+  assert.equal(nudgeCalls, 2, "the reopen retried");
+  assert.ok(textOf(controller.state.panels.nudge).includes(NUDGE_TEXT), "and filled the panel");
+  assert.equal(controller.state.highestRung, "nudged", "the rung counts once its content arrived");
+});
+
+test("L5: a 401 arriving mid-drill from the turn route means the login page, for help and attempt alike", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  let dead = false;
+  const navigations = [];
+  const s = await bootIntercepted({
+    d1,
+    client: fakeClient(),
+    token,
+    navigate: (url) => navigations.push(url),
+    intercept: (base, url, opts) => {
+      if (dead && String(url) === "/prep/api/turn") {
+        return Promise.resolve(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }));
+      }
+      return base(url, opts);
+    },
+  });
+  const { controller } = s;
+  controller.start();
+  dead = true; // the session dies AFTER load: exactly the mid-drill case
+
+  await controller.openRung("nudged");
+  assert.deepEqual(navigations, ["/prep/login"], "a dead session's help lands on login");
+
+  navigations.length = 0;
+  s.answer.value = "An answer sent on a dead session.";
+  await controller.submitAttempt();
+  assert.deepEqual(navigations, ["/prep/login"], "a dead session's attempt lands on login");
+  assert.equal(attemptCount(db), 0);
+});
+
+test("L5: a rung response landing after the drill moved on fills nothing and inflates nothing", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const client = fakeClient({ nudge: () => gate });
+  const s = await boot({ d1, client, token });
+  const { controller } = s;
+  controller.start();
+
+  const flight = controller.openRung("nudged"); // in flight, gated
+  s.answer.value = "An answer sent before the nudge ever arrived.";
+  await controller.submitAttempt(); // the drill moves to the next question
+  release(wrap({ nudge: NUDGE_TEXT }));
+  await flight;
+
+  assert.deepEqual(attemptModes(db), ["recall"], "the stale nudge inflated no mode");
+  assert.equal(controller.state.highestRung, "recall");
+  assert.equal(controller.state.help.nudge, "idle", "the new question's cache is untouched");
+  assert.ok(!textOf(controller.state.panels.nudge).includes(NUDGE_TEXT), "the new panel stayed empty");
+});
