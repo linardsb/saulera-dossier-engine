@@ -32,10 +32,13 @@ const COPY = {
     "reply to the email that invited you.",
 };
 
-/** #22 replaces this with the token-gated endpoint that reads candidate_role.brief_json.
- *  Until #20's auth lands there is nothing to gate on, and a page that renders a stored
- *  payload is exactly what this ticket asks for. */
-const SOURCE = "/prep/brief.fixture.json";
+/** The session-gated projection of this candidate's own stored brief (#22).
+ *
+ *  Not the stored row: functions/prep/api/brief.js runs it through candidateProjection first,
+ *  so the model's failed guesses, the importance scores and the question bank stay server-side.
+ *  This page could not display them if it wanted to, which is the point — the guarantee is
+ *  about what is DELIVERED, not about what is rendered. */
+const SOURCE = "/prep/api/brief";
 
 const state = document.getElementById("brief-state");
 const mount = document.getElementById("blocks");
@@ -57,10 +60,27 @@ showState(COPY.loading, false);
 
 fetch(SOURCE, { headers: { accept: "application/json" } })
   .then((res) => {
+    // A candidate whose session has gone is a person in front of a browser, not a caller
+    // parsing a body — /prep/login can explain itself and offer the code path, which an
+    // error line on a page they cannot use cannot. `replace`, not `assign`: a dead page
+    // should not sit in the history for Back to land on.
+    if (res.status === 401) {
+      window.location.replace("/prep/login");
+      // Never resolves, deliberately: the navigation is already under way and settling this
+      // chain would flash an error line over a page that is leaving.
+      return new Promise(() => {});
+    }
+    // The handover has not been written yet — a real state, not a failure. It gets the
+    // "not ready yet" copy below rather than the "something went wrong" copy.
+    if (res.status === 404) return null;
     if (!res.ok) throw new Error(`brief: ${res.status}`);
     return res.json();
   })
   .then((payload) => {
+    if (payload === null) {
+      showState(COPY.empty, false);
+      return;
+    }
     if (!payload || !Array.isArray(payload.blocks)) throw new Error("brief: no blocks");
 
     // Text, never an HTML-parsing assignment: the title comes out of the payload, which is

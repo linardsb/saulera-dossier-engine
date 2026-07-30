@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { fakeD1 } from "./helpers/fake-d1.js";
 import { StoreError } from "../src/store.js";
 import {
+  briefJsonByInviteId,
   consumeOtp,
   createInvite,
   deleteInviteByTokenHash,
@@ -21,6 +22,7 @@ import {
   inviteByTokenHash,
   issueOtp,
   openInvite,
+  persistHandover,
   purgeExpired,
   rotateSession,
 } from "../src/portal/store.js";
@@ -319,4 +321,143 @@ test("consumeOtp treats a missing row and a dead row as the same answer", async 
     );
     assert.equal(db.calls.length, 1, "a dead code is read and left alone — nothing to increment");
   }
+});
+
+// ── the handover writers (#22) ─────────────────────────────────────────────────────────
+//
+// What a recording fake CAN prove here: that no payload value reaches a SQL string, that the
+// three inserts happen in dependency order, and that the brief read takes one column. What it
+// CANNOT prove — the competency PRIMARY KEY collision and the INTEGER affinity that swallows
+// a string — needs constraints, and lives in test/prep-send.test.js against node:sqlite.
+
+/** #19's payload shape, small enough to read and wide enough to bind every column. */
+const PAYLOAD = {
+  role_title: "Community Staff Nurse",
+  blocks: [],
+  competencies: [
+    { id: "lone-working", label: "Lone working", source_quote: "rural caseload", importance: 5 },
+    { id: "documentation", label: "Documentation", source_quote: "before end of day", importance: 3 },
+  ],
+  questions: [
+    { competency_id: "lone-working", text: "Tell me about a solo visit.", axis: "core", difficulty: "gentle" },
+    { competency_id: "lone-working", text: "When did you escalate?", axis: "core", difficulty: "probing" },
+    { competency_id: "documentation", text: "How do you keep notes current?", axis: "core", difficulty: "standard" },
+  ],
+};
+
+test("persistHandover writes the role, then its competencies, then their questions", async () => {
+  const db = fakeD1([]);
+  const result = await persistHandover(db, {
+    inviteId: "inv-1",
+    jdText: "the brief",
+    ethosText: "## Their process\nslow",
+    cvText: "the cv",
+    payload: PAYLOAD,
+  });
+
+  assert.deepEqual(result, { roleId: result.roleId, competencies: 2, questions: 3 });
+  assert.match(result.roleId, /^[0-9a-f-]{36}$/i, "the role id is a UUID, not a payload value");
+
+  const tables = db.calls.map(({ sql }) => sql.match(/INSERT INTO (\w+)/i)[1]);
+  assert.deepEqual(
+    tables,
+    ["candidate_role", "competency", "question", "question", "competency", "question"],
+    "dependency order: a competency cannot precede its role, nor a question its competency",
+  );
+});
+
+test("persistHandover interpolates nothing — every value is a bound parameter", async () => {
+  const db = fakeD1([]);
+  await persistHandover(db, {
+    inviteId: "inv-1",
+    jdText: "the brief",
+    ethosText: "## Their process\nslow and consensual",
+    cvText: "the cv",
+    payload: PAYLOAD,
+  });
+
+  // The values that would hurt most in a SQL string: the CV, the brief, the agency's private
+  // ethos text, and every label and quote the model wrote. Each is chosen NOT to be a
+  // substring of a column name — 'ethos' alone matches `ethos_text` and fails while the code
+  // is correct, and a gate that cries wolf gets deleted.
+  const values = [
+    "the brief", "the cv", "slow and consensual", "rural caseload", "before end of day",
+    "Lone working", "Documentation", "Tell me about a solo visit.",
+  ];
+  for (const { sql } of db.calls) {
+    for (const value of values) {
+      assert.ok(!sql.includes(value), `a payload value reached the SQL text: ${sql}`);
+    }
+  }
+});
+
+test("R2: a competency row id is namespaced on the role, so two candidates cannot collide", async () => {
+  const db = fakeD1([]);
+  const { roleId } = await persistHandover(db, { inviteId: "inv-1", payload: PAYLOAD });
+
+  const competencyRows = db.calls.filter(({ sql }) => /INSERT INTO competency/i.test(sql));
+  assert.equal(competencyRows.length, 2);
+  for (const [i, call] of competencyRows.entries()) {
+    assert.equal(
+      call.args[0],
+      `${roleId}:${PAYLOAD.competencies[i].id}`,
+      "the model's slug alone is not unique across a client's candidates",
+    );
+    assert.equal(call.args[1], roleId, "and it hangs off the role it was written for");
+  }
+});
+
+test("R3: axis is bound NULL and difficulty is bound as a NUMBER", async () => {
+  const db = fakeD1([]);
+  const { roleId } = await persistHandover(db, { inviteId: "inv-1", payload: PAYLOAD });
+
+  const questionRows = db.calls.filter(({ sql }) => /INSERT INTO question/i.test(sql));
+  assert.equal(questionRows.length, 3);
+
+  const expected = [1, 3, 2]; // gentle, probing, standard — in payload order per competency
+  for (const [i, call] of questionRows.entries()) {
+    const [, , , axis, difficulty] = call.args;
+    // 'core' would fail CHECK (axis IN ('lateral','vertical')) at insert. NULL passes because
+    // a CHECK that evaluates to NULL is not a violation.
+    assert.equal(axis, null, "the core bank is the rows with a NULL axis");
+    assert.equal(
+      typeof difficulty,
+      "number",
+      "SQLite stores 'standard' in an INTEGER column silently; #23's ORDER BY would sort as text",
+    );
+    assert.equal(difficulty, expected[i]);
+  }
+
+  // Question ids are namespaced on the competency ROW id, which is itself namespaced on the
+  // role — so two candidates' question banks cannot collide either.
+  assert.equal(questionRows[0].args[0], `${roleId}:lone-working#0`);
+  assert.equal(questionRows[1].args[0], `${roleId}:lone-working#1`);
+  assert.equal(questionRows[2].args[0], `${roleId}:documentation#0`);
+});
+
+test("persistHandover leaves stage and success_rate to their DDL defaults", async () => {
+  const db = fakeD1([]);
+  await persistHandover(db, { inviteId: "inv-1", payload: PAYLOAD });
+
+  const { sql } = db.calls.find((c) => /INSERT INTO competency/i.test(c.sql));
+  assert.ok(!/\bstage\b/.test(sql), "stage is #23's column, not this ticket's");
+  assert.ok(!/success_rate/.test(sql), "and a send has produced no attempts to rate");
+});
+
+test("persistHandover refuses a handover with no invite to hang off", async () => {
+  const db = fakeD1([]);
+  assert.equal(await codeOf(() => persistHandover(db, { payload: PAYLOAD })), "missing_fields");
+  assert.equal(db.calls.length, 0, "nothing may be written without the scope that purges it");
+});
+
+test("briefJsonByInviteId selects one column and mentions no other", async () => {
+  const db = fakeD1([{ brief_json: "{}" }]);
+  await briefJsonByInviteId(db, "inv-1");
+
+  const { sql, args } = db.calls[0];
+  // The CV, the brief and the agency's private ethos text live in this row. A SELECT * here
+  // would put all three one JSON.parse away from a candidate's browser.
+  assert.doesNotMatch(sql, /cv_text|jd_text|ethos_text|\*/, `too wide: ${sql}`);
+  assert.match(sql, /^SELECT brief_json FROM candidate_role WHERE invite_id = \?$/i);
+  assert.deepEqual(args, ["inv-1"]);
 });

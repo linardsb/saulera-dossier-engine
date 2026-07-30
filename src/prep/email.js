@@ -26,7 +26,7 @@ export const MAIL_FROM_DEFAULT = "Interview prep <prep@saulera.com>";
  * diagnose. The guard is before the fetch, deliberately — a request built with
  * `Bearer undefined` would reach Resend, be rejected, and count against the account.
  */
-export async function sendEmail(env, { to, subject, text, html } = {}) {
+export async function sendEmail(env, { to, subject, text, html, from } = {}) {
   if (!env?.RESEND_API_KEY) {
     throw new StoreError("not_configured", 503, "RESEND_API_KEY is not set");
   }
@@ -40,7 +40,16 @@ export async function sendEmail(env, { to, subject, text, html } = {}) {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from: env.PREP_MAIL_FROM || MAIL_FROM_DEFAULT, to, subject, text, html }),
+    // `from` is an override, not a new default: every existing caller passes nothing and gets
+    // exactly the behaviour it had. #22's invite is the one message that puts the agency's
+    // name in the display name (decision 10), and it builds that value through mailFrom.
+    body: JSON.stringify({
+      from: from || env.PREP_MAIL_FROM || MAIL_FROM_DEFAULT,
+      to,
+      subject,
+      text,
+      html,
+    }),
   });
 
   if (!response.ok) {
@@ -95,4 +104,123 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
   ].join("\n");
 
   return sendEmail(env, { to, subject: "Your interview-prep sign-in code", text, html });
+}
+
+// ── the invite (#22, decision 10) ──────────────────────────────────────────────────────
+//
+// TWO EMAILS, TWO RULES, ON PURPOSE. `sendOtpEmail` above deliberately carries NO link, and
+// test/prep-email.test.js asserts that absence for a stated anti-phishing reason. This
+// message's link is its entire mechanism: it is the one click the whole portal exists to
+// make work, and it arrives unprompted rather than in answer to a code request.
+//
+// The two are different BY DESIGN. Neither should be "harmonised" toward the other —
+// removing this link breaks the product, and adding one to the OTP mail teaches candidates
+// that a message asking them to click is normal, which is the lesson a phishing email needs
+// them to have already learned.
+
+/** How long an agency name may get before it stops being a display name. */
+const NAME_MAX = 120;
+
+/** CR, LF and every other C0 control, plus DEL. None of them belongs in a mail header. */
+const CONTROLS = /[\u0000-\u001f\u007f]/g;
+
+/**
+ * `"<Agency>" <prep@saulera.com>` — decision 10 puts the agency in the display name.
+ *
+ * R8 LIVES HERE. The agency name is agency-authored text going straight into a mail header,
+ * and two separate things go wrong with it:
+ *
+ *   INJECTION   a name containing CR or LF ends the From header and starts another. A name
+ *               of "Evil\r\nBcc: someone@else" is a second recipient on every invite the
+ *               agency sends. Stripped FIRST, before anything else looks at the string.
+ *   SYNTAX      an agency name can legally contain a comma ("Ashdown, Park & Co"), a full
+ *               stop ("A.B. Recruitment") or a quote. Unquoted, RFC 5322 §3.2.4 reads the
+ *               comma as an address separator and the header becomes two malformed
+ *               addresses. Quoting unconditionally is cheaper than deciding case by case
+ *               which character made it necessary.
+ *
+ * A name that survives neither pass returns the configured string unchanged: a nameless
+ * agency gets today's behaviour rather than a broken header.
+ */
+export function mailFrom(env, agencyName) {
+  const configured = String(env?.PREP_MAIL_FROM || MAIL_FROM_DEFAULT).trim();
+  // The address out of whatever form the operator configured — either "Name <a@b>" or a bare
+  // address. Taking the capture rather than the whole string is what stops a configured
+  // display name and the agency's from both ending up in one header.
+  const address = configured.match(/<([^>]+)>\s*$/)?.[1]?.trim() || configured;
+
+  const name = String(agencyName ?? "")
+    .replace(CONTROLS, " ") // header injection, closed before anything else looks at it
+    .replace(/[<>]/g, "") // angle brackets would open a second address
+    .trim()
+    .slice(0, NAME_MAX)
+    .trim();
+
+  if (!name) return configured;
+
+  // RFC 5322 §3.2.4: inside a quoted-string, `\` and `"` are the two characters that must be
+  // escaped. Order matters — escaping the quote first and the backslash second would escape
+  // the backslashes this line just added.
+  const quoted = name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${quoted}" <${address}>`;
+}
+
+/**
+ * The invite: what this is, the link, the date, and how long it lasts.
+ *
+ * Both halves carry the URL, and the TEXT half carries it as bare text on its own line — a
+ * plain-text client shows exactly what the text half says, and a link that exists only as an
+ * `<a>` href is a link that reader cannot follow. AC #5.
+ *
+ * Never logs the token, the link or the recipient. `sendEmail` logs the status alone
+ * (email.js:47-52) and this adds nothing to that.
+ */
+export async function sendInviteEmail(
+  env,
+  { to, agencyName, roleTitle, interviewAt, link } = {},
+) {
+  const agency = String(agencyName || "").trim() || "your recruitment agency";
+  const role = String(roleTitle || "").trim();
+  const url = String(link ?? "");
+  // The date as the recruiter entered it, day-only: the stamp is stored to the second for the
+  // retention arithmetic, but a candidate reading "2026-08-12 00:00:00" learns nothing from
+  // the zeros and reasonably wonders whether their interview is at midnight.
+  const when = String(interviewAt ?? "").slice(0, 10);
+  // Same origin as the link, so the sentence about a dead link points somewhere real.
+  const base = url.split("/prep/")[0];
+
+  const subject = role ? `Your interview prep for ${role}` : "Your interview prep";
+
+  const text = [
+    "Hello,",
+    "",
+    `${agency} has put together a private preparation page for your interview${role ? ` for ${role}` : ""}.`,
+    "It is built from the job brief, your CV, and what we know about this client.",
+    "",
+    "Open it here:",
+    url,
+    "",
+    ...(when ? [`Your interview: ${when}`, ""] : []),
+    "Everything here is deleted 30 days after your interview, and there is a delete-now",
+    "button on the page if you would rather it went sooner.",
+    "",
+    `If the link stops working, go to ${base}/prep/login and ask for a code.`,
+  ].join("\n");
+
+  // Inline styles and literal colours, which is the one place in this repo that is right:
+  // mail clients strip <style> blocks and none of them resolve a CSS custom property, so
+  // public/tokens.css cannot reach here (see sendOtpEmail's note above).
+  const html = [
+    `<p>Hello,</p>`,
+    `<p>${escapeHtml(agency)} has put together a private preparation page for your interview` +
+      `${role ? ` for ${escapeHtml(role)}` : ""}. It is built from the job brief, your CV, and ` +
+      `what we know about this client.</p>`,
+    `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your interview prep</a></p>`,
+    ...(when ? [`<p>Your interview: ${escapeHtml(when)}</p>`] : []),
+    `<p style="color:#666666;font-size:13px">Everything here is deleted 30 days after your`,
+    `interview, and there is a delete-now button on the page if you would rather it went`,
+    `sooner. If the link stops working, go to ${escapeHtml(base)}/prep/login and ask for a code.</p>`,
+  ].join("\n");
+
+  return sendEmail(env, { to, subject, text, html, from: mailFrom(env, agencyName) });
 }

@@ -216,8 +216,24 @@ hostname-level application and still redirect to Access.
 | Path | Result |
 |---|---|
 | `/prep/privacy`, `/prep/login` | **200, served directly** |
+| `/prep/api/brief` (#22, candidate) | **200, served directly** — then gated by `requireSession` in code |
 | `/` , `/clients.html`, `/api/events` | 302 → `cloudflareaccess.com` |
+| `/api/prep/prepare`, `/api/prep/send` (#22, recruiter) | 302 → `cloudflareaccess.com` |
 | `/prepx`, `/prep-secret`, `/preparation` | **302 → Access** |
+
+**THE DIRECTORY IS THE DOOR, and the next portal endpoint will get this wrong by copying its
+nearest neighbour.** Which tree a Function file lives in decides which of the two applications
+above matches it, so it is a security decision and not a filing one:
+
+| Path | File | Door |
+|---|---|---|
+| `/api/prep/prepare`, `/api/prep/send` | `functions/api/prep/` | Cloudflare Access (recruiter) |
+| `/prep/api/brief` | `functions/prep/api/` | `requireSession` on the invite cookie (candidate) |
+
+A send endpoint placed at `functions/prep/send.js` would be **unauthenticated** — it would mint
+magic links and spend Opus credit for anyone who guessed the path. Inverting the two inverts
+the security in both directions at once: the candidate route would 302 candidates to an Access
+login they cannot pass. Two Level 1 greps in the plan's validation block enforce it.
 
 That third row is the one worth keeping: the bypass matches the `/prep` **path segment**, not
 the string prefix, so no sibling route leaks out with the portal. (`/Prep/privacy` also
@@ -409,6 +425,12 @@ the dashboard.
 | `503 {"error":"no_model_key"}` from `/api/generate` only | the `ANTHROPIC_API_KEY` secret is not set in this environment | section 5b. Production and preview are set separately. The manual route works meanwhile |
 | `502 {"error":"model_refused"}` from `/api/generate` | the model (and its fallback) declined the request | read the inputs for anything that reads as a security or medical-research document rather than a brief and a CV; the manual route will show Claude's own explanation |
 | `502 {"error":"truncated"}` or `502 {"error":"no_pack"}` from `/api/generate` | the model's answer was cut off or was not a pack | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis |
+| `400 {"error":"interview_past"}` from `/api/prep/prepare` or `/api/prep/send` | the interview date is before today (decision 9 unlocks the CTA on a confirmed interview, and the server enforces it whatever the browser did) | enter the date of the interview itself; the check is by DAY, so an interview at 09:00 today is still sendable at 14:00 |
+| `400 {"error":"not_sendable"}` from `/api/prep/send` | one or more competencies could not be found verbatim in the brief, so architecture §3's provenance rule refuses the send | the response's `failures` names them; untick those lines in the preview, or regenerate the pack against the brief that was actually pasted |
+| `400 {"error":"nothing_to_send"}` from `/api/prep/send` | every competency was struck | tick at least one back on — a prep brief with nothing to drill is not a prep brief |
+| `503 {"error":"not_configured"}` from `/api/prep/send` **specifically** | the `RESEND_API_KEY` secret is not set in this environment | section 5b. Nothing was written and nothing was counted; the send is safe to retry once the key is set. Note this shares a code with the DB-binding row above — the difference is that only this route answers it while `/api/clients` is healthy |
+| `502 {"error":"mail_failed"}` from `/api/prep/send` | Resend rejected the message — **almost always an unverified sending domain (their 403)** | verify the domain in Resend and add its SPF and DKIM records (section 5b). The invite and the whole candidate scope were rolled back, so nothing is orphaned and the count did not move; the recruiter can retry without regenerating |
+| a candidate's magic link points at a preview URL | `PREP_BASE_URL` is unset, so the link was built from the origin the recruiter's browser used | set `PREP_BASE_URL` on production (section 5b). Links already sent cannot be repointed; the candidate can sign in at `<origin>/prep/login` with a code instead |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
 
@@ -473,8 +495,40 @@ become the one input that changes the answer. The signal is in the deployment lo
 setting the key, **do one real send** before believing the path works — the unit tests stub
 the transport by design and pass whether or not Resend would accept a single message.
 
-The magic link still works with no mail key at all: #22 sends the invite, and this key is only
-the returning-login path.
+⚠ **This changed with #22.** The sentence above — "that is the only mail this deployment sends
+today" — no longer holds: `POST /api/prep/send` sends the invite itself, and unlike the OTP
+path it FAILS LOUDLY without the key. A recruiter pressing **Send to candidate** on a
+deployment with no `RESEND_API_KEY` gets `503 {"error":"not_configured"}` and a screen telling
+them to ask whoever set it up. Nothing is written and nothing is counted, so the failure costs
+a retry rather than a half-sent candidate; but the Send button does not work at all until this
+key is set. That is the deliberate difference: an OTP that silently does not arrive is
+answered by "ask for another code", and an invite that silently does not arrive is a candidate
+who never hears from you.
+
+### `PREP_BASE_URL` — where the magic link points (#22)
+
+A plain **Variable**, not a Secret (Settings → Variables and secrets → type *Variable*): it
+carries no credential and it appears in every invite email anyway.
+
+Set it to the exact origin, with **no trailing slash, no path, no query**:
+
+```
+PREP_BASE_URL = https://<project>.pages.dev
+```
+
+It is the origin `POST /api/prep/send` builds the invite's magic link against —
+`<PREP_BASE_URL>/prep/auth/enter?t=<token>`.
+
+**Until it is set, nothing is broken.** The link is built from the origin the recruiter's
+browser used, which is correct on production and wrong only on a preview deployment — where a
+candidate would be sent a link to a preview URL that later disappears. So: set it in
+production, and leave it unset in previews if you would rather previews mint links against
+themselves.
+
+A malformed value is **ignored rather than concatenated**. `send.js` accepts it only if it
+parses as an `https:` URL with no path, query or fragment, and otherwise falls back to the
+request origin — a broken override would otherwise mint links nobody notices until a candidate
+clicks one.
 
 ---
 

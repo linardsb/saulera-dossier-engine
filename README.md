@@ -53,8 +53,28 @@ asserting it in prose.
 have is reported to the console and skipped, never injected and never rendered as markup, which
 is what makes "no component renders a finished answer or a score" a fact about the code rather
 than an instruction in a prompt — see §3 of `docs/epics/candidate-portal.architecture.md`. The
-screen renders `public/prep/brief.fixture.json`, a payload derived from #19's own test fixtures,
-until #22 wires the token-gated endpoint that reads `candidate_role.brief_json`.
+screen now reads `GET /prep/api/brief`, session-gated on the invite cookie, which serves a
+**projection** of the stored payload rather than the row itself: the model's failed guesses,
+the importance scores and the question bank never leave the server, so "the candidate does not
+see them" is a fact about the response and not about the rendering
+(`src/prep/projection.js`, `test/prep-projection.test.js`).
+
+**Send to Candidate closes the loop** (30 Jul 2026, #22). Once a pack exists and an interview
+is booked, act 4 on the pack screen takes the date and the candidate's email address and sends
+them their own prep. It is deliberately two steps, because decision 15 requires the recruiter
+to see the extracted competencies before anything goes — `POST /api/prep/prepare` runs the one
+Opus call and returns a preview that persists nothing, and `POST /api/prep/send` re-runs the
+whole contract on what comes back, writes the invite scope, mints the magic link and emails it.
+Three things make the round trip safe rather than merely conventional: `verifyBrief` recomputes
+`verified` from the quote on every pass and never reads the incoming flag, the candidate-visible
+field keys are read from the database and never from the browser, and an unverified competency
+refuses the send outright. `invite_sent` is recorded **last**, after the email succeeded, and a
+mail failure rolls the whole scope back — so the counts on `/counts` cannot overstate what was
+actually delivered, which is the one number decision 23's sales claim rests on.
+
+The recruiter's whole view of the portal is those two numbers per client, sent and opened
+(`/counts`). Nothing a candidate does ever reaches them, and `test/counts.test.js` scans the
+page's source to keep that true rather than trusting it.
 
 See **#1** for the epic, the dependency graph and the date gates. `DEPLOY.md` is the runbook for
 the deployment.

@@ -16,13 +16,17 @@
 </head>
 <body>
 
-<!-- #21 REPLACES THIS FILE. It is deliberately bare: #20 ships the door, and this page exists
-     to prove the door works and to give the magic link somewhere to land. The dashboard, the
-     brief and the drill UI are #21 and #24. Do not grow this page; replace it.
+<!-- THE LANDING PAD, and deliberately nothing else. /prep/auth/enter redirects here after
+     spending the magic link, and that redirect must not change (it is the one path a
+     candidate's email actually contains) — so this page stays where it is and simply decides
+     where the candidate goes next.
 
-     What it does have to keep when #21 rewrites it: the signed-out bounce below. Every page
-     under /prep that holds candidate content asks the server whether there is a session,
-     because the cookie is HttpOnly and no script here can read it. -->
+     Signed in  -> /prep/brief, the dashboard #21 built and #22 gave real data to.
+     Signed out -> /prep/login, which can explain itself and offer the code path.
+
+     The signed-out bounce below is the thing that must survive any rewrite of this page.
+     Every page under /prep holding candidate content asks the SERVER whether there is a
+     session, because the cookie is HttpOnly and no script here can read it. -->
 <header class="topbar">
   <div class="topbar-inner">
     <span class="topbar-brand">Interview prep</span>
@@ -50,9 +54,9 @@
         window.location.replace("/prep/login");
         return;
       }
-      document.getElementById("head").textContent = "You are signed in";
-      document.getElementById("sub").textContent =
-        "Your prep brief will appear here.";
+      // `replace`, not `assign`, on both branches: this page is a junction and never a
+      // destination, so leaving it in the history only gives Back somewhere useless to land.
+      window.location.replace("/prep/brief");
     })
     .catch(function () {
       // A failed check is not a session. Fail closed, and let the login page explain itself.

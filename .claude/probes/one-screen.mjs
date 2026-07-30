@@ -38,7 +38,16 @@ const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/cs
 function serveStatic() {
   const server = createServer(async (req, res) => {
     const path = req.url.split("?")[0];
-    const file = join(PUBLIC, path === "/" ? "index.html" : path === "/clients" ? "clients.html" : path);
+    // Pages' built-in HTML handling, reproduced: an extensionless path resolves to its .html
+    // file. The map is explicit rather than a suffix rule so a typo 404s here the way it
+    // would in production instead of silently resolving to something else.
+    const EXTENSIONLESS = {
+      "/": "index.html",
+      "/clients": "clients.html",
+      "/counts": "counts.html",
+      "/prep/brief": "prep/brief.html",
+    };
+    const file = join(PUBLIC, EXTENSIONLESS[path] ?? path);
     try {
       const body = await readFile(file);
       const ext = file.slice(file.lastIndexOf("."));
@@ -330,6 +339,33 @@ const READ = `(function () {
       document.querySelectorAll("#pack-body .claim-failed-quote"),
       function (n) { return n.textContent; }),
     claimCount: document.querySelectorAll("#pack-body .claim").length,
+
+    // ── act 4 ──────────────────────────────────────────────────────────────────────────
+    sendHidden: hidden("act-send"),
+    previewHidden: hidden("send-preview"),
+    sendState: t("send-state"),
+    sendLede: t("send-preview-lede"),
+    prepareBusy: (function () {
+      var n = document.getElementById("prepare-send");
+      return n ? n.getAttribute("aria-disabled") : null;
+    })(),
+    confirmBusy: (function () {
+      var n = document.getElementById("confirm-send");
+      return n ? n.getAttribute("aria-disabled") : null;
+    })(),
+    // id + ticked, per preview row, so a probe can assert WHICH box arrived unticked rather
+    // than only how many did.
+    strikeBoxes: Array.prototype.map.call(
+      document.querySelectorAll("#strike-list .strike-box"),
+      function (n) { return { id: n.dataset.id, checked: n.checked }; }),
+    fieldRows: Array.prototype.map.call(
+      document.querySelectorAll("#send-fields-list .send-field-row"),
+      function (n) { return n.textContent; }),
+    dateReadOnly: (function () {
+      var n = document.getElementById("interview-date");
+      return n ? n.readOnly : null;
+    })(),
+
     url: location.search,
     calls: window.__probe.calls,
     confirms: window.__probe.confirms,
@@ -987,6 +1023,378 @@ async function probe17() {
   await page.close();
 }
 
+/* ── act 4: send to candidate (#22) ──────────────────────────────────────────────────────
+ *
+ * These measure what the plan's AC #1 and R7 assert in prose. The CTA being "provably locked"
+ * is a claim about REQUESTS ISSUED, not about an attribute — an aria-disabled button whose
+ * handler still fires is exactly as broken as no guard at all, and only a count of fetches
+ * can tell the two apart.
+ */
+
+const COMPETENCIES = [
+  { id: "comp-lone-working", label: "Lone working", source_quote: "rural caseload", importance: 5, verified: true },
+  { id: "comp-documentation", label: "Same-day documentation", source_quote: "written up the same day", importance: 3, verified: true },
+];
+
+/** A prepare response, with `verified` overridable so probe 22 can send an unsourced one. */
+const PREPARED = (competencies = COMPETENCIES) => ({
+  payload: {
+    role_title: "Band 6 Community Nurse",
+    blocks: [],
+    competencies,
+    questions: competencies.map((c) => ({ competency_id: c.id, text: "Tell me about it.", axis: "core", difficulty: "standard" })),
+  },
+  provenance: { sourced: competencies.filter((c) => c.verified).length, unverified: 0, total: competencies.length },
+  failures: [],
+  interview_at: "2099-08-12 00:00:00",
+  visible_fields: [{ key: "their-process", heading: "Their process", chars: 412 }],
+  duration_ms: 1200,
+});
+
+const SENT = { ok: true, sent_at: "2099-08-12 09:00:00", competencies: ["comp-lone-working"], event_recorded: true };
+
+/** Reach phase "pack" by the generate route, which is where act 4 lives. */
+async function reachPack(page, routes) {
+  await primeInputs(page);
+  await page.eval(CLICK("generate"));
+  await page.eval(SETTLE(300));
+  return routes;
+}
+
+const GENERATE_OK = { method: "POST", match: "^/api/generate$", status: 201, body: VERIFIED };
+const PREPARE_OK = { method: "POST", match: "^/api/prep/prepare$", status: 200, body: PREPARED() };
+
+async function probe18() {
+  // AC #1, MEASURED. A click with the date field empty must issue ZERO requests — the button
+  // carrying aria-disabled proves nothing on its own, because the handler is still bound.
+  const page = await openScreen({ routes: baseRoutes([GENERATE_OK, PREPARE_OK]) });
+  await reachPack(page);
+
+  const before = await page.eval(READ);
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+  const r = await page.eval(READ);
+
+  const prepares = r.calls.filter((c) => c.path === "/api/prep/prepare");
+  check(
+    "18", "the CTA is locked without a date: clicking issues no request and says what is missing",
+    before.sendHidden === false && before.prepareBusy === "true" &&
+      prepares.length === 0 && (r.sendState ?? "").includes("interview date"),
+    `act-send visible=${!before.sendHidden} · aria-disabled=${before.prepareBusy}\n` +
+      `        /api/prep/prepare calls=${prepares.length} · state=${JSON.stringify(r.sendState)}`,
+  );
+  await page.close();
+}
+
+async function probe19() {
+  // The gate opens on both fields and closes again when either is cleared.
+  const page = await openScreen({ routes: baseRoutes([GENERATE_OK, PREPARE_OK]) });
+  await reachPack(page);
+
+  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  const open = await page.eval(READ);
+
+  await page.eval(FILL("interview-date", ""));
+  const shut = await page.eval(READ);
+
+  check(
+    "19", "filling both fields unlocks the CTA; clearing the date locks it again",
+    open.prepareBusy === null && shut.prepareBusy === "true",
+    `both filled -> aria-disabled=${JSON.stringify(open.prepareBusy)} · ` +
+      `date cleared -> aria-disabled=${JSON.stringify(shut.prepareBusy)}`,
+  );
+  await page.close();
+}
+
+async function probe20() {
+  // AC #3, measured on the WIRE: the strike array carries exactly the unticked id, and the
+  // payload posted is the one prepare returned rather than a rebuilt approximation.
+  const page = await openScreen({
+    routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  // Untick the second competency.
+  await page.eval(`
+    (function () {
+      var box = document.querySelectorAll("#strike-list .strike-box")[1];
+      box.checked = false;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const sent = r.calls.filter((c) => c.path === "/api/prep/send");
+  const body = sent.length ? JSON.parse(sent[0].body) : {};
+  check(
+    "20", "the send body carries exactly the unticked id, and prepare's own payload",
+    sent.length === 1 &&
+      JSON.stringify(body.strike) === JSON.stringify(["comp-documentation"]) &&
+      body.payload && body.payload.competencies.length === 2 &&
+      body.interview_at === "2099-08-12 00:00:00",
+    `sends=${sent.length} · strike=${JSON.stringify(body.strike)}\n` +
+      `        payload competencies=${body.payload ? body.payload.competencies.length : "none"} · ` +
+      `interview_at=${JSON.stringify(body.interview_at)} (the SERVER's normalised stamp)`,
+  );
+  await page.close();
+}
+
+async function probe21() {
+  // R7, MEASURED. Two invites for one candidate is two `invite_sent` events, and decision 23's
+  // number is the thing the epic sells on. After a success the state is terminal: further
+  // clicks must issue nothing at all.
+  const page = await openScreen({
+    routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const sends = r.calls.filter((c) => c.path === "/api/prep/send");
+  const prepares = r.calls.filter((c) => c.path === "/api/prep/prepare");
+  check(
+    "21", "R7: after a successful send, further clicks issue exactly nothing",
+    sends.length === 1 && prepares.length === 1 &&
+      r.previewHidden === true && r.dateReadOnly === true && r.confirmBusy === "true",
+    `sends=${sends.length} (must be 1) · prepares=${prepares.length} (must be 1)\n` +
+      `        preview collapsed=${r.previewHidden} · fields frozen=${r.dateReadOnly} · ` +
+      `confirm locked=${r.confirmBusy}\n        state=${JSON.stringify(r.sendState)}`,
+  );
+  await page.close();
+}
+
+async function probe22() {
+  // R9's browser half. A mail outage must cost a retry, not another two-minute ~30p model
+  // call — so the second confirm reuses the SAME payload and issues no second prepare.
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK, PREPARE_OK,
+      { method: "POST", match: "^/api/prep/send$", status: 502, body: { error: "mail_failed" } },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+  const afterFailure = await page.eval(READ);
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const sends = r.calls.filter((c) => c.path === "/api/prep/send");
+  const prepares = r.calls.filter((c) => c.path === "/api/prep/prepare");
+  const same = sends.length === 2 && sends[0].body === sends[1].body;
+  check(
+    "22", "a mail failure keeps the payload: the retry re-sends it and prepares nothing again",
+    same && prepares.length === 1 && afterFailure.previewHidden === false &&
+      (afterFailure.sendState ?? "").includes("not accepted"),
+    `sends=${sends.length} · identical bodies=${same} · prepares=${prepares.length} (must stay 1)\n` +
+      `        preview still live after the failure=${!afterFailure.previewHidden}\n` +
+      `        state=${JSON.stringify(afterFailure.sendState)}`,
+  );
+  await page.close();
+}
+
+async function probe23() {
+  // An unverified competency arrives UNTICKED and is struck by default. Ticked would be a
+  // default the server refuses (step 11 of the send contract) — a dead end wearing a control.
+  const unsourced = [
+    COMPETENCIES[0],
+    { ...COMPETENCIES[1], verified: false },
+  ];
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK,
+      { method: "POST", match: "^/api/prep/prepare$", status: 200, body: PREPARED(unsourced) },
+      { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  const preview = await page.eval(READ);
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const sent = r.calls.filter((c) => c.path === "/api/prep/send");
+  const body = sent.length ? JSON.parse(sent[0].body) : {};
+  const boxes = preview.strikeBoxes;
+  check(
+    "23", "an unsourced competency arrives unticked and is struck by default",
+    boxes.length === 2 && boxes[0].checked === true && boxes[1].checked === false &&
+      JSON.stringify(body.strike) === JSON.stringify(["comp-documentation"]) &&
+      // The lede must EXPLAIN the untick. An unexplained unticked box reads as a mistake the
+      // recruiter should correct — which is the one correction the server would refuse.
+      (preview.sendLede ?? "").includes("not being sent"),
+    `boxes=${JSON.stringify(boxes)}\n` +
+      `        strike posted=${JSON.stringify(body.strike)}\n` +
+      `        lede=${JSON.stringify(preview.sendLede)}`,
+  );
+  await page.close();
+}
+
+async function probe27() {
+  // The state line must not outlive the situation it describes. Untick everything and the
+  // screen says so and locks confirm; tick one back and BOTH have to come undone. The first
+  // cut only ever set the message, so an unlocked Send it sat under "there is nothing left
+  // to send" — a screen contradicting itself, which is worse than either state alone.
+  const page = await openScreen({
+    routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  const toggle = (index, checked) => `
+    (function () {
+      var box = document.querySelectorAll("#strike-list .strike-box")[${index}];
+      box.checked = ${checked};
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`;
+
+  await page.eval(toggle(0, false));
+  await page.eval(toggle(1, false));
+  const emptied = await page.eval(READ);
+
+  await page.eval(toggle(0, true));
+  const restored = await page.eval(READ);
+
+  check(
+    "27", "unticking everything warns and locks; ticking one back clears both",
+    emptied.confirmBusy === "true" && (emptied.sendState ?? "").includes("nothing left to send") &&
+      restored.confirmBusy === null && (restored.sendState ?? "") === "",
+    `all unticked -> locked=${emptied.confirmBusy} · state=${JSON.stringify(emptied.sendState)}\n` +
+      `        one re-ticked -> locked=${JSON.stringify(restored.confirmBusy)} · ` +
+      `state=${JSON.stringify(restored.sendState)}`,
+  );
+  await page.close();
+}
+
+/* ── the other two screens (#22) ─────────────────────────────────────────────────────────
+ *
+ * These exist because nothing else executes either file. test/counts.test.js is a SOURCE
+ * SCAN — it proves what counts.js does not fetch, not that it renders — and the candidate
+ * page's 401 branch is client-side, so the integration test that drives
+ * functions/prep/api/brief.js never reaches it. Both were shipping on "reads correct".
+ */
+
+async function probe24() {
+  // AC #4's rendering half, and the one line of it a source scan cannot see: a client with no
+  // invites must show 0, not a blank. A blank reads as "we do not know", and we do know.
+  const page = await openScreen({
+    routes: [
+      { method: "GET", match: "^/api/clients$", status: 200, body: LIST },
+      { method: "GET", match: "^/api/events$", status: 200, body: {
+        total: 6,
+        // Only client A has any history. B must still render a full row of zeros.
+        per_client: [{ client_id: A, packs: 6, invites_sent: 4, invites_opened: 3 }],
+      } },
+    ],
+  }, { query: "counts" });
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(`(function () {
+    var rows = Array.prototype.map.call(document.querySelectorAll("#counts-body tr"), function (tr) {
+      return Array.prototype.map.call(tr.children, function (c) { return c.textContent; });
+    });
+    var state = document.getElementById("counts-state");
+    return {
+      rows: rows,
+      stateText: state.textContent,
+      stateShown: state.classList.contains("is-shown"),
+      calls: window.__probe.calls.map(function (c) { return c.path; }),
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    };
+  })()`);
+
+  const a = r.rows[0] ?? [];
+  const b = r.rows[1] ?? [];
+  check(
+    "24", "the counts page renders a row per client, and zeros where there is no history",
+    r.rows.length === 2 &&
+      a[1] === "6" && a[2] === "4" && a[3] === "3" &&
+      b[1] === "0" && b[2] === "0" && b[3] === "0" &&
+      r.calls.length === 2 && r.stateShown === false &&
+      r.scrollWidth <= r.innerWidth,
+    `rows=${JSON.stringify(r.rows)}\n` +
+      `        requests=${JSON.stringify(r.calls)} (must be exactly the two aggregates)\n` +
+      `        state cleared=${!r.stateShown} · no horizontal page scroll=${r.scrollWidth <= r.innerWidth}`,
+  );
+  await page.close();
+}
+
+async function probe25() {
+  // A candidate whose session has gone must land on /prep/login, not on an error line over a
+  // page they cannot use. This is brief.js's 401 branch, which no server-side test reaches.
+  const page = await openScreen({
+    routes: [{ method: "GET", match: "^/prep/api/brief$", status: 401, body: { error: "invalid_token" } }],
+  }, { query: "prep/brief" });
+  await page.eval(SETTLE(400));
+
+  // `window.__probe.calls` is NOT read here: it belongs to the document that made the
+  // request, and the navigation this probe is about replaced that document. The landing IS
+  // the assertion — the request must have been issued and answered 401 for it to have
+  // happened at all, since nothing else on this page navigates.
+  const r = await page.eval(`({ path: location.pathname, search: location.search })`);
+  check(
+    "25", "a candidate with no session is sent to /prep/login rather than shown an error",
+    r.path === "/prep/login",
+    `landed on ${r.path}${r.search} (from /prep/brief, via the 401 branch)`,
+  );
+  await page.close();
+}
+
+async function probe26() {
+  // 404 is a REAL STATE, not a failure: the invite exists and the handover has not been
+  // written. It must get the "not ready yet" copy and stay on the page.
+  const page = await openScreen({
+    routes: [{ method: "GET", match: "^/prep/api/brief$", status: 404, body: { error: "not_found" } }],
+  }, { query: "prep/brief" });
+  await page.eval(SETTLE(400));
+
+  const r = await page.eval(`({
+    path: location.pathname,
+    state: (document.getElementById("brief-state") || {}).textContent,
+    isError: (document.getElementById("brief-state") || { classList: { contains: function () { return null; } } })
+      .classList.contains("is-error"),
+  })`);
+  check(
+    "26", "a brief that is not ready yet says so, and does not read as a failure",
+    r.path === "/prep/brief" && (r.state ?? "").includes("not ready yet") && r.isError === false,
+    `stayed on ${r.path} · state=${JSON.stringify(r.state)} · styled as an error=${r.isError}`,
+  );
+  await page.close();
+}
+
 /* ── run ─────────────────────────────────────────────────────────────────────────────── */
 
 const server = await serveStatic();
@@ -994,7 +1402,9 @@ const chrome = await startChrome();
 try {
   for (const probe of [probe1, probe2, probe3, probe4, probe5, probe6, probe7,
                        probe8, probe9, probe10, probe11, probe12, probe13, probe14,
-                       probe15, probe16, probe17]) {
+                       probe15, probe16, probe17,
+                       probe18, probe19, probe20, probe21, probe22, probe23,
+                       probe24, probe25, probe26, probe27]) {
     await probe();
   }
 } finally {
