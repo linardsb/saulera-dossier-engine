@@ -239,6 +239,35 @@ test("closePayload picks the stage-riser as improved, and never leaks numbers", 
   assert.ok(!JSON.stringify(close).match(/importance|stage|success_rate/));
 });
 
+test("closePayload with no stage rise picks the BIGGEST rate riser, not the first in rank", () => {
+  const attemptsByCompetency = new Map([
+    // a: can_answer before and after; rate 1/2 -> 2/3 (a rise of ~0.17)
+    ["a", [
+      attempt({ rating: 3, created_at: stamp(-120) }),
+      attempt({ rating: 1, created_at: stamp(-110) }),
+      attempt({ rating: 3, created_at: stamp(-10) }),
+    ]],
+    // d: can_answer before and after (no variant success, so no stage rise at 5 counted
+    // attempts even at rate 0.6); rate 1/3 -> 3/5 — the bigger rise, ranked second.
+    ["d", [
+      attempt({ rating: 3, created_at: stamp(-120) }),
+      attempt({ rating: 1, created_at: stamp(-115) }),
+      attempt({ rating: 1, created_at: stamp(-110) }),
+      attempt({ rating: 3, created_at: stamp(-10) }),
+      attempt({ rating: 3, created_at: stamp(-5) }),
+    ]],
+  ]);
+  const close = closePayload({
+    competencies: [A, D],
+    attemptsByCompetency,
+    sessionStart: stamp(-15),
+    sessionEnd: null,
+    ranked: [A, D],
+    queued: [],
+  });
+  assert.deepEqual(close.improved, { id: "d", label: "D" });
+});
+
 test("closePayload with a flat session improves nothing", () => {
   const close = closePayload({
     competencies: [A],

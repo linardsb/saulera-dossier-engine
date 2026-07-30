@@ -51,7 +51,11 @@ export function daysToInterview(interviewAt, now = new Date()) {
   return Math.round((day(date) - day(now)) / 86_400_000);
 }
 
-/** SPEC's spacing table as per-competency cooldowns (whole days since last non-revealed attempt). */
+/**
+ * SPEC's spacing table as per-competency cooldowns. The unit is WALL-CLOCK days —
+ * `eligible` compares raw milliseconds, so a cooldown of 2 means a full 48 h since the
+ * last non-revealed attempt, not two calendar dates like `daysToInterview` counts.
+ */
 export function cooldownDays(days) {
   if (days <= 3) return 0; // 1–3 days (and past-interview): same day is fine
   if (days <= 14) return 2; // 1–2 weeks: every 2–3 days

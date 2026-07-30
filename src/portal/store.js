@@ -607,21 +607,19 @@ export async function insertVariant(db, { competencyId, text, variantOf, axis, d
  * One observation of a habit: +1 on an ACTIVE row with this label, else a fresh row at
  * the DDL's default 1. The count read back is what lets turn.js announce a habit exactly
  * once — on the observation that made it 2 (the moment noise becomes a pattern).
+ *
+ * ONE statement, not UPDATE-then-INSERT: habits sit outside the log-replay invariant,
+ * so a race that inserts two active rows for one label would double-count forever with
+ * nothing to heal it. 0005's partial unique index is the backstop this upsert rides.
  */
 export async function observeHabit(db, { roleId, label } = {}) {
   requireFields({ roleId, label });
-  const updated = await db
-    .prepare(
-      "UPDATE habit SET evidence_count = evidence_count + 1 WHERE role_id = ? AND label = ? AND active = 1",
-    )
-    .bind(roleId, label)
-    .run();
-  if ((updated.meta?.changes ?? 0) === 0) {
-    await db.prepare("INSERT INTO habit (role_id, label) VALUES (?, ?)").bind(roleId, label).run();
-  }
   const evidenceCount = await db
     .prepare(
-      "SELECT evidence_count FROM habit WHERE role_id = ? AND label = ? AND active = 1",
+      `INSERT INTO habit (role_id, label) VALUES (?, ?)
+       ON CONFLICT (role_id, label) WHERE active = 1
+       DO UPDATE SET evidence_count = evidence_count + 1
+       RETURNING evidence_count`,
     )
     .bind(roleId, label)
     .first("evidence_count");

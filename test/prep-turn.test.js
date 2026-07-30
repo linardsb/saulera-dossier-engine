@@ -307,6 +307,14 @@ test("a mint failure degrades to next_question: null — never a 502 on a paid t
   const minted = [body].filter((b) => b.next_question?.id.includes("#v-"));
   assert.equal(minted.length, 0);
   assert.equal(attemptCount(db), 2, "both attempt rows exist");
+
+  // Deviation #2, the follow-up: the GET degrades the still-standing {mint} demand to
+  // the least-recently-attempted question — a mint failure must never dead-end the
+  // drill with next_question: null, and the degrade costs no model call.
+  const variantCalls = client.kinds().filter((k) => k === "variant").length;
+  const session = await (await getSession(d1, token)).json();
+  assert.equal(session.next_question?.id, questions[0].id, "the least-recently-attempted question");
+  assert.equal(client.kinds().filter((k) => k === "variant").length, variantCalls, "no new mint");
 });
 
 /* ── failure semantics ─────────────────────────────────────────────────────────────────── */
@@ -343,6 +351,23 @@ test("empty answer_text: legal on revealed (no model call, rating NULL), 400 on 
 
   const recall = await postTurn(d1, client, attemptBody(question.id, { answer_text: "   " }), token);
   assert.equal(recall.status, 400);
+});
+
+test("a 20,001-character answer is too_long — no model call, no write; the cap itself is legal", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+  const client = fakeClient();
+
+  const over = await postTurn(d1, client, attemptBody(question.id, { answer_text: "a".repeat(20_001) }), token);
+  assert.equal(over.status, 400);
+  assert.equal((await over.json()).error, "too_long");
+  assert.equal(client.calls.length, 0, "a caller fault costs no model spend");
+  assert.equal(attemptCount(db), 0, "and no write");
+
+  const atCap = await postTurn(d1, client, attemptBody(question.id, { answer_text: "a".repeat(20_000) }), token);
+  assert.equal(atCap.status, 200, "20,000 exactly is inside the cap");
 });
 
 /* ── the help rungs ────────────────────────────────────────────────────────────────────── */
@@ -451,6 +476,45 @@ test("zero competencies (all struck before Send) is a 200 done-state, not an err
   const body = await response.json();
   assert.equal(body.next_question, null);
   assert.deepEqual(body.competencies, []);
+});
+
+/* ── the session boundary and last_close ───────────────────────────────────────────────── */
+
+test("backdated sessions: last_close is the last COMPLETED session, idle and live", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1, { payload: SINGLE() });
+  const questions = await questionsByRole(d1, roleId);
+  const lone = { id: questions[0].competency_id, label: "Working autonomously on a rural caseload" };
+  const struggling = fakeClient({ feedback: FEEDBACK_OK(2) });
+  const strong = fakeClient({ feedback: FEEDBACK_OK(4) });
+
+  // Three real turns through the route, then backdate the log into two sessions split
+  // by > 30 minutes: A = two failures ~2 h ago, B = one success 60 min ago (a stage
+  // rise, '' -> can_answer, so B's close has an `improved`).
+  await postTurn(d1, struggling, attemptBody(questions[0].id), token);
+  await postTurn(d1, struggling, attemptBody(questions[0].id), token);
+  await postTurn(d1, strong, attemptBody(questions[0].id), token);
+  const minutesAgo = [120, 119, 60];
+  db.prepare("SELECT id FROM attempt ORDER BY id").all().forEach((row, i) => {
+    db.prepare("UPDATE attempt SET created_at = ? WHERE id = ?").run(at(-minutesAgo[i] / 1440), row.id);
+  });
+
+  // 60 idle minutes: nothing is live, so B is the last completed session and closes.
+  const idle = await (await getSession(d1, token)).json();
+  assert.equal(idle.turns_this_session, 0, "no live session, no turns");
+  assert.equal(idle.suggest_close, false);
+  assert.deepEqual(idle.last_close.improved, lone, "B's stage rise, judged against all of A");
+  assert.deepEqual(idle.last_close.next, lone);
+  assert.ok(idle.last_close.queued.every((q) => typeof q === "string"), "queued is plain text");
+  assert.equal(idle.competencies[0].moved, true, "moved is scoped to B, the latest session");
+
+  // One fresh attempt opens session C: B stays the last COMPLETED close (now bounded
+  // by C's start, not by 'now'), and the turn counter is C's alone.
+  await postTurn(d1, struggling, attemptBody(questions[0].id), token);
+  const live = await (await getSession(d1, token)).json();
+  assert.equal(live.turns_this_session, 1, "only session C's turns count");
+  assert.deepEqual(live.last_close.improved, lone, "still session B's close");
 });
 
 /* ── suggest_close ─────────────────────────────────────────────────────────────────────── */

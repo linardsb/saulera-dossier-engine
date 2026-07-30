@@ -1,7 +1,7 @@
 // #23 — the session engine's store section, on real SQL.
 //
-// Everything here turns on a CONSTRAINT (the axis CHECK, the FK cascade), a JOIN (the
-// ownership check), or `meta.changes` (observeHabit's upsert) — all of which
+// Everything here turns on a CONSTRAINT (the axis CHECK, the FK cascade, observeHabit's
+// partial unique index) or a JOIN (the ownership check) — all of which
 // test/helpers/fake-d1.js fakes. So this file runs on node:sqlite through
 // test/helpers/sqlite-d1.js, seeding a REAL handover through `persistHandover`, the same
 // writer production uses.
@@ -134,6 +134,14 @@ test("observeHabit: once -> 1, twice -> 2; an inactive row is not incremented", 
   db.prepare("UPDATE habit SET active = 0").run();
   assert.deepEqual(await observeHabit(d1, { roleId, label: "rambles" }), { evidenceCount: 1 });
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM habit").get().n, 2);
+
+  // The race backstop (0005): a second ACTIVE row for one label — what two concurrent
+  // double-submitted turns could once insert — is a constraint violation, not a fork.
+  assert.throws(
+    () => db.prepare("INSERT INTO habit (role_id, label) VALUES (?, ?)").run(roleId, "rambles"),
+    /UNIQUE/,
+    "two active rows for one (role_id, label) must be impossible",
+  );
 });
 
 test("recordAttempt guards the rating's affinity and the cascade takes the log", { skip }, async () => {
