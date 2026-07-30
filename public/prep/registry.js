@@ -543,7 +543,11 @@ export const REGISTRY = Object.freeze({
  *
  * @param payload  a stored brief: `{ blocks, competencies }`
  * @param mount    the element to render into; its previous contents are replaced
- * @param ctx      `{ doc, competencies, onRung }`, all optional
+ * @param ctx      `{ doc, competencies, onRung, idPrefix }`, all optional. `idPrefix` seeds the
+ *                 generated ids (`<prefix>-<index>`, default `"block"`): a caller that renders
+ *                 into a page more than once — session.js appends a log entry per turn — passes
+ *                 a fresh prefix each call, so no two renders ever mint the same id and every
+ *                 `aria-labelledby` keeps pointing at its own heading.
  * @returns `{ rendered, skipped, unresolved }` — a count and the offending names, so the caller
  *          can show an honest empty state rather than a blank page. Children dropped by a
  *          constructor that does not nest are NOT in `skipped`: the parent rendered and still
@@ -626,7 +630,7 @@ export function renderBlocks(payload, mount, ctx = {}) {
 
   // So a re-render replaces rather than appends.
   mount.textContent = "";
-  render(payload && payload.blocks, mount, "block");
+  render(payload && payload.blocks, mount, ctx.idPrefix ?? "block");
 
   return { rendered, skipped, unresolved };
 }

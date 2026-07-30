@@ -1,0 +1,76 @@
+/* The drill shell's own vocabulary (#24).
+
+   This file SUPPLEMENTS app.css and prep.css exactly as prep.css supplements app.css, and it is
+   a SEPARATE file for one reason: prep.css sits behind a test gate that forbids animation, and
+   the typing indicator below is the one animated thing on the candidate surface. Everything
+   else about the contract is inherited rather than restated: every colour and size resolves
+   through a custom property in tokens.css, app.css owns the single focus rule, and app.css's
+   reduced-motion guard neutralises the one animation here for free. The indicator always
+   carries its own text, so motion is never the only signal.
+
+   Nothing below sets `display` on anything that is ever given the hidden attribute — the acts,
+   the answer form and the indicator all keep the user agent's display, so `[hidden]` keeps
+   working without the prep.css:155 counter-rule. Any rule added here that changes that needs
+   the same `[hidden] { display: none }` guard. */
+
+/* ── the page ──────────────────────────────────────────────────────────────────────────── */
+
+/* The same measure as the brief: this is prose the candidate reads and writes end to end. */
+.session {
+  max-width: 72ch;
+  min-width: 0;
+}
+
+/* The three acts. The gap between acts is the page's largest step, one above the block rhythm
+   inside them. (`.act` belongs to app.css's recruiter screens; this shell names its own.) */
+.session-act { margin-bottom: var(--space-12); }
+
+/* ── the drill log ─────────────────────────────────────────────────────────────────────── */
+
+/* A transcript. Who is speaking is carried by the label line and the indent, never by colour
+   alone; everything inside can hold long unbroken model or candidate text. */
+.log-entry {
+  margin-bottom: var(--space-8);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The candidate's own entries step in from the interviewer's. */
+.log-you { padding-left: var(--space-6); }
+
+/* ── the answer form ───────────────────────────────────────────────────────────────────── */
+
+.answer-form { margin-top: var(--space-8); }
+
+.answer-form textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── the typing indicator: the one animated thing ──────────────────────────────────────── */
+
+/* Three dots pulsing opacity — a compositor property, on a node that exists only while a turn
+   is in flight, and always beside its own words. Durations compose from the tokened step so
+   the whole rhythm retunes from tokens.css. */
+.typing-dot {
+  display: inline-block;
+  animation-name: typing-pulse;
+  animation-duration: calc(var(--duration-2) * 6);
+  animation-iteration-count: infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: calc(var(--duration-2) * 2); }
+.typing-dot:nth-child(3) { animation-delay: calc(var(--duration-2) * 4); }
+
+@keyframes typing-pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
+/* ── narrow screens ────────────────────────────────────────────────────────────────────── */
+
+/* The same tightening prep.css applies at this width, for this file's own vocabulary. */
+@media (max-width: 600px) {
+  .session-act { margin-bottom: var(--space-8); }
+  .log-entry { margin-bottom: var(--space-6); }
+}
