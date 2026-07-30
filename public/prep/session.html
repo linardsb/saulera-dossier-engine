@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Practise for your interview</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
+<link rel="stylesheet" href="/prep/session.css">
+</head>
+<body>
+
+<!-- A candidate-facing page: the topbar carries the portal's own name and no recruiter
+     navigation, same as brief.html. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Interview prep</span>
+  </div>
+</header>
+
+<main class="session">
+
+  <div class="page-head">
+    <h1>Practise for your interview</h1>
+    <p class="page-sub">Real questions, and one change to make per answer. You are preparing
+      here, never being marked, and nothing you do is shown to your recruiter.</p>
+    <p class="save-state" id="session-state" role="status"></p>
+  </div>
+
+  <!-- Act 1: prime. Hidden until session.js knows whether this visit is a fresh start or a
+       resume; a resume skips straight to the drill. -->
+  <section id="act-prime" class="session-act" aria-labelledby="prime-head" hidden>
+    <h2 id="prime-head" class="block-head">Before you start</h2>
+    <div id="prime-blocks"></div>
+    <p><button type="button" class="btn" id="start">Start practising</button></p>
+  </section>
+
+  <!-- Act 2: the drill. The log is a live region so an answer's feedback is announced when it
+       lands rather than arriving silently mid-wait. -->
+  <section id="act-drill" class="session-act" aria-labelledby="drill-head" hidden>
+    <h2 id="drill-head" class="block-head">Your practice</h2>
+
+    <div id="drill-log" aria-live="polite"></div>
+
+    <p class="prep-caption" id="drill-progress"></p>
+
+    <form id="answer-form" class="answer-form">
+      <label class="prep-label" for="answer">Your answer</label>
+      <textarea id="answer" rows="6"></textarea>
+      <!-- The fidelity caveat lives in the markup, so it appears exactly once and no script
+           decides when. -->
+      <p class="prep-caption">Say your answer out loud first if you can. An interview is spoken,
+        and typing is useful practice of a slightly different skill.</p>
+      <p><button type="submit" class="btn" id="send">Send answer</button></p>
+    </form>
+
+    <p><button type="button" class="btn" id="close-drill" hidden>Wrap up for now</button></p>
+  </section>
+
+  <!-- Act 3: close. Composed by session.js from this session's own turns; the two static lines
+       are true whatever happened above them. -->
+  <section id="act-close" class="session-act" aria-labelledby="close-head" hidden>
+    <h2 id="close-head" class="block-head">Where you got to</h2>
+    <div id="close-body"></div>
+    <p class="prep-caption">Leave whenever you need to. This page brings you back to where you
+      stopped.</p>
+    <p><a class="btn" href="/prep/brief">Back to your prep</a></p>
+  </section>
+
+</main>
+
+<footer class="prep-footer">
+  <p><a href="/prep/privacy">What we hold about you, and when it is deleted</a></p>
+</footer>
+
+<!-- A module script, deferred by the platform. The page boots the exported controller so
+     node --test can import the module with no document and drive the same code. -->
+<script type="module">
+  import { initSession } from "/prep/session.js";
+  initSession();
+</script>
+
+</body>
+</html>
