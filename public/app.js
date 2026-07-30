@@ -208,6 +208,11 @@
                     "Try again. You do not need to prepare it a second time.",
     sendNoMail: "This deployment cannot send email yet. Ask whoever set it up to add the " +
                 "email key, then try again.",
+    // Refused before anything is minted or written, so "nothing was sent" is a fact, not a
+    // hope — and without this string a misconfigured deployment read as a transient failure.
+    sendNoBaseUrl: "This deployment does not know the web address candidate pages live at, " +
+                   "so the link cannot be built. Nothing was sent. Ask whoever set it up to " +
+                   "add the page address, then try again.",
     sendNotSendable: function (labels) {
       return "These lines could not be found in the brief, so they cannot be sent: " +
         labels + ". Untick them, or generate the pack again.";
@@ -1195,12 +1200,16 @@
    *
    * The server is the enforcement; both routes refuse `interview_too_far` before the model call.
    * This is the courtesy, in the idiom of updateSendGate's own note about the past end.
+   *
+   * Computed in UTC with `setUTCMonth`, the exact arithmetic isWithinHorizon uses, so the
+   * picker's far end IS the server's far end. Local `getFullYear() + 2` disagreed with it by a
+   * day for any recruiter east of UTC — the picker offered a date the server then refused —
+   * and, computed on Feb 29, produced an invalid max the browser silently ignored.
    */
-  function maxLocal() {
-    var now = new Date();
-    return (now.getFullYear() + 2) + "-" +
-      String(now.getMonth() + 1).padStart(2, "0") + "-" +
-      String(now.getDate()).padStart(2, "0");
+  function maxUtc() {
+    var horizon = new Date();
+    horizon.setUTCMonth(horizon.getUTCMonth() + 24);
+    return horizon.toISOString().slice(0, 10);
   }
 
   /**
@@ -1212,7 +1221,7 @@
    */
   function updateSendGate() {
     var date = el.interviewDate.value;
-    var ready = Boolean(date) && date >= todayLocal() && date <= maxLocal() &&
+    var ready = Boolean(date) && date >= todayLocal() && date <= maxUtc() &&
       el.candidateEmail.value.trim().indexOf("@") > 0;
     // Locked over an open preview too — see prepareSend. aria-disabled is how the rest of this
     // screen says "not right now", and a live-looking button that re-spends ~30p is worse than
@@ -1276,6 +1285,9 @@
       // mail one is the only one reachable at confirm on a working deployment, and naming the
       // email key is the remedy that gets it fixed.
       if (err.code === "not_configured") return COPY.sendNoMail;
+      // The other one-setting refusal, same remedy shape as sendNoMail. DEPLOY.md's triage
+      // row covers the operator; this sentence covers the recruiter reading the screen.
+      if (err.code === "no_base_url") return COPY.sendNoBaseUrl;
       if (err.code === "not_sendable") {
         var labels = (err.failures || [])
           .filter(function (f) { return f.kind === "competency"; })
@@ -1303,12 +1315,12 @@
 
     var date = el.interviewDate.value;
     var email = el.candidateEmail.value.trim();
-    if (!date || date < todayLocal() || date > maxLocal() || email.indexOf("@") <= 0) {
+    if (!date || date < todayLocal() || date > maxUtc() || email.indexOf("@") <= 0) {
       showState(
         el.sendState,
         date && date < todayLocal()
           ? COPY.sendDatePast
-          : date && date > maxLocal()
+          : date && date > maxUtc()
             ? COPY.sendDateTooFar
             : COPY.sendNeedDate,
         true,
@@ -1831,7 +1843,7 @@
 
   // The picker's own far end. Set here rather than written into the markup, because an
   // attribute with a date in it goes stale the day after it is typed.
-  el.interviewDate.max = maxLocal();
+  el.interviewDate.max = maxUtc();
 
   setPhase("inputs");
   load(new URL(window.location.href).searchParams.get("client"), "");

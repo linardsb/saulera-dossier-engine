@@ -245,3 +245,52 @@ headless Chrome and `test/helpers/dom.js` explicitly cannot answer those.
 All validations pass except the one named above. Next: `piv-commit`, then `piv-create-pr`, then
 `piv-review-pr`. **Verify the branch immediately before committing** — parallel sessions share
 this worktree.
+
+---
+
+## Addendum — the two review rounds (30 Jul 2026)
+
+The body above describes the branch at `4e40674` and is left as written. Two commits landed on it since;
+every number below supersedes its counterpart above.
+
+**`7235d68` — the round-1 fixes.** PR #32's first review found 6 High · 10 Medium · 6 Low. Twenty were
+fixed, each with a test that dies when its fix is reverted (all nine mutations tried killed at least one
+test); two were deferred behind open issues — #33 (Node 20's false pass in CI) and #34 (R7's inflated
+`invite_sent` residual). New tests: `assertBrief` duplicate-id refusal, the guarded `rollbackInvite` with
+a faulty-D1 drive of `persistHandover`, the seeded-note visibility gate, the 24-month `interview_at`
+horizon in both routes, and probes 28–34.
+
+**Round 3's four findings, fixed here.** The follow-up review (0 Critical · 0 High · 1 Medium · 3 Low,
+recommendation approve) produced this commit:
+
+- `maxLocal()` → `maxUtc()`: the picker's far end is now computed with `setUTCMonth(+24)`, the exact
+  arithmetic `isWithinHorizon` uses, so browser and server can no longer disagree by a day across the
+  UTC boundary (and a Feb 29 no longer yields an invalid `max`). **Probe 35** opens the screen in
+  Pacific/Kiritimati (UTC+14) and Etc/GMT+12 and asserts the input's `max` equals the server horizon in
+  both — at any real instant at least one of those zones is on a different calendar day than UTC, which
+  is what makes the old arithmetic fail it deterministically (mutation-checked: reverting to local
+  arithmetic fails probe 35).
+- `503 no_base_url` now has recruiter-facing copy (`sendNoBaseUrl`) instead of falling through to the
+  generic "Could not send that" — a misconfigured deployment no longer reads as a transient failure.
+  **Probe 36** stubs the 503 and asserts the sentence names the missing setting and says nothing was
+  sent (mutation-checked: removing the `sendMessageFor` case fails probe 36).
+- The overclaiming comment in `test/prep-generate.test.js` no longer says the wrapped message reaches
+  the recruiter's screen; `errorResponse` sends the browser only the code — the sentence reaches the log.
+- The stale numbers in this report and the PR body are corrected by this addendum and a PR-body edit.
+
+### Validation at this head
+
+| Level | Command | Result |
+|---|---|---|
+| 1 | every gate from the plan | all `ok` |
+| 2 | `npm test` (Node 24.11.0) | **577 tests, 577 pass, 0 fail**, 0 skipped |
+| 2 | `npm test` (Node 20.20.2) | 577 tests, 505 pass, **0 fail**, 72 skipped |
+| 3 | table list | 11 application tables, unchanged |
+| 4 | live curl sweep (`/counts`, past date, `field_keys`, no session) | 200 · `interview_past` · `unexpected_fields` · 401 |
+| 5 | `node .claude/probes/one-screen.mjs` (Node 24) | **36/36 probes pass** |
+
+**+113 tests over the `fd1e0b4` baseline of 464.** Node 20's skips are 72 because the sqlite-backed
+files need `node:sqlite`; under Node 24 nothing skips.
+
+Still outstanding before the pilot, unchanged: one live Resend send read in a plain-text client, and the
+real-browser Safari/Chrome keyboard sweep.

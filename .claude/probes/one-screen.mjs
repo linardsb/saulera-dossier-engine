@@ -24,6 +24,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { MAX_MONTHS_AHEAD } from "../../src/prep/dates.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PUBLIC = join(ROOT, "public");
@@ -269,13 +270,16 @@ function baseRoutes(extra = []) {
   ];
 }
 
-async function openScreen(config, { query = "", viewport = null } = {}) {
+async function openScreen(config, { query = "", viewport = null, timezone = null } = {}) {
   const page = await newPage();
   if (viewport) {
     await page.send("Emulation.setDeviceMetricsOverride", {
       width: viewport, height: 720, deviceScaleFactor: 1, mobile: false,
     });
   }
+  // Set before navigation, so everything app.js computes at load — the date input's max
+  // included — already sees the overridden local clock.
+  if (timezone) await page.send("Emulation.setTimezoneOverride", { timezoneId: timezone });
   await page.send("Page.addScriptToEvaluateOnNewDocument", { source: harness(config) });
   await page.send("Page.navigate", { url: `http://127.0.0.1:${PORT}/${query}` });
   await page.waitFor("Page.loadEventFired");
@@ -1631,6 +1635,62 @@ async function probe34() {
   await page.close();
 }
 
+async function probe35() {
+  // The picker's far end must BE the server's far end. maxUtc() used to be maxLocal() — the
+  // local calendar +2 years, where isWithinHorizon compares UTC +24 months — so a recruiter
+  // east of UTC picking the exact day the picker offered got a server `interview_too_far` the
+  // browser had said was fine. The two zones below sit 14h ahead of and 12h behind UTC, so at
+  // ANY real instant at least one of them is on a different calendar day than UTC: local
+  // arithmetic cannot satisfy both, which is what makes this falsifiable at any hour.
+  const horizon = new Date();
+  horizon.setUTCMonth(horizon.getUTCMonth() + MAX_MONTHS_AHEAD);
+  const expected = horizon.toISOString().slice(0, 10);
+
+  const maxes = [];
+  for (const timezone of ["Pacific/Kiritimati", "Etc/GMT+12"]) {
+    const page = await openScreen({ routes: baseRoutes() }, { timezone });
+    const r = await page.eval(READ);
+    maxes.push({ timezone, max: r.dateMax });
+    await page.close();
+  }
+  check(
+    "35", "the picker's far end is the server's horizon, whichever side of UTC the recruiter is on",
+    maxes.every((m) => m.max === expected),
+    `${maxes.map((m) => `${m.timezone} max=${JSON.stringify(m.max)}`).join(" · ")}\n` +
+      `        server horizon=${expected} (UTC + ${MAX_MONTHS_AHEAD} months, same arithmetic)`,
+  );
+}
+
+async function probe36() {
+  // A deployment with no PREP_BASE_URL answers `503 no_base_url` before anything is minted or
+  // written — and until this string existed, that read on screen as the generic "Could not
+  // send that", a transient failure the recruiter would retry forever. The remedy is one
+  // deployment setting; the sentence has to say so, and say that nothing was sent.
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK, PREPARE_OK,
+      { method: "POST", match: "^/api/prep/send$", status: 503, body: { error: "no_base_url" } },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  check(
+    "36", "a deployment that cannot build the link says so, instead of reading as transient",
+    (r.sendState ?? "").includes("page address") && (r.sendState ?? "").includes("Nothing was sent") &&
+      !(r.sendState ?? "").includes("Could not send that"),
+    `state=${JSON.stringify(r.sendState)}\n` +
+      `        must name the missing setting and say nothing was sent`,
+  );
+  await page.close();
+}
+
 /* ── the other two screens (#22) ─────────────────────────────────────────────────────────
  *
  * These exist because nothing else executes either file. test/counts.test.js is a SOURCE
@@ -1738,7 +1798,8 @@ try {
                        probe15, probe16, probe17,
                        probe18, probe19, probe20, probe21, probe22, probe23,
                        probe24, probe25, probe26, probe27,
-                       probe28, probe29, probe30, probe31, probe32, probe33, probe34]) {
+                       probe28, probe29, probe30, probe31, probe32, probe33, probe34,
+                       probe35, probe36]) {
     await probe();
   }
 } finally {

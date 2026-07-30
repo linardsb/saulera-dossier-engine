@@ -219,8 +219,8 @@ test("a shape failure is a 502 bad_brief, in the register of every other model f
   axis.questions[0].axis = "lateral";
   assert.equal(await codeOf(() => generateBrief(fakeAnthropic(ok(axis)), INPUTS)), "bad_brief");
 
-  // The message survives the wrap: without it the recruiter's screen loses the one sentence
-  // saying WHICH rule the answer broke.
+  // The message survives the wrap: errorResponse sends the browser only the code, so this
+  // sentence reaches the LOG — where it is the one line saying WHICH rule the answer broke.
   await assert.rejects(
     () => generateBrief(fakeAnthropic(ok(duped)), INPUTS),
     /already taken/,
