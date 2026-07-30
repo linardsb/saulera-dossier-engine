@@ -246,6 +246,19 @@ test("every foreign key in the chain declares ON DELETE CASCADE toward its paren
   }
 });
 
+test("candidate_role.invite_id is UNIQUE — one brief behind one link", () => {
+  // `columns()` above filters UNIQUE out as a table-level keyword, so this constraint is
+  // invisible to every exact-column lock in this file. It is not decoration: two handovers for
+  // one invite would put two briefs behind one magic link, and it is also the constraint that
+  // makes `persistHandover` throw on a retry — which is the branch
+  // functions/api/prep/send.js's handover rollback exists to clean up.
+  assert.match(
+    bodyOf.get("candidate_role") ?? "",
+    /invite_id\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i,
+    "candidate_role.invite_id must be UNIQUE: one invite is one candidate's one brief.",
+  );
+});
+
 test("attempt.mode is CHECK-typed to recall|nudged|revealed — the honesty rule, structural", () => {
   const body = bodyOf.get("attempt") ?? "";
   assert.match(

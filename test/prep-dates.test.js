@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { addDays, isNotPast, toSqliteUtc } from "../src/prep/dates.js";
+import { MAX_MONTHS_AHEAD, addDays, isNotPast, isWithinHorizon, toSqliteUtc } from "../src/prep/dates.js";
 import { maxAgeFrom } from "../src/prep/tokens.js";
 import { StoreError } from "../src/store.js";
 
@@ -46,6 +46,27 @@ test("toSqliteUtc throws a 400 StoreError on anything the schema could not store
       `${JSON.stringify(bad)} must be refused at the door`,
     );
   }
+});
+
+test("toSqliteUtc refuses a day the calendar does not have, instead of rolling it forward", () => {
+  // V8 rejects a bad MONTH but silently rolls a bad DAY, and this function's own contract says
+  // it "Throws rather than defaulting. A silently-substituted date would write an invite whose
+  // retention window is not the one the recruiter agreed to." `2027-02-31` used to return
+  // `2027-03-03 00:00:00`: a 201, an invite stored against a day nobody chose, and the
+  // candidate's email printing the substituted one.
+  for (const bad of ["2027-02-31", "2026-04-31", "2026-02-30"]) {
+    assert.throws(() => toSqliteUtc(bad), StoreError, `${bad} is not a day`);
+  }
+  // Its own output form is checked the same way, because addDays and the confirm step both
+  // re-normalise a stamp this function already produced.
+  assert.throws(() => toSqliteUtc("2027-02-31 00:00:00"), StoreError);
+
+  // And a leap day that DOES exist still passes — the check is about the calendar, not February.
+  assert.equal(toSqliteUtc("2028-02-29"), "2028-02-29 00:00:00");
+  assert.equal(toSqliteUtc("2026-02-28"), "2026-02-28 00:00:00");
+
+  // A value stating its own zone is left alone, and is entitled to land on a different UTC day.
+  assert.equal(toSqliteUtc("2026-08-12T23:30:00-05:00"), "2026-08-13 04:30:00");
 });
 
 test("addDays keeps the format and crosses a month boundary", () => {
@@ -95,4 +116,32 @@ test("isNotPast fails closed on a stamp it cannot read", () => {
   assert.equal(isNotPast("next Tuesday", now), false);
   assert.equal(isNotPast("", now), false);
   assert.equal(isNotPast(null, now), false);
+});
+
+test("isWithinHorizon caps the far end, which the purge has no other defence against", () => {
+  const now = new Date("2026-08-12T14:00:00Z");
+
+  // The whole reason this exists: `purgeExpired` deletes on interview_at + 30 days, so a year
+  // typo is not a diary mistake, it is a retention failure that never surfaces. The candidate's
+  // CV would sit in D1 for two centuries while their email says it is deleted after 30 days.
+  assert.equal(isWithinHorizon("2226-08-12 00:00:00", now), false, "a mistyped century");
+  assert.equal(isWithinHorizon("2030-01-01 00:00:00", now), false, "and merely years too far");
+
+  // And it must never refuse a real booking. Two years is generous on purpose: the typo it is
+  // built for misses by centuries, so the bound can afford to sit well clear of any diary.
+  assert.equal(isWithinHorizon("2026-08-12 00:00:00", now), true, "today");
+  assert.equal(isWithinHorizon("2027-06-01 00:00:00", now), true, "next year");
+  assert.equal(isWithinHorizon("2028-08-12 00:00:00", now), true, "the boundary day itself");
+  assert.equal(isWithinHorizon("2028-08-13 00:00:00", now), false, "and the day after it");
+
+  assert.equal(MAX_MONTHS_AHEAD, 24, "public/app.js's maxLocal() restates this number");
+});
+
+test("isWithinHorizon fails closed on a stamp it cannot read, like isNotPast", () => {
+  // Same posture as its sibling, and for the same reason: two independent guards, neither of
+  // which may open on a value the other was going to refuse.
+  const now = new Date("2026-08-12T14:00:00Z");
+  assert.equal(isWithinHorizon("next Tuesday", now), false);
+  assert.equal(isWithinHorizon("", now), false);
+  assert.equal(isWithinHorizon(null, now), false);
 });

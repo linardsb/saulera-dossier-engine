@@ -811,8 +811,12 @@ a {
   white-space: nowrap;
 }
 
+/* --brief is act 4's word for the same fact act 3 calls --cv or --note: found, literally, in
+   the material. It shares --verified rather than earning a fourth colour, because a fourth
+   provenance colour would mean a fourth thing to tell apart for no extra meaning. */
 .mark-cv,
-.mark-note { color: var(--verified); }
+.mark-note,
+.mark-brief { color: var(--verified); }
 .mark-unverified { color: var(--unverified); }
 .mark-failed { color: var(--failed); }
 

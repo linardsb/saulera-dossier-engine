@@ -29,7 +29,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { generateBrief } from "../../../src/prep/generate.js";
-import { isNotPast, toSqliteUtc } from "../../../src/prep/dates.js";
+import { MAX_MONTHS_AHEAD, isNotPast, isWithinHorizon, toSqliteUtc } from "../../../src/prep/dates.js";
 import { visibleFields } from "../../../src/note-fields.js";
 import { getClient, listVisibleKeys, StoreError } from "../../../src/store.js";
 import { json, readJson, sameOrigin, errorResponse } from "../../../src/http.js";
@@ -59,6 +59,15 @@ export async function onRequestPost(context) {
     const interviewAt = toSqliteUtc(body.interview_at);
     if (!isNotPast(interviewAt)) {
       throw new StoreError("interview_past", 400, "interview_at: that date has already passed");
+    }
+    // And the far end, refused HERE too rather than only at Send — the whole reason this check
+    // runs before the model call is that a mistyped year should cost nothing.
+    if (!isWithinHorizon(interviewAt)) {
+      throw new StoreError(
+        "interview_too_far",
+        400,
+        `interview_at: that date is more than ${MAX_MONTHS_AHEAD} months away — check the year`,
+      );
     }
 
     // 404 before the model call, not after — an unknown client id should cost nothing

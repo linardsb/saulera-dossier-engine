@@ -59,7 +59,20 @@ export function toSqliteUtc(value) {
   if (!date) {
     throw new StoreError("missing_fields", 400, "interview_at: not a date this schema can store");
   }
-  return format(date);
+
+  // THE ROUND TRIP, asserted rather than assumed. V8 rejects a bad month (`2026-13-01` does not
+  // parse) but silently ROLLS a bad day: `2027-02-31` becomes 3 March. Left alone that is
+  // exactly the "silently-substituted date" the paragraph above refuses — a 201, an invite
+  // stored against a day nobody chose, and an email printing it to the candidate with both
+  // retention windows shifted to match.
+  //
+  // Only for the forms that state no zone. A value carrying an offset is ENTITLED to land on a
+  // different UTC day — that is the point of stating one — and `toUtcDate` leaves it alone.
+  const stamp = format(date);
+  if ((DATE_ONLY.test(raw) || SQLITE_STAMP.test(raw)) && stamp.slice(0, raw.length) !== raw) {
+    throw new StoreError("missing_fields", 400, "interview_at: not a date this schema can store");
+  }
+  return stamp;
 }
 
 /**
@@ -76,6 +89,38 @@ export function addDays(stamp, days) {
     throw new StoreError("missing_fields", 400, "interview_at: not a date this schema can store");
   }
   return format(new Date(date.getTime() + Number(days) * 86_400_000));
+}
+
+/**
+ * How far ahead an interview may be booked.
+ *
+ * Not a guess about how far out diaries go — a RETENTION bound. `purgeExpired`
+ * (src/portal/store.js:44-49) deletes on `datetime(interview_at,'+30 days') <= datetime('now')`,
+ * so the interview date is the clock the whole promise hangs off, and nothing else caps it. A
+ * one-character year typo — `2226-08-12` for `2026-08-12` — makes that DELETE match nothing for
+ * two centuries: the candidate's `cv_text`, `jd_text`, `ethos_text` and address sit in D1, and
+ * the magic link stays live, while src/prep/email.js tells that same candidate in writing that
+ * "Everything here is deleted 30 days after your interview." Decision 13 gates the pilot on
+ * exactly that sentence, and the failure is silent — it surfaces at an audit, not in a test.
+ *
+ * Two years is deliberately generous. This is not a diary rule and must never refuse a real
+ * booking; it exists to catch the typo, which misses by centuries rather than by months.
+ */
+export const MAX_MONTHS_AHEAD = 24;
+
+/**
+ * Is this interview inside the retention horizon? Same DAY granularity as `isNotPast`, and the
+ * same fail-closed answer for a stamp that will not parse.
+ *
+ * `setUTCMonth` rather than epoch arithmetic, because "24 months" is a calendar span and no
+ * fixed number of milliseconds is one. UTC throughout, for the reason in the header.
+ */
+export function isWithinHorizon(stamp, now = new Date()) {
+  const date = toUtcDate(stamp);
+  if (!date) return false;
+  const horizon = new Date(now.getTime());
+  horizon.setUTCMonth(horizon.getUTCMonth() + MAX_MONTHS_AHEAD);
+  return date.toISOString().slice(0, 10) <= horizon.toISOString().slice(0, 10);
 }
 
 /**

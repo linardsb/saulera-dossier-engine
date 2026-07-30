@@ -254,7 +254,9 @@ back up.
   store (`store.js`) and the HTTP helpers its endpoints share (`http.js`)
 - `functions/api/` — the thin adapters. Storage, plus the two halves of the generation seam:
   `prompt.js` builds the string the recruiter pastes into their own Claude session and
-  `verify.js` checks and renders what comes back. **No model call from any of them**
+  `verify.js` checks and renders what comes back — **neither of those two calls a model**.
+  Architecture §5 names exactly **two** call sites in this deployment and both live here:
+  `generate.js` (the pack) and `prep/prepare.js` (the prep brief). A third would be wrong
 - `migrations/` — the schema, one reviewable file
 - `public/` — the one screen (`index.html`, `app.js`), the note editor (`clients.html`,
   `clients.js`), `tokens.css`, the default token layer, `app.css`, the components built from

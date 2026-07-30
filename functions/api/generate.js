@@ -1,11 +1,17 @@
 // POST /api/generate { client_id, brief, cv }
 //   -> 201 { pack, provenance, failures, renderer, text, html, event_recorded }
 //
-// The one place in this deployment where a model call happens (#6, superseded 28 Jul 2026).
-// Architecture §5.6: "Every model call goes through one Function, which is also the boundary
-// that lets the data posture in §6.4 stay switchable." Do not add a second call site — the
-// switchability is the whole reason this is one Function rather than a helper anyone can
-// reach for.
+// The pack's model call (#6, superseded 28 Jul 2026). Architecture §5.6: "Every model call goes
+// through one Function, which is also the boundary that lets the data posture in §6.4 stay
+// switchable." The switchability is the whole reason a call lives in a Function rather than in a
+// helper anyone can reach for.
+//
+// THIS IS NO LONGER THE ONLY CALL SITE, and the rule this header used to state — "do not add a
+// second" — has one sanctioned exception, so it is written down here rather than left for the
+// next reader to discover as a contradiction. Architecture §5 names exactly TWO: "at Send
+// (claude-opus-5)" and "in session (claude-sonnet-5)". The first of those is
+// functions/api/prep/prepare.js, whose header claims the exemption and argues it. A THIRD call
+// site that is not in §5 is still wrong.
 //
 // The response shape is deliberately IDENTICAL to /api/verify's: the screen renders a pack the
 // same way whichever route produced it, and a divergence here would fork the one renderer path

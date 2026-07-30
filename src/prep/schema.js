@@ -239,6 +239,16 @@ export function assertBrief(brief) {
     if (typeof c?.source_quote !== "string" || !c.source_quote.trim()) {
       throw new Error(`brief: competencies[${i}].source_quote is empty`);
     }
+    // Uniqueness is a rule BRIEF_SCHEMA structurally cannot express, which is precisely the gap
+    // this file's header says assertBrief exists to close. Two competencies sharing a slug reach
+    // `competency.id TEXT PRIMARY KEY` through `${roleId}:${competency.id}`
+    // (src/portal/store.js:195) and the second INSERT throws a raw ERR_SQLITE_ERROR — a `500
+    // internal` DEPLOY.md reserves for "the migration did not run", after the recruiter has
+    // already paid for the model call. It also makes the strike lie: `strikeCompetencies` filters
+    // by id (src/prep/strike.js:33), so unticking one duplicate silently removes both.
+    if (ids.has(c.id)) {
+      throw new Error(`brief: competencies[${i}].id is ${c.id}, which is already taken`);
+    }
     ids.add(c.id);
   }
 

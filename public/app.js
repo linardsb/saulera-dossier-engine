@@ -131,6 +131,11 @@
     marks: {
       cv: "CV",
       client_note: "Our note",
+      // Act 4's own word. A prep competency's `verified` flag is computed against the cleaned
+      // BRIEF — the schema tells the model to quote the brief and never the CV — so labelling it
+      // "Our note" said the wrong thing about every row. The enum above is act 3's, where a pack
+      // claim really can come from either source; there is no right value in it for this.
+      brief: "Brief",
       unverified: "Unverified",
       failed: "Quote not found"
     },
@@ -156,6 +161,9 @@
     sendPreparing: "Getting the preparation ready…",
     sendNeedDate: "Add the interview date and the candidate's email address first.",
     sendDatePast: "That date has already gone. Use the date of the interview itself.",
+    // Names the year, because a date this far out is a typo in the year essentially always,
+    // and "out of range" would send the recruiter looking at the day.
+    sendDateTooFar: "That date is more than two years away. Check the year.",
     sendSending: "Sending…",
     sendPreviewLede: "This is what the candidate will get. Untick anything you would rather " +
                      "not send, then send it.",
@@ -166,11 +174,18 @@
                            "could not be, so they are not being sent.",
     sendAllUnverified: "None of these could be found in the brief, so there is nothing to " +
                        "send. Generate the pack again, or check the brief you pasted.",
+    // The empty preview used to lock "Send it" and say NOTHING at all — a disabled button over
+    // a blank list, which reads as the screen having broken rather than as an outcome. The
+    // remedy is the same as sendAllUnverified's; the cause is not, so the sentence is not.
+    sendNothingExtracted: "Nothing was pulled out of the brief, so there is nothing to send. " +
+                          "Check the brief you pasted, or generate the pack again.",
+    // Said rather than done silently: "Not yet" cannot take effect while the send it would
+    // cancel is already on the wire, and a button that does visibly nothing reads as broken.
+    sendBusyWait: "The send is already going. Wait for it to finish.",
     sendFieldsNone: "Nothing from your client note will be shared. You have not ticked any " +
                     "sections as shareable.",
     sendFieldsSome: "These sections of your note travel with it, because you ticked them as " +
                     "shareable:",
-    sendNoteLink: "Read the note",
     sendNothingTicked: "Everything is unticked, so there is nothing left to send.",
     sendDone: function (email) {
       return "Sent to " + email + ". They will get an email with a link to their own " +
@@ -198,12 +213,12 @@
         labels + ". Untick them, or generate the pack again.";
     },
     sendNothingToSend: "You have unticked everything, so there is nothing to send.",
+    // Points at the two fields on THIS screen. The reachable causes are all one of them: an
+    // address the server would not accept, or a date it could not read.
+    sendCheckFields: "The email address or the interview date was not accepted. Check them both " +
+                     "and try again.",
+    sendBadBrief: "The prepared brief was not accepted. Press Not yet, then prepare it again.",
     sendPrepareFailed: "Could not get the preparation ready. Nothing was sent. Try again.",
-
-    // Extends the existing warning to cover a prepared-but-unsent brief, which costs two
-    // minutes and real money to rebuild and is kept nowhere but this tab.
-    leavingPrepared: "You have prepared a candidate's interview prep and not sent it yet. " +
-                     "Leaving loses it."
   };
 
   var el = {
@@ -465,6 +480,13 @@
 
   /** Back to act 1, keeping the brief and the CV. Losing a paste is the real error state. */
   function resetToInputs() {
+    // FIRST, and it is not bookkeeping. Every other path that changes what the screen is about
+    // bumps this — each load, each request — and `mine()` is what stops a response landing on a
+    // screen that has moved on. Neither Start again button is guarded by state.busy and both are
+    // on screen throughout act 4, so without this line a send still in flight comes back after
+    // the reset and sets the terminal sendDone state on the NEXT candidate: a locked CTA, frozen
+    // fields, and "Sent to <the previous address>" over a pack that was never sent.
+    state.reqId += 1;
     state.route = null;
     setPhase("inputs");
     state.sent = null;
@@ -1165,6 +1187,23 @@
   }
 
   /**
+   * The far end of the date field, two years out — src/prep/dates.js's MAX_MONTHS_AHEAD, stated
+   * once more here because this file has no import of it and duplicating the number is cheaper
+   * than a build step. It is a RETENTION bound rather than a diary one: the interview date is
+   * the clock the 30-day purge runs on, so a mistyped year keeps a candidate's CV alive for
+   * centuries and nothing anywhere says so.
+   *
+   * The server is the enforcement; both routes refuse `interview_too_far` before the model call.
+   * This is the courtesy, in the idiom of updateSendGate's own note about the past end.
+   */
+  function maxLocal() {
+    var now = new Date();
+    return (now.getFullYear() + 2) + "-" +
+      String(now.getMonth() + 1).padStart(2, "0") + "-" +
+      String(now.getDate()).padStart(2, "0");
+  }
+
+  /**
    * AC #1's BROWSER HALF. The CTA is locked until an interview date exists (decision 9) and
    * an email address has been typed.
    *
@@ -1173,9 +1212,12 @@
    */
   function updateSendGate() {
     var date = el.interviewDate.value;
-    var ready = Boolean(date) && date >= todayLocal() &&
+    var ready = Boolean(date) && date >= todayLocal() && date <= maxLocal() &&
       el.candidateEmail.value.trim().indexOf("@") > 0;
-    setBusy(el.prepareSend, state.sendDone || !ready);
+    // Locked over an open preview too — see prepareSend. aria-disabled is how the rest of this
+    // screen says "not right now", and a live-looking button that re-spends ~30p is worse than
+    // one that says so.
+    setBusy(el.prepareSend, state.sendDone || Boolean(state.sendPrepared) || !ready);
   }
 
   /**
@@ -1219,8 +1261,17 @@
     if (err) {
       if (err.code === "no_model_key") return COPY.noModelKey;
       if (err.code === "interview_past") return COPY.sendDatePast;
+      if (err.code === "interview_too_far") return COPY.sendDateTooFar;
       if (err.code === "nothing_to_send") return COPY.sendNothingToSend;
       if (err.code === "mail_failed") return COPY.sendMailFailed;
+      // NAMED HERE rather than left to messageFor, whose `missing_fields` copy is act 1's —
+      // "Paste the brief and the CV before you copy the prompt." — and would be shown on a
+      // screen where both are frozen, filled and visible two acts above. That is the exact
+      // hazard messageFor's own doc-comment names: a message describing the wrong act is worse
+      // than a generic one. An address that clears the browser's `indexOf("@") > 0` and fails
+      // the server's `cleanEmail` is the ordinary way to get here.
+      if (err.code === "missing_fields") return COPY.sendCheckFields;
+      if (err.code === "bad_brief") return COPY.sendBadBrief;
       // `not_configured` from the mail path and from a missing DB binding share a code. The
       // mail one is the only one reachable at confirm on a working deployment, and naming the
       // email key is the remedy that gets it fixed.
@@ -1244,12 +1295,24 @@
    * this text server-side, and posting an edited brief would demote claims for no reason.
    */
   function prepareSend() {
-    if (state.busy || state.sendDone) return;
+    // `state.sendPrepared` is the third guard, and it is about MONEY as much as state: this
+    // button stayed live over an open preview, so a second press silently ran the ~30p model
+    // call again and replaced the preview the recruiter was reading with a new one. "Not yet"
+    // is the way back — it drops the preview, which unlocks this.
+    if (state.busy || state.sendDone || state.sendPrepared) return;
 
     var date = el.interviewDate.value;
     var email = el.candidateEmail.value.trim();
-    if (!date || date < todayLocal() || email.indexOf("@") <= 0) {
-      showState(el.sendState, date && date < todayLocal() ? COPY.sendDatePast : COPY.sendNeedDate, true);
+    if (!date || date < todayLocal() || date > maxLocal() || email.indexOf("@") <= 0) {
+      showState(
+        el.sendState,
+        date && date < todayLocal()
+          ? COPY.sendDatePast
+          : date && date > maxLocal()
+            ? COPY.sendDateTooFar
+            : COPY.sendNeedDate,
+        true,
+      );
       return;
     }
     if (!state.sent) return;
@@ -1260,6 +1323,10 @@
     var mine = function () { return state.reqId === reqId && state.selected === clientId; };
 
     state.busy = true;
+    // Frozen for the duration, for the reason interviewDateChanged gives: the date is an INPUT
+    // to the call now going out, so an edit made while it is in flight would be accepted on
+    // screen and then overwritten by a preview prepared against the old day.
+    el.interviewDate.readOnly = true;
     setBusy(el.prepareSend, true);
     el.prepareSend.textContent = COPY.sendPreparing;
     el.sendPreview.hidden = true;
@@ -1288,6 +1355,7 @@
       .then(function () {
         stopSendClock();
         state.busy = false;
+        el.interviewDate.readOnly = false;
         el.prepareSend.textContent = COPY.sendIdle;
         updateSendGate();
       });
@@ -1311,9 +1379,14 @@
     var unverified = competencies.filter(function (c) { return c.verified !== true; });
 
     el.strikeList.textContent = "";
-    competencies.forEach(function (competency) {
+    competencies.forEach(function (competency, index) {
+      var verified = competency.verified === true;
+
       var row = document.createElement("li");
-      row.className = "claim strike-row";
+      // The third of the three signals act 3 uses, and act 4 was missing it: the WORD, the
+      // colour, and on an unverified row a left border on the whole claim. A recruiter who
+      // cannot distinguish the colours reads the word; one scanning the list sees the border.
+      row.className = verified ? "claim strike-row" : "claim strike-row claim-unverified";
 
       var label = document.createElement("label");
       label.className = "strike-label";
@@ -1326,7 +1399,7 @@
       // cosmetic: the server refuses any send that includes one, so "ticked" would be a
       // default that cannot be confirmed — a dead end with an error message where a control
       // should be.
-      box.checked = competency.verified === true;
+      box.checked = verified;
       if (!box.checked) state.sendStruck[competency.id] = true;
       box.addEventListener("change", function () {
         if (box.checked) delete state.sendStruck[box.dataset.id];
@@ -1343,8 +1416,16 @@
       label.appendChild(text);
 
       var mark = document.createElement("span");
-      mark.className = competency.verified === true ? "mark" : "mark mark-unverified";
-      mark.textContent = competency.verified === true ? COPY.marks.client_note : COPY.marks.unverified;
+      // The verified branch used to set a bare "mark" with no colour modifier, so it inherited
+      // --text-primary while every other provenance mark on the screen carried its own colour.
+      mark.className = verified ? "mark mark-brief" : "mark mark-unverified";
+      mark.textContent = verified ? COPY.marks.brief : COPY.marks.unverified;
+      // The mark sits OUTSIDE the label, because .claim-head lays the two out side by side and
+      // moving it inside would change the row's grammar. So it is wired to the checkbox instead:
+      // without this a screen-reader user hears the competency and the tick state and never the
+      // reason the box arrived unticked, which is the one thing that row is telling them.
+      mark.id = "strike-mark-" + index;
+      box.setAttribute("aria-describedby", mark.id);
 
       var head = document.createElement("div");
       head.className = "claim-head";
@@ -1363,13 +1444,18 @@
     });
 
     // The lede says which situation this is, so an all-unverified brief explains itself
-    // rather than offering a send the server would refuse.
+    // rather than offering a send the server would refuse. An EMPTY list is its own situation,
+    // and used to be the only one with no sentence at all — a locked button over a blank list,
+    // which reads as the screen having broken rather than as an outcome with a remedy.
+    var allUnverified = competencies.length > 0 && unverified.length === competencies.length;
     el.sendPreviewLede.textContent =
-      unverified.length === competencies.length && competencies.length
-        ? COPY.sendAllUnverified
-        : unverified.length
-          ? COPY.sendPreviewUnverified
-          : COPY.sendPreviewLede;
+      competencies.length === 0
+        ? COPY.sendNothingExtracted
+        : allUnverified
+          ? COPY.sendAllUnverified
+          : unverified.length
+            ? COPY.sendPreviewUnverified
+            : COPY.sendPreviewLede;
 
     // The note sections: HEADINGS AND COUNTS, never the section text. The recruiter read
     // those sections on /clients with the note in front of them, and a second copy of
@@ -1399,8 +1485,27 @@
       : "/clients";
 
     el.sendPreview.hidden = false;
-    updateConfirmGate(true);
-    el.confirmSend.focus({ preventScroll: true });
+
+    // NOT announcing when the lede already owns the situation. `updateConfirmGate(true)` writes
+    // "Everything is unticked, so there is nothing left to send" whenever nothing is ticked —
+    // which is true of an all-unverified preview the moment it renders, and blames the recruiter
+    // for unticking they did not do, in a second sentence contradicting the first. The lede says
+    // what happened; the gate only locks the button.
+    updateConfirmGate(!allUnverified && competencies.length > 0);
+
+    // THE ARRIVING PREVIEW COMES TO THE READER, and focus goes to the first thing to READ rather
+    // than to the irreversible thing to press. `focus({preventScroll: true})` on "Send it" left
+    // a recruiter who had scrolled up holding focus on a button they could not see: one Space
+    // and the email is gone, before a single competency has been looked at. So: scroll the
+    // preview into view (setPhase's own idiom, motion only where it is welcome) and land focus on
+    // the first checkbox — where Space toggles a tick and costs nothing.
+    el.sendPreview.scrollIntoView({
+      block: "nearest",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
+    var first = el.strikeList.querySelector(".strike-box");
+    if (first) first.focus({ preventScroll: true });
+    else el.cancelSend.focus({ preventScroll: true });
   }
 
   /**
@@ -1471,7 +1576,13 @@
     var mine = function () { return state.reqId === reqId && state.selected === clientId; };
 
     state.busy = true;
+    // Same freeze as prepareSend's: the stamp being posted below is the one prepared earlier,
+    // so an edit landing between here and the response would never reach the server.
+    el.interviewDate.readOnly = true;
     setBusy(el.confirmSend, true);
+    // "Not yet" cannot take effect while this is on the wire, so it says so rather than looking
+    // live — the same rule setPhase applies to "Check this reply" once act 3 has arrived.
+    setBusy(el.cancelSend, true);
     el.confirmSend.textContent = COPY.sendSending;
     clearState(el.sendState);
     startSendClock();
@@ -1511,6 +1622,10 @@
       .then(function () {
         stopSendClock();
         state.busy = false;
+        // Not on the success path: sendDone freezes both fields deliberately, and thawing the
+        // date here would undo the terminal state the success handler just set.
+        if (!state.sendDone) el.interviewDate.readOnly = false;
+        setBusy(el.cancelSend, state.sendDone);
         el.confirmSend.textContent = COPY.sendIt;
         // NO announce: the catch above may just have written a mail failure, and that
         // message is what tells the recruiter their payload is still here to retry.
@@ -1518,9 +1633,9 @@
       });
   }
 
-  /** "Not yet" — drop the prepared brief and go back to the two fields. */
-  function cancelSend() {
-    if (state.busy) return;
+  /** The clearing half of "Not yet", without the busy guard — so the one caller that must run
+   *  whatever the button would have done can reach it. */
+  function dropPreparedSend() {
     state.sendPrepared = null;
     state.sendStruck = null;
     el.sendPreview.hidden = true;
@@ -1528,6 +1643,43 @@
     el.sendFieldsList.textContent = "";
     clearState(el.sendState);
     updateSendGate();
+  }
+
+  /** "Not yet" — drop the prepared brief and go back to the two fields. */
+  function cancelSend() {
+    // SAID, not done silently. Mid-send this button cannot do what it says — the request it
+    // would cancel is already on the wire — and it used to early-return with no message and no
+    // aria-disabled, so it read as broken at the one moment a recruiter is most likely to press
+    // it. The lock is set by confirmSend for the duration; this is the answer to a press that
+    // beats the lock.
+    if (state.busy) {
+      showState(el.sendState, COPY.sendBusyWait, false);
+      return;
+    }
+    dropPreparedSend();
+  }
+
+  /**
+   * A changed interview date invalidates the preview it was prepared against.
+   *
+   * `confirmSend` posts `state.sendPrepared.interview_at` — the stamp the SERVER normalised at
+   * prepare time — and never re-reads this field. So an edit made while a preview is open was
+   * accepted on screen and then discarded: the client moves the interview a week, the recruiter
+   * retypes it, presses Send it, and the candidate's email, their portal and the retention
+   * window all say the old day. Nothing ever said the edit was ignored.
+   *
+   * Dropping the preview is the honest answer rather than re-stamping it, because the date is an
+   * INPUT to the model call — `interviewAt` reaches generateBrief and the LogisticsRail block
+   * built from it. A payload prepared for one date is not a payload for another; it has to be
+   * prepared again, which is what pressing "Send to candidate" now does.
+   *
+   * This also settles the two gates: `updateConfirmGate` never consults the date, so a past date
+   * used to lock "Send to candidate" while leaving a live "Send it" beside it. With no preview
+   * to send, that pairing cannot occur.
+   */
+  function interviewDateChanged() {
+    if (state.sendPrepared) dropPreparedSend();
+    else updateSendGate();
   }
 
   /**
@@ -1617,8 +1769,8 @@
   el.cancelSend.addEventListener("click", cancelSend);
   // Both fields, on input: the gate is a live answer to "can this be sent yet", and a date
   // picker can change the value without a keystroke.
-  el.interviewDate.addEventListener("input", updateSendGate);
-  el.interviewDate.addEventListener("change", updateSendGate);
+  el.interviewDate.addEventListener("input", interviewDateChanged);
+  el.interviewDate.addEventListener("change", interviewDateChanged);
   el.candidateEmail.addEventListener("input", updateSendGate);
 
   el.briefFile.addEventListener("change", function () {
@@ -1676,6 +1828,10 @@
     event.preventDefault();
     event.returnValue = "";
   });
+
+  // The picker's own far end. Set here rather than written into the markup, because an
+  // attribute with a date in it goes stale the day after it is typed.
+  el.interviewDate.max = maxLocal();
 
   setPhase("inputs");
   load(new URL(window.location.href).searchParams.get("client"), "");

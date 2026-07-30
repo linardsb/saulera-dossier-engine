@@ -291,6 +291,31 @@ test("the invite's From carries the agency name; the OTP's does not change", asy
   assert.equal(bodyOf(otp.calls).from, MAIL_FROM_DEFAULT);
 });
 
+test("R8, applied to the subject too: a role title cannot open a second header", async () => {
+  // `mailFrom` strips, caps and quotes the agency name for exactly this reason, and the subject
+  // was the one header field taking a browser-supplied value straight through. `role_title` is
+  // model-written and arrives in the send body — unbounded, and never checked for CR or LF.
+  const { calls } = await withFetch(ok, () =>
+    sendInviteEmail(ENV, { ...INVITE, roleTitle: "Nurse\r\nBcc: attacker@example.com" }),
+  );
+  const body = bodyOf(calls);
+
+  assert.ok(!body.subject.includes("\r"), "no carriage return survives");
+  assert.ok(!body.subject.includes("\n"), "no line feed survives");
+  assert.equal(body.subject.split(/\r?\n/).length, 1, "the subject is a single line");
+
+  // And it is capped, so a runaway title becomes a long subject rather than a provider
+  // rejection the recruiter cannot diagnose.
+  const long = await withFetch(ok, () =>
+    sendInviteEmail(ENV, { ...INVITE, roleTitle: "x".repeat(5_000) }),
+  );
+  assert.ok(bodyOf(long.calls).subject.length < 200, "the subject stays a subject");
+
+  // A legitimate title is untouched — the discipline must not cost the ordinary case.
+  const plain = await withFetch(ok, () => sendInviteEmail(ENV, INVITE));
+  assert.equal(bodyOf(plain.calls).subject, "Your interview prep for Community Staff Nurse");
+});
+
 test("an agency name cannot inject markup into the invite's html half", async () => {
   const { calls } = await withFetch(ok, () =>
     sendInviteEmail(ENV, { ...INVITE, agencyName: "<script>alert(1)</script>Agency" }),

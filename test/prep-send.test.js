@@ -29,10 +29,18 @@ import { fileURLToPath } from "node:url";
 import { onRequestPost as sendRoute } from "../functions/api/prep/send.js";
 import { onRequestGet as briefRoute } from "../functions/prep/api/brief.js";
 import { onRequestGet as enterRoute } from "../functions/prep/auth/enter.js";
-import { purgeExpired } from "../src/portal/store.js";
-import { eventCounts } from "../src/store.js";
+import { createInvite, persistHandover, purgeExpired } from "../src/portal/store.js";
+import { eventCounts, StoreError } from "../src/store.js";
 import { SESSION_COOKIE } from "../src/prep/tokens.js";
-import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
+import {
+  at,
+  d1Shape,
+  openMigrated,
+  skip,
+  NOTE_TICKED,
+  NOTE_UNTICKED,
+  SEED_CLIENT_WITH_NOTE,
+} from "./helpers/sqlite-d1.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -190,10 +198,54 @@ test("the stored row carries the frozen brief and CV, not a re-read of anything"
 
   const [role] = rowsOf(db, "candidate_role");
   // jd_text is the SAME string verifyBrief used as its haystack, so the row and the verified
-  // brief_json cannot disagree about what was checked.
-  assert.equal(role.jd_text, BRIEF);
-  assert.equal(role.cv_text, CV);
+  // brief_json cannot disagree about what was checked. Both go through `cleanInput` first — the
+  // route bounds what it persists, and trimming is all that does to a real paste — which is also
+  // what makes this haystack identical to the one /api/prep/prepare verified against.
+  assert.equal(role.jd_text, BRIEF.trim());
+  assert.equal(role.cv_text, CV.trim());
   assert.doesNotThrow(() => JSON.parse(role.brief_json), "the payload round-trips as JSON");
+});
+
+// ── #18's gate, on the row a candidate's session can reach ─────────────────────────────
+//
+// Every test above runs against `SEED_CLIENT`, whose note is empty — so `ethos_text` is `""` in
+// all of them and the gate is trivially satisfied. These two run against a client with a real
+// note and a real allow-list, which is what makes the gate falsifiable.
+
+test("AC #2: ethos_text carries the TICKED section and nothing else", { skip }, async () => {
+  const db = openMigrated(SEED_CLIENT_WITH_NOTE);
+  await send(d1Shape(db));
+
+  const [role] = rowsOf(db, "candidate_role");
+  assert.match(role.ethos_text, new RegExp(NOTE_TICKED.heading), "the ticked heading travels");
+  assert.match(role.ethos_text, new RegExp(NOTE_TICKED.text), "and so does its text");
+
+  // THE ONE THAT MATTERS. This row is reachable by a candidate's session. The unticked section
+  // is the agency's private read on a client — the class of sentence src/note-fields.js:8-10
+  // quotes — and decision 2 says the recruiter decides, per field, whether it travels.
+  assert.doesNotMatch(
+    role.ethos_text,
+    new RegExp(NOTE_UNTICKED.heading),
+    "an unticked heading must not reach a row the candidate can read",
+  );
+  assert.doesNotMatch(role.ethos_text, new RegExp(NOTE_UNTICKED.text), "and neither must its text");
+});
+
+test("R4: the field keys come from D1, so a panel claim cannot source itself", { skip }, async () => {
+  const db = openMigrated(SEED_CLIENT_WITH_NOTE);
+  await send(d1Shape(db));
+
+  const [role] = rowsOf(db, "candidate_role");
+  const panel = JSON.parse(role.brief_json).blocks.find((b) => b.name === "PanelBrief").props.panel;
+
+  // The ticked key survives — which is only possible if the allow-list was actually read. Were
+  // `listVisibleKeys` replaced with `[]`, this claim would demote alongside the other one and
+  // every assertion about demotion would still pass.
+  assert.equal(panel[0].source_field_key, NOTE_TICKED.key, "a ticked key verifies");
+
+  // And the unticked one is blanked. A key the model can see in no input it was given means the
+  // attribution was invented, so it is demoted rather than dropped: it renders wearing its mark.
+  assert.equal(panel[1].source_field_key, "", `${NOTE_UNTICKED.key} was never ticked`);
 });
 
 // ── R2: the primary key collision, which is an ordinary second candidate ───────────────
@@ -224,6 +276,30 @@ test("R2: two sends for the SAME client both persist, with distinct competency i
         `#23 must be able to derive ${role.id}:${competency.id}`,
       );
     }
+  }
+});
+
+test("the SAME collision arriving in one payload is a 400, not a constraint failure", { skip }, async () => {
+  // R2's twin, through the other door. Two competencies sharing an id inside ONE payload derive
+  // the same `${roleId}:${competency.id}` — so the second INSERT hits the PRIMARY KEY that R2
+  // above proves is real, mid-write, and a raw ERR_SQLITE_ERROR is not a StoreError: the
+  // recruiter would read `500 internal`, which DEPLOY.md's triage table sends the operator to
+  // `npm run db:remote` for. `assertBrief` refuses it at the door instead.
+  const db = openMigrated();
+  const duped = PAYLOAD();
+  // Appended rather than renamed, so the DUPLICATE is the only defect: every reference still
+  // resolves (the id exists, twice) and both copies carry a quote the brief contains, so this
+  // payload passes every other guard in assertBrief and every check in verifyBrief.
+  duped.competencies.push({ ...duped.competencies[2] });
+
+  const { response } = await send(d1Shape(db), sendBody({ payload: duped }));
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "bad_brief");
+  // Nothing was written at all — the shape check runs before createInvite, so this is not the
+  // rollback path working, it is the write never starting.
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db, table), 0, `${table} was never touched`);
   }
 });
 
@@ -260,6 +336,37 @@ test("R3: competency importance stores as a number and stage/success_rate keep t
     assert.equal(typeof row.importance, "number");
     assert.equal(row.stage, "", "stage is #23's column");
     assert.equal(row.success_rate, 0, "and a send has produced no attempts to rate");
+  }
+});
+
+test("R3's neighbour: importance is bound to the schema's 1-5, not merely to 'a number'", { skip }, async () => {
+  // The same affinity trap DIFFICULTY closes, one bind along — and the one the old
+  // `Number.isFinite(x) ? x : 0` left open. SQLite does not REJECT a value that misfits an
+  // INTEGER column: `2.5` and `1e21` both store as REAL, and `"3"` fails Number.isFinite and
+  // lands as 0 — a LOST score rather than a visible error. BRIEF_SCHEMA's enum:[1..5] cannot
+  // help, because it is enforced by the decoder at request time and this payload arrives from
+  // the browser.
+  const db = openMigrated();
+  const payload = PAYLOAD();
+  payload.competencies[0].importance = 4; // legitimate, and must survive untouched
+  payload.competencies[1].importance = 2.5;
+  payload.competencies[2].importance = "3";
+
+  await send(d1Shape(db), sendBody({ payload }));
+
+  const [role] = rowsOf(db, "candidate_role");
+  const by = new Map(rowsOf(db, "competency").map((r) => [r.id, r]));
+  const typed = db
+    .prepare("SELECT id, typeof(importance) AS t FROM competency")
+    .all()
+    .reduce((acc, r) => acc.set(r.id, r.t), new Map());
+
+  const idOf = (i) => `${role.id}:${payload.competencies[i].id}`;
+  assert.equal(by.get(idOf(0)).importance, 4, "a value inside the vocabulary is stored as it is");
+  assert.equal(by.get(idOf(1)).importance, 0, "2.5 is not one of the five");
+  assert.equal(by.get(idOf(2)).importance, 0, "and neither is the STRING \"3\"");
+  for (const [id, t] of typed) {
+    assert.equal(t, "integer", `${id} stored importance as ${t}, which #23 would read as a score`);
   }
 });
 
@@ -302,6 +409,59 @@ test("AC #1: a past interview date is refused before anything is written", { ski
 
   assert.equal(result.status, 400);
   assert.equal((await result.json()).error, "interview_past");
+  assert.equal(calls.length, 0, "no mail was attempted");
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db, table), 0, `${table} must be untouched`);
+  }
+});
+
+test("the route that PERSISTS the brief and the CV bounds them, as the one that shows them does", { skip }, async () => {
+  // /api/prep/prepare runs both through `cleanInput` before the model call; this route wrote
+  // them to D1 through `String(x ?? "")` and bounded neither. A 601,938-character brief and a
+  // 900,000-character CV both returned 201 and were stored in full, and `cv: {secret:"obj"}`
+  // stored the literal "[object Object]" — a CV column holding fifteen characters of nothing.
+  // Past D1's 2 MB row limit it stops being tidiness and becomes another 500 where a 400 belongs.
+  const db = openMigrated();
+
+  const tooLong = await send(d1Shape(db), sendBody({ brief: "x".repeat(100_001) }));
+  assert.equal(tooLong.response.status, 400);
+  assert.equal((await tooLong.response.json()).error, "too_long");
+
+  const bigCv = await send(d1Shape(db), sendBody({ cv: "y".repeat(100_001) }));
+  assert.equal(bigCv.response.status, 400);
+  assert.equal((await bigCv.response.json()).error, "too_long");
+
+  // An object is not a CV. `String({})` made one out of it and stored the result.
+  const object = await send(d1Shape(db), sendBody({ cv: { secret: "obj" } }));
+  assert.equal(object.response.status, 400);
+  assert.equal(
+    (await object.response.json()).error,
+    "missing_fields",
+    "and the LENGTH check alone would not catch it: String({}) is fifteen legal characters",
+  );
+
+  const empty = await send(d1Shape(db), sendBody({ brief: "   " }));
+  assert.equal(empty.response.status, 400);
+  assert.equal((await empty.response.json()).error, "missing_fields");
+
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db, table), 0, `${table} must be untouched — these are gates, not writes`);
+  }
+});
+
+test("an interview date past the retention horizon is refused too", { skip }, async () => {
+  // The SAME failure as the row below, arriving through a date that parses perfectly. `2226` for
+  // `2026` writes a row whose `datetime(interview_at,'+30 days') <= datetime('now')` is false
+  // for two centuries: the CV, the brief, the note slice, the address and a live magic link,
+  // all kept while src/prep/email.js tells the candidate in writing they are deleted after 30
+  // days. Nothing else in the stack caps it — not the input, not the gate, not the purge.
+  const db = openMigrated();
+  const { calls, result } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody({ interview_at: "2226-08-12" })), env: ENV(d1Shape(db)) }),
+  );
+
+  assert.equal(result.status, 400);
+  assert.equal((await result.json()).error, "interview_too_far");
   assert.equal(calls.length, 0, "no mail was attempted");
   for (const table of PORTAL_TABLES) {
     assert.equal(countOf(db, table), 0, `${table} must be untouched`);
@@ -440,6 +600,155 @@ test("R9: a mail failure rolls back everything and counts nothing", { skip }, as
   assert.equal(counts.per_client.length, 0, "no invite_sent was recorded");
 });
 
+/**
+ * `d1Shape` with a fault injected into one write.
+ *
+ * `fail(sql, nth)` is consulted before every `run()` — `nth` counts executions of that exact
+ * statement — and returns the error to throw, or nothing. Everything else is the real database,
+ * which is the whole point: a rollback is only provable against writes that actually landed.
+ */
+function faultyD1(db, fail) {
+  const real = d1Shape(db);
+  const counts = new Map();
+  return {
+    prepare(sql) {
+      const inner = real.prepare(sql);
+      const wrapper = {
+        bind(...args) {
+          inner.bind(...args);
+          return wrapper;
+        },
+        first: (column) => inner.first(column),
+        all: () => inner.all(),
+        async run() {
+          const nth = (counts.get(sql) ?? 0) + 1;
+          counts.set(sql, nth);
+          const err = fail(sql, nth);
+          if (err) throw err;
+          return inner.run();
+        },
+      };
+      return wrapper;
+    },
+  };
+}
+
+/** Runs `fn` with console.error captured, and RESTORES IT IN A FINALLY — the same discipline
+ *  `withFetch` keeps above, for the same reason. */
+async function withConsoleError(fn) {
+  const original = console.error;
+  const lines = [];
+  console.error = (...args) => lines.push(args.join(" "));
+  try {
+    return { lines, result: await fn() };
+  } finally {
+    console.error = original;
+  }
+}
+
+/** A write that fails partway through the handover — after the role row and the competencies.
+ *  A StoreError rather than a plain one so the response says WHICH error surfaced, which is the
+ *  only way to observe whether `throw err` ran at all. */
+const HANDOVER_FAILS = (sql, nth) =>
+  sql.includes("INSERT INTO question") && nth === 3
+    ? new StoreError("write_failed", 507, "injected: the write did not complete")
+    : null;
+
+const ROLLBACK_FAILS = (sql) =>
+  sql.includes("DELETE FROM invite") ? new Error("D1_ERROR: injected rollback failure") : null;
+
+test("R9's other half: a handover failure rolls back the invite too", { skip }, async () => {
+  const db = openMigrated();
+  // The third question INSERT — by which point the invite, the role row carrying the CV and the
+  // brief, and every competency have landed. The mail path is not the only way to reach an
+  // orphan: a CHECK, a D1 error, or the `candidate_role.invite_id` UNIQUE on a retry all land
+  // here, and until now nothing exercised this catch at all.
+  const d1 = faultyD1(db, HANDOVER_FAILS);
+
+  const { calls, result } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody()), env: ENV(d1) }),
+  );
+
+  assert.equal(result.status, 507, "the handover's own error is the one that surfaces");
+  assert.equal((await result.json()).error, "write_failed");
+  assert.equal(calls.length, 0, "the failure is before the mail, so no message was sent");
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db, table), 0, `${table} must be empty after a rolled-back handover`);
+  }
+  const counts = await eventCounts(d1);
+  assert.equal(counts.per_client.length, 0, "and nothing was counted");
+});
+
+test("a rollback that itself fails must not replace the error it is rolling back", { skip }, async () => {
+  // THE TRAP. `await deleteInviteByTokenHash(...)` bare in front of `throw err` means a failing
+  // DELETE throws PAST the throw, so the outer catch sees a database error instead of the mail
+  // error. The recruiter reads `500 internal` — which DEPLOY.md's triage table calls "the
+  // migration did not run" — instead of `502 mail_failed`, the one message telling them the
+  // payload is still on screen and worth retrying rather than worth another ~30p model call.
+  const db = openMigrated();
+  const d1 = faultyD1(db, ROLLBACK_FAILS);
+
+  const captured = await withConsoleError(() =>
+    withFetch(mailForbidden, () => sendRoute({ request: sendRequest(sendBody()), env: ENV(d1) })),
+  );
+  const response = captured.result.result;
+
+  assert.equal(response.status, 502, "the MAIL error survives its own failed rollback");
+  assert.equal((await response.json()).error, "mail_failed");
+
+  // The rows really are orphaned — a guard preserves the diagnosis, it cannot undo a DELETE that
+  // will not run — so the operator has to be told. Silence here is the worse outcome of the two.
+  assert.equal(countOf(db, "candidate_role"), 1, "the orphan is real, which is why it is logged");
+  assert.ok(
+    captured.lines.some((line) => /rollback failed/.test(line)),
+    "the failed rollback is reported, not swallowed silently",
+  );
+});
+
+test("the same guard on the handover rollback, which is the branch a retry reaches", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = faultyD1(db, (sql, nth) => HANDOVER_FAILS(sql, nth) ?? ROLLBACK_FAILS(sql));
+
+  const captured = await withConsoleError(() =>
+    withFetch(mailOk, () => sendRoute({ request: sendRequest(sendBody()), env: ENV(d1) })),
+  );
+  const response = captured.result.result;
+
+  assert.equal(response.status, 507, "the handover error survives its own failed rollback too");
+  assert.equal((await response.json()).error, "write_failed");
+  assert.ok(captured.lines.some((line) => /rollback failed/.test(line)));
+});
+
+test("candidate_role.invite_id UNIQUE: one invite can only ever hold one brief", { skip }, async () => {
+  // The constraint is asserted in the DDL by test/schema.test.js; this is what it DOES. It is
+  // the state the handover rollback above can leave behind followed by a retry, and until now
+  // it was covered only by test/helpers/fake-d1.js, which enforces nothing.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const inviteId = "inv-1";
+  await createInvite(d1, {
+    id: inviteId,
+    clientId: "c-1",
+    email: "candidate@example.com",
+    interviewAt: at(1),
+    tokenHash: "hash-1",
+    expiresAt: at(15),
+  });
+
+  const handover = { inviteId, jdText: BRIEF, ethosText: "", cvText: CV, payload: PAYLOAD() };
+  await persistHandover(d1, handover);
+  await assert.rejects(
+    () => persistHandover(d1, handover),
+    /UNIQUE|constraint/i,
+    "two handovers for one invite would put two briefs behind one magic link",
+  );
+
+  // And the refusal is total: the second call's role row never landed, so there is no half-
+  // written scope hiding behind the constraint.
+  assert.equal(countOf(db, "candidate_role"), 1);
+  assert.equal(countOf(db, "competency"), PAYLOAD().competencies.length);
+});
+
 test("R9: with no RESEND_API_KEY the send answers not_configured and writes nothing", { skip }, async () => {
   const db = openMigrated();
   const { calls, result } = await withFetch(mailOk, () =>
@@ -455,6 +764,91 @@ test("R9: with no RESEND_API_KEY the send answers not_configured and writes noth
   for (const table of PORTAL_TABLES) {
     assert.equal(countOf(db, table), 0, `${table} must be empty`);
   }
+});
+
+// ── the guards nothing was executing ───────────────────────────────────────────────────
+//
+// Each of these was PROVEN unreachable by the PR #32 review: delete the guard, suite stays
+// green. They are not exotic paths — one is every browser request this route will ever see.
+
+test("a cross-site POST is refused before the invite is minted", { skip }, async () => {
+  // Every other test in this file uses `headers: {get: () => null}` — the curl path `sameOrigin`
+  // allows by design — so the check itself was never executed. Access is the door and it
+  // authenticates with a cookie; this is the bolt against a cross-site POST riding it.
+  const db = openMigrated();
+  const cross = await sendRoute({
+    request: {
+      ...sendRequest(sendBody()),
+      headers: { get: (name) => (name === "Sec-Fetch-Site" ? "cross-site" : null) },
+    },
+    env: ENV(d1Shape(db)),
+  });
+
+  assert.equal(cross.status, 403);
+  assert.equal((await cross.json()).error, "cross_origin");
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db, table), 0, `${table} must be untouched — nothing ran`);
+  }
+
+  // And a genuine browser POST is not refused, so the bolt is a bolt rather than a wall.
+  const { result } = await withFetch(mailOk, () =>
+    sendRoute({
+      request: {
+        ...sendRequest(sendBody()),
+        headers: { get: (name) => (name === "Sec-Fetch-Site" ? "same-origin" : null) },
+      },
+      env: ENV(d1Shape(db)),
+    }),
+  );
+  assert.equal(result.status, 201, "the recruiter's own browser still sends");
+});
+
+test("a malformed strike is a 400 naming the strike, not a 500 naming nothing", { skip }, async () => {
+  // Both guards were unexecuted. Without the first, `strike: {}` reaches `new Set({})`, which
+  // throws a TypeError inside strikeCompetencies — caught by the route's own catch and reported
+  // as `nothing_to_send`, a message about a control the recruiter did not touch.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+
+  for (const strike of [{}, "comp-lone-working", [1, 2], [null]]) {
+    const { response } = await send(d1, sendBody({ strike }));
+    assert.equal(response.status, 400, `strike: ${JSON.stringify(strike)}`);
+    assert.equal((await response.json()).error, "missing_fields");
+  }
+
+  // The second guard: a strike list longer than the payload's own competency count is either a
+  // bug or an attempt to make this loop expensive. Bounded for the same reason
+  // VISIBILITY_KEYS_MAX is — one request may not ask for unbounded work.
+  const tooMany = PAYLOAD().competencies.map((c) => c.id).concat(["a", "b", "c", "d"]);
+  const { response } = await send(d1, sendBody({ strike: tooMany }));
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "missing_fields");
+
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db, table), 0, `${table} must be untouched`);
+  }
+});
+
+test("a send that could not be counted still succeeds, and says so", { skip }, async () => {
+  // The UI ships a dedicated COPY.sendDoneUncounted for this response and no server test ever
+  // emitted it. The trade is deliberate and stated at the route: a failure HERE is reported and
+  // never costs the send — the candidate has their link, and decision 23's number can only be
+  // DEFLATED, which is the direction the failure ordering argues for.
+  const db = openMigrated();
+  const d1 = faultyD1(db, (sql) =>
+    sql.includes("INSERT INTO events") ? new Error("D1_ERROR: injected counter failure") : null,
+  );
+
+  const { result } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody()), env: ENV(d1) }),
+  );
+
+  assert.equal(result.status, 201, "the send stands: the email went out");
+  assert.equal((await result.json()).event_recorded, false, "and the screen is told it did not count");
+  assert.equal(countOf(db, "invite"), 1, "the invite and its scope are intact");
+  assert.equal(countOf(db, "candidate_role"), 1);
+  const counts = await eventCounts(d1);
+  assert.equal(counts.per_client.length, 0, "the count is deflated, never inflated");
 });
 
 // ── AC #4: the count ───────────────────────────────────────────────────────────────────
@@ -546,6 +940,36 @@ test("a session-less GET /prep/api/brief answers 401", { skip }, async () => {
   assert.equal(response.status, 401, "the page bounces to /prep/login on this");
 });
 
+test("a stored brief that no longer satisfies the contract answers 502, not an empty 200", { skip }, async () => {
+  // The branch was dead: replacing this 502 with `json({}, 200)` left the suite green, so a
+  // corrupt stored payload would have shipped an empty page to the candidate as if it were
+  // their prep. 502 is the right code — the fault is a migration or a change to assertBrief
+  // that the stored rows predate, which is upstream of the person reading the screen.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+
+  const { calls } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody()), env: ENV(d1) }),
+  );
+  const entered = await enterRoute({
+    request: { url: `https://engine.pages.dev/prep/auth/enter?t=${tokenFromMail(calls)}`, headers: { get: () => null } },
+    env: { DB: d1 },
+  });
+  const session = entered.headers.get("Set-Cookie").match(/prep_session=([^;]+)/)[1];
+
+  // Valid JSON, and not a prep brief. Both halves matter: JSON.parse must succeed so this is
+  // assertBrief's refusal being tested and not the parser's.
+  db.prepare("UPDATE candidate_role SET brief_json = ?").run('{"role_title":"Nurse"}');
+
+  const response = await briefRoute({
+    request: cookieRequest("https://engine.pages.dev/prep/api/brief", session),
+    env: { DB: d1 },
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error, "bad_brief");
+});
+
 test("a session whose handover was never written answers 404, not 500", { skip }, async () => {
   const db = openMigrated();
   const d1 = d1Shape(db);
@@ -572,7 +996,7 @@ test("a session whose handover was never written answers 404, not 500", { skip }
 
 // ── the link the email carried ─────────────────────────────────────────────────────────
 
-test("the magic link is built against PREP_BASE_URL, and falls back to the request origin", { skip }, async () => {
+test("the magic link is built against PREP_BASE_URL, and against nothing else", { skip }, async () => {
   const db = openMigrated();
 
   const configured = await withFetch(mailOk, () =>
@@ -580,31 +1004,61 @@ test("the magic link is built against PREP_BASE_URL, and falls back to the reque
   );
   assert.ok(
     JSON.parse(configured.calls[0].init.body).text.includes("https://prep.agency.co.uk/prep/auth/enter?t="),
-    "the configured origin wins",
+    "the configured origin is the link's origin",
   );
 
+  // NO FALLBACK TO THE REQUEST. This used to build the link from `new URL(request.url).origin`,
+  // which is the Host the edge saw — a header the caller sets. Its sibling
+  // functions/prep/auth/enter.js:30-31 refuses the identical move for a REDIRECT; this one would
+  // have emailed a candidate a sign-in link carrying a live token, which is strictly worse.
   const db2 = openMigrated();
-  const fallback = await withFetch(mailOk, () =>
+  const { calls, result } = await withFetch(mailOk, () =>
     sendRoute({ request: sendRequest(sendBody()), env: { DB: d1Shape(db2), RESEND_API_KEY: "re_x" } }),
   );
-  assert.ok(
-    JSON.parse(fallback.calls[0].init.body).text.includes("https://engine.pages.dev/prep/auth/enter?t="),
-    "unset, the link is built from the origin the recruiter's browser used",
-  );
+  assert.equal(result.status, 503);
+  assert.equal((await result.json()).error, "no_base_url");
+  assert.equal(calls.length, 0, "the guard is before the mint, so no message and no token");
+  for (const table of PORTAL_TABLES) {
+    assert.equal(countOf(db2, table), 0, `${table} must be empty — nothing to roll back`);
+  }
+
+  // But it is the LAST gate, not the first: a body that was going to be refused anyway is
+  // refused BY NAME. Putting the config answer in front of the 400s would tell a caller the
+  // deployment is misconfigured instead of telling the recruiter which field is wrong, and it
+  // would swallow the whole vocabulary check on any deployment that has not set the variable.
+  const db3 = openMigrated();
+  const named = await sendRoute({
+    request: sendRequest({ ...sendBody(), field_keys: ["their-process"] }),
+    env: { DB: d1Shape(db3), RESEND_API_KEY: "re_x" },
+  });
+  assert.equal(named.status, 400);
+  assert.deepEqual(await named.json(), { error: "unexpected_fields", fields: ["field_keys"] });
+
+  // And `sameOrigin` still runs in front of both: a cross-site caller learns nothing about how
+  // this deployment is configured.
+  const cross = await sendRoute({
+    request: {
+      ...sendRequest(sendBody()),
+      headers: { get: (name) => (name === "Sec-Fetch-Site" ? "cross-site" : null) },
+    },
+    env: { DB: d1Shape(db3), RESEND_API_KEY: "re_x" },
+  });
+  assert.equal(cross.status, 403);
+  assert.equal((await cross.json()).error, "cross_origin");
 });
 
-test("a malformed PREP_BASE_URL is ignored rather than concatenated blindly", { skip }, async () => {
-  // A link nobody notices until a candidate clicks one is the expensive failure here.
+test("a malformed PREP_BASE_URL is refused, not concatenated and not fallen back from", { skip }, async () => {
+  // A link nobody notices until a candidate clicks one is the expensive failure here, and
+  // "https://example.com/prep/prep/auth/enter" is what blind concatenation produces.
   for (const bad of ["http://insecure.example", "https://host.example/with/path", "not a url", "https://h.example?q=1"]) {
     const db = openMigrated();
-    const { calls } = await withFetch(mailOk, () =>
+    const { calls, result } = await withFetch(mailOk, () =>
       sendRoute({ request: sendRequest(sendBody()), env: ENV(d1Shape(db), { PREP_BASE_URL: bad }) }),
     );
-    const { text } = JSON.parse(calls[0].init.body);
-    assert.ok(
-      text.includes("https://engine.pages.dev/prep/auth/enter?t="),
-      `${bad} must fall back to the request origin, not build a broken link`,
-    );
+    assert.equal(result.status, 503, `${bad} must be refused`);
+    assert.equal((await result.json()).error, "no_base_url");
+    assert.equal(calls.length, 0, `${bad} must not reach the mail provider`);
+    assert.equal(countOf(db, "invite"), 0, `${bad} must not mint an invite`);
   }
 });
 

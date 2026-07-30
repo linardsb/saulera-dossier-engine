@@ -197,6 +197,36 @@ test("a block name outside the vocabulary throws before the payload is returned"
   );
 });
 
+test("a shape failure is a 502 bad_brief, in the register of every other model failure here", async () => {
+  // assertBrief throws a PLAIN Error by design — schema.js calls it "a shape bug, not an HTTP
+  // outcome" — so the route would answer `500 internal`, which DEPLOY.md's triage table reads as
+  // "the migration did not run". The operator would be sent to `npm run db:remote` for a payload
+  // problem. Every branch is exercised: these are all rules BRIEF_SCHEMA cannot state, so a
+  // payload the decoder accepted reaches them.
+  const noQuestions = payload();
+  noQuestions.questions = noQuestions.questions.filter(
+    (q) => q.competency_id !== noQuestions.competencies[0].id,
+  );
+  assert.equal(await codeOf(() => generateBrief(fakeAnthropic(ok(noQuestions)), INPUTS)), "bad_brief");
+
+  // Appended, not renamed: the duplicate is then the ONLY defect, so this asserts the
+  // uniqueness rule rather than the dangling reference a rename would also create.
+  const duped = payload();
+  duped.competencies.push({ ...duped.competencies[2] });
+  assert.equal(await codeOf(() => generateBrief(fakeAnthropic(ok(duped)), INPUTS)), "bad_brief");
+
+  const axis = payload();
+  axis.questions[0].axis = "lateral";
+  assert.equal(await codeOf(() => generateBrief(fakeAnthropic(ok(axis)), INPUTS)), "bad_brief");
+
+  // The message survives the wrap: without it the recruiter's screen loses the one sentence
+  // saying WHICH rule the answer broke.
+  await assert.rejects(
+    () => generateBrief(fakeAnthropic(ok(duped)), INPUTS),
+    /already taken/,
+  );
+});
+
 /* ── the answers that are not a prep brief ─────────────────────────────────────────────── */
 
 async function codeOf(fn) {

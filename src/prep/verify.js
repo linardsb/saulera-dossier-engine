@@ -60,7 +60,15 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
       // a second pass re-demotes it and overwrites failed_field_key with the blank, destroying
       // the diagnostic on exactly the path that needs it most: a payload re-verified out of
       // storage, where the original key is the only record of what the model claimed.
-      if ("failed_field_key" in entry) return entry;
+      //
+      // The test is the SHAPE this function produces, not the mere presence of the key. Key
+      // presence alone is forgeable: `{"failed_field_key": null}` is legal JSON that survives
+      // readJson and assertBrief, so a payload arriving from the browser could carry a
+      // `source_field_key` naming a HIDDEN note section and return here before the D1 allow-list
+      // was ever consulted. A genuine demotion always blanks the key first, so requiring both is
+      // what keeps the guarantee functions/api/prep/send.js advertises — the keys come from the
+      // database — true of the round trip and not only of the first pass.
+      if (entry.source_field_key === "" && "failed_field_key" in entry) return entry;
       if (keys.has(entry.source_field_key)) return entry;
 
       failures.push({

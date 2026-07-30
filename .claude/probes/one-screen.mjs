@@ -365,6 +365,35 @@ const READ = `(function () {
       var n = document.getElementById("interview-date");
       return n ? n.readOnly : null;
     })(),
+    dateValue: v("interview-date"),
+    emailValue: v("candidate-email"),
+    cancelBusy: (function () {
+      var n = document.getElementById("cancel-send");
+      return n ? n.getAttribute("aria-disabled") : null;
+    })(),
+    // The provenance grammar of the preview rows: the word, the colour class, the row's own
+    // border class, and the wiring that gets the word to a screen reader.
+    strikeMarks: Array.prototype.map.call(
+      document.querySelectorAll("#strike-list .mark"),
+      function (n) { return { text: n.textContent, cls: n.className, colour: getComputedStyle(n).color }; }),
+    strikeRowClasses: Array.prototype.map.call(
+      document.querySelectorAll("#strike-list .strike-row"), function (n) { return n.className; }),
+    strikeDescribedBy: Array.prototype.map.call(
+      document.querySelectorAll("#strike-list .strike-box"),
+      function (n) {
+        var id = n.getAttribute("aria-describedby");
+        var target = id ? document.getElementById(id) : null;
+        return target ? target.textContent : null;
+      }),
+    focused: (function () {
+      var a = document.activeElement;
+      return a ? { id: a.id || null, cls: a.className || "", tag: a.tagName } : null;
+    })(),
+    // The picker's own far end, set from app.js at load rather than written into the markup.
+    dateMax: (function () {
+      var n = document.getElementById("interview-date");
+      return n ? n.getAttribute("max") : null;
+    })(),
 
     url: location.search,
     calls: window.__probe.calls,
@@ -1037,6 +1066,17 @@ const COMPETENCIES = [
 ];
 
 /** A prepare response, with `verified` overridable so probe 22 can send an unsourced one. */
+/**
+ * A real interview date, computed rather than written down.
+ *
+ * These probes used `2099-08-12`, which src/prep/dates.js's MAX_MONTHS_AHEAD now refuses: the
+ * interview date is the clock decision 13's 30-day purge runs on, so a date centuries out is a
+ * retention failure and both routes answer `interview_too_far`. Sixty days is an ordinary
+ * booking, and deriving it means this file cannot go stale the way a literal year does.
+ */
+const INTERVIEW_DATE = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10);
+const INTERVIEW_STAMP = `${INTERVIEW_DATE} 00:00:00`;
+
 const PREPARED = (competencies = COMPETENCIES) => ({
   payload: {
     role_title: "Band 6 Community Nurse",
@@ -1046,12 +1086,12 @@ const PREPARED = (competencies = COMPETENCIES) => ({
   },
   provenance: { sourced: competencies.filter((c) => c.verified).length, unverified: 0, total: competencies.length },
   failures: [],
-  interview_at: "2099-08-12 00:00:00",
+  interview_at: INTERVIEW_STAMP,
   visible_fields: [{ key: "their-process", heading: "Their process", chars: 412 }],
   duration_ms: 1200,
 });
 
-const SENT = { ok: true, sent_at: "2099-08-12 09:00:00", competencies: ["comp-lone-working"], event_recorded: true };
+const SENT = { ok: true, sent_at: `${INTERVIEW_DATE} 09:00:00`, competencies: ["comp-lone-working"], event_recorded: true };
 
 /** Reach phase "pack" by the generate route, which is where act 4 lives. */
 async function reachPack(page, routes) {
@@ -1091,7 +1131,7 @@ async function probe19() {
   const page = await openScreen({ routes: baseRoutes([GENERATE_OK, PREPARE_OK]) });
   await reachPack(page);
 
-  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
   await page.eval(FILL("candidate-email", "candidate@example.com"));
   const open = await page.eval(READ);
 
@@ -1114,7 +1154,7 @@ async function probe20() {
     routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
   });
   await reachPack(page);
-  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
   await page.eval(FILL("candidate-email", "candidate@example.com"));
   await page.eval(CLICK("prepare-send"));
   await page.eval(SETTLE(300));
@@ -1138,7 +1178,7 @@ async function probe20() {
     sent.length === 1 &&
       JSON.stringify(body.strike) === JSON.stringify(["comp-documentation"]) &&
       body.payload && body.payload.competencies.length === 2 &&
-      body.interview_at === "2099-08-12 00:00:00",
+      body.interview_at === INTERVIEW_STAMP,
     `sends=${sent.length} · strike=${JSON.stringify(body.strike)}\n` +
       `        payload competencies=${body.payload ? body.payload.competencies.length : "none"} · ` +
       `interview_at=${JSON.stringify(body.interview_at)} (the SERVER's normalised stamp)`,
@@ -1154,7 +1194,7 @@ async function probe21() {
     routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
   });
   await reachPack(page);
-  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
   await page.eval(FILL("candidate-email", "candidate@example.com"));
   await page.eval(CLICK("prepare-send"));
   await page.eval(SETTLE(300));
@@ -1190,7 +1230,7 @@ async function probe22() {
     ]),
   });
   await reachPack(page);
-  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
   await page.eval(FILL("candidate-email", "candidate@example.com"));
   await page.eval(CLICK("prepare-send"));
   await page.eval(SETTLE(300));
@@ -1231,7 +1271,7 @@ async function probe23() {
     ]),
   });
   await reachPack(page);
-  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
   await page.eval(FILL("candidate-email", "candidate@example.com"));
   await page.eval(CLICK("prepare-send"));
   await page.eval(SETTLE(300));
@@ -1267,7 +1307,7 @@ async function probe27() {
     routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
   });
   await reachPack(page);
-  await page.eval(FILL("interview-date", "2099-08-12"));
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
   await page.eval(FILL("candidate-email", "candidate@example.com"));
   await page.eval(CLICK("prepare-send"));
   await page.eval(SETTLE(300));
@@ -1294,6 +1334,299 @@ async function probe27() {
     `all unticked -> locked=${emptied.confirmBusy} · state=${JSON.stringify(emptied.sendState)}\n` +
       `        one re-ticked -> locked=${JSON.stringify(restored.confirmBusy)} · ` +
       `state=${JSON.stringify(restored.sendState)}`,
+  );
+  await page.close();
+}
+
+/* ── the three act-4 hazards PR #32's review found (H4, H5, H6) ─────────────────────────
+ *
+ * All three are async-sequencing or stale-input bugs, which is what this file is for: none is
+ * reachable from `node --test`, and all three shipped past a green suite and 27 green probes.
+ */
+
+async function probe28() {
+  // H4. Both "Start again" buttons are on screen throughout act 4 and are guarded by NOTHING —
+  // not state.busy, and `resetToInputs` was the one reset path that never bumped state.reqId.
+  // So a send still in flight came back AFTER the reset and set the terminal sendDone state:
+  // the NEXT candidate's act 4 opened with a locked CTA, frozen fields and "Sent to <the
+  // previous address>" over a pack that was never sent. Nothing on screen said why, and nothing
+  // said that pressing Start again a second time was the way out.
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK, PREPARE_OK,
+      { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT, delay: 600 },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "first@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(120)); // in flight
+  await page.eval(CLICK("start-again-2"));
+  await page.eval(SETTLE(900)); // the send's own response now lands, on a screen that moved on
+
+  const r = await page.eval(READ);
+  check(
+    "28", "a send in flight cannot land on the screen Start again just cleared",
+    r.dateReadOnly === false && r.emailValue === "" && r.dateValue === "" &&
+      r.previewHidden === true && (r.sendState ?? "") === "" &&
+      r.prepareBusy === "true" && r.inputsHidden === false,
+    `fields thawed=${r.dateReadOnly === false} · date=${JSON.stringify(r.dateValue)} · ` +
+      `email=${JSON.stringify(r.emailValue)}\n` +
+      `        state=${JSON.stringify(r.sendState)} (must be empty — no "Sent to first@…")\n` +
+      `        back on act 1=${r.inputsHidden === false} · CTA locked by the empty fields, ` +
+      `not by sendDone=${r.prepareBusy}`,
+  );
+  await page.close();
+}
+
+async function probe29() {
+  // H5. `confirmSend` posts `state.sendPrepared.interview_at` — the stamp the SERVER normalised
+  // at prepare time — and never re-reads the field. The field was live throughout, so an edit
+  // made over an open preview was accepted on screen and then discarded: the client moves the
+  // interview a week, the recruiter retypes it, presses Send it, and the candidate's email,
+  // their portal and the retention window all say the old day. Nothing said the edit was
+  // ignored, and the date is never restated in the preview either.
+  const page = await openScreen({
+    routes: baseRoutes([GENERATE_OK, PREPARE_OK, { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT }]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+  const prepared = await page.eval(READ);
+
+  // The interview moves a week. The preview on screen was built for the old day.
+  const MOVED = new Date(Date.now() + 67 * 86_400_000).toISOString().slice(0, 10);
+  await page.eval(FILL("interview-date", MOVED));
+  const afterEdit = await page.eval(READ);
+
+  // And "Send it" must now be unreachable rather than silently sending the old stamp.
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const sends = r.calls.filter((c) => c.path === "/api/prep/send");
+  check(
+    "29", "editing the interview date drops the preview it was prepared against",
+    prepared.previewHidden === false && afterEdit.previewHidden === true && sends.length === 0,
+    `preview open after prepare=${prepared.previewHidden === false} · ` +
+      `dropped by the edit=${afterEdit.previewHidden}\n` +
+      `        sends after clicking "Send it"=${sends.length} (must be 0 — the old stamp is gone, ` +
+      `not posted)\n        the recruiter re-prepares against ${MOVED}, which is the only way ` +
+      `the date reaches the model call again`,
+  );
+  await page.close();
+}
+
+async function probe30() {
+  // H6, the browser courtesy half. `purgeExpired` deletes on interview_at + 30 days, so a
+  // one-character year typo — 2226 for 2026 — keeps a candidate's CV, brief, note slice, address
+  // and live magic link in D1 for two centuries, while their email says it is all deleted after
+  // 30 days. Nothing anywhere capped the far end: not the input, not the gate, not the purge.
+  const page = await openScreen({ routes: baseRoutes([GENERATE_OK, PREPARE_OK]) });
+  await reachPack(page);
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(FILL("interview-date", "2226-08-12"));
+  const typo = await page.eval(READ);
+
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const prepares = r.calls.filter((c) => c.path === "/api/prep/prepare");
+  const maxYear = Number((typo.dateMax ?? "0").slice(0, 4));
+  const thisYear = new Date().getFullYear();
+  check(
+    "30", "a mistyped year is caught before it becomes a two-century retention window",
+    typo.dateMax !== null && maxYear === thisYear + 2 &&
+      typo.prepareBusy === "true" && prepares.length === 0 &&
+      (r.sendState ?? "").includes("Check the year"),
+    `input max=${JSON.stringify(typo.dateMax)} (two years out, computed at load)\n` +
+      `        CTA locked=${typo.prepareBusy} · prepares issued=${prepares.length} (must be 0 — ` +
+      `the ~30p call is never spent on a typo)\n        state=${JSON.stringify(r.sendState)}`,
+  );
+  await page.close();
+}
+
+async function probe31() {
+  // The preview rows are provenance rows, so they have to speak act 3's grammar — and they were
+  // speaking a dialect of it. Every verified competency was badged "Our note", which is the one
+  // thing it cannot be: `verified` is computed against the cleaned BRIEF, and the schema tells
+  // the model to quote the brief and never the CV. The verified branch also set a bare "mark"
+  // with no colour modifier, and the unverified row never got `claim-unverified` — so two of the
+  // three signals act 3 promises (the word, the colour, the border) were missing or wrong.
+  const unsourced = [COMPETENCIES[0], { ...COMPETENCIES[1], verified: false }];
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK,
+      { method: "POST", match: "^/api/prep/prepare$", status: 200, body: PREPARED(unsourced) },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  const [ok, bad] = r.strikeMarks;
+  const [okRow, badRow] = r.strikeRowClasses;
+  check(
+    "31", "a preview row carries the right word, its colour and its border",
+    ok && ok.text === "Brief" && ok.cls.includes("mark-brief") &&
+      bad && bad.text === "Unverified" && bad.cls.includes("mark-unverified") &&
+      // Distinct colours, and neither inheriting the body colour by omission.
+      ok.colour !== bad.colour &&
+      okRow === "claim strike-row" && (badRow ?? "").includes("claim-unverified") &&
+      // And the word reaches a screen reader with the checkbox rather than beside it.
+      JSON.stringify(r.strikeDescribedBy) === JSON.stringify(["Brief", "Unverified"]),
+    `marks=${JSON.stringify(r.strikeMarks.map((m) => m.text))} · ` +
+      `classes=${JSON.stringify(r.strikeMarks.map((m) => m.cls))}\n` +
+      `        colours=${JSON.stringify(r.strikeMarks.map((m) => m.colour))} (must differ)\n` +
+      `        row classes=${JSON.stringify(r.strikeRowClasses)}\n` +
+      `        each box describedby its own mark=${JSON.stringify(r.strikeDescribedBy)}`,
+  );
+  await page.close();
+}
+
+async function probe32() {
+  // Two defects that only appear together. An all-unverified preview said BOTH "None of these
+  // could be found in the brief" (the lede) and "Everything is unticked, so there is nothing
+  // left to send" (the gate, announcing) — a screen contradicting itself, the second sentence
+  // blaming the recruiter for an unticking they did not do. And focus landed on the irreversible
+  // "Send it" with preventScroll, so a recruiter who had scrolled up held focus on a button they
+  // could not see: one Space and the email is gone, before a competency has been read.
+  const allBad = COMPETENCIES.map((c) => ({ ...c, verified: false }));
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK,
+      { method: "POST", match: "^/api/prep/prepare$", status: 200, body: PREPARED(allBad) },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(400));
+
+  const r = await page.eval(READ);
+  await page.close();
+
+  // And the emptiest case of all, which used to lock the button and say NOTHING — a disabled
+  // control over a blank list reads as the screen having broken, not as an outcome.
+  const empty = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK,
+      { method: "POST", match: "^/api/prep/prepare$", status: 200, body: PREPARED([]) },
+    ]),
+  });
+  await reachPack(empty);
+  await empty.eval(FILL("interview-date", INTERVIEW_DATE));
+  await empty.eval(FILL("candidate-email", "candidate@example.com"));
+  await empty.eval(CLICK("prepare-send"));
+  await empty.eval(SETTLE(400));
+  const e = await empty.eval(READ);
+
+  check(
+    "32", "an all-unverified preview says one thing, and focus is not on the irreversible button",
+    (r.sendLede ?? "").includes("None of these could be found") &&
+      (r.sendState ?? "") === "" &&
+      r.confirmBusy === "true" &&
+      r.focused && r.focused.id !== "confirm-send" && (r.focused.cls ?? "").includes("strike-box") &&
+      // The empty preview explains itself too, and does not double up either.
+      (e.sendLede ?? "").includes("Nothing was pulled out of the brief") &&
+      (e.sendState ?? "") === "" && e.confirmBusy === "true" && e.strikeBoxes.length === 0,
+    `lede=${JSON.stringify(r.sendLede)}\n` +
+      `        state=${JSON.stringify(r.sendState)} (must be empty — the lede owns this)\n` +
+      `        confirm locked=${r.confirmBusy} · focus on ${JSON.stringify(r.focused)}\n` +
+      `        zero competencies -> lede=${JSON.stringify(e.sendLede)} · ` +
+      `state=${JSON.stringify(e.sendState)} · locked=${e.confirmBusy}`,
+  );
+  await empty.close();
+}
+
+async function probe33() {
+  // "Send to candidate" stayed live over an open preview, so a second press silently ran the
+  // ~30p model call again and swapped the preview underneath the recruiter. "Not yet" is the way
+  // back — and IT was the silent one mid-send: an early return on state.busy with no message and
+  // no aria-disabled, so it read as broken at the moment it is most likely to be pressed.
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK, PREPARE_OK,
+      { method: "POST", match: "^/api/prep/send$", status: 201, body: SENT, delay: 500 },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "candidate@example.com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+
+  // Over an open preview: locked, and pressing it spends nothing.
+  const open = await page.eval(READ);
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(200));
+  const afterSecondPress = await page.eval(READ);
+
+  // Mid-send: "Not yet" cannot do what it says, and now says so instead of doing nothing.
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(120));
+  const sending = await page.eval(READ);
+  await page.eval(CLICK("cancel-send"));
+  const cancelled = await page.eval(READ);
+  await page.eval(SETTLE(600));
+
+  const prepares = afterSecondPress.calls.filter((c) => c.path === "/api/prep/prepare");
+  check(
+    "33", "the model call cannot be re-run over an open preview, and \"Not yet\" never does nothing",
+    open.prepareBusy === "true" && prepares.length === 1 &&
+      afterSecondPress.previewHidden === false &&
+      sending.cancelBusy === "true" &&
+      (cancelled.sendState ?? "").includes("already going") &&
+      cancelled.previewHidden === false,
+    `preview open -> "Send to candidate" locked=${open.prepareBusy} · ` +
+      `prepares after a second press=${prepares.length} (must stay 1)\n` +
+      `        mid-send "Not yet" locked=${sending.cancelBusy} · ` +
+      `pressed anyway -> ${JSON.stringify(cancelled.sendState)}\n` +
+      `        and the payload it would have dropped is still there=${!cancelled.previewHidden}`,
+  );
+  await page.close();
+}
+
+async function probe34() {
+  // A send failure must describe THIS act. `sendMessageFor` had no case for `missing_fields`, so
+  // it fell through to messageFor, whose copy for that code is act 1's — "Paste the brief and the
+  // CV before you copy the prompt." — shown in act 4, where both are frozen, filled and visible
+  // two acts above. An address that clears the browser's `indexOf("@") > 0` and fails the
+  // server's cleanEmail is the ordinary way to get here.
+  const page = await openScreen({
+    routes: baseRoutes([
+      GENERATE_OK, PREPARE_OK,
+      { method: "POST", match: "^/api/prep/send$", status: 400, body: { error: "missing_fields" } },
+    ]),
+  });
+  await reachPack(page);
+  await page.eval(FILL("interview-date", INTERVIEW_DATE));
+  await page.eval(FILL("candidate-email", "candidate@example..com"));
+  await page.eval(CLICK("prepare-send"));
+  await page.eval(SETTLE(300));
+  await page.eval(CLICK("confirm-send"));
+  await page.eval(SETTLE(300));
+
+  const r = await page.eval(READ);
+  check(
+    "34", "a send failure names this screen's fields, not act 1's",
+    (r.sendState ?? "").includes("email address or the interview date") &&
+      !(r.sendState ?? "").includes("copy the prompt") &&
+      // And the payload is kept, so the remedy is an edit and a retry rather than another call.
+      r.previewHidden === false,
+    `state=${JSON.stringify(r.sendState)}\n` +
+      `        must not mention the prompt, and the preview is still here=${!r.previewHidden}`,
   );
   await page.close();
 }
@@ -1404,7 +1737,8 @@ try {
                        probe8, probe9, probe10, probe11, probe12, probe13, probe14,
                        probe15, probe16, probe17,
                        probe18, probe19, probe20, probe21, probe22, probe23,
-                       probe24, probe25, probe26, probe27]) {
+                       probe24, probe25, probe26, probe27,
+                       probe28, probe29, probe30, probe31, probe32, probe33, probe34]) {
     await probe();
   }
 } finally {

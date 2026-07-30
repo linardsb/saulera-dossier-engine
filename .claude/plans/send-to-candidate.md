@@ -1106,8 +1106,12 @@ done
 grep -rn "TODO\|FIXME\|console.log" src/prep/ src/portal/ functions/api/prep/ functions/prep/ \
   public/counts.js && echo "clean these" || echo ok
 
-# the credential must never reach a log line
+# the credential must never reach a log line.
+# `sed` strips the `path:line:` prefix grep -rn adds, because otherwise the FILE NAME is matched
+# too: src/prep/email.js:60 logs `response.status` and nothing else, and tripped this gate on the
+# word "email" in its own path. A gate that cries wolf gets deleted, so it reads the line.
 grep -rn "console\.\(log\|error\|warn\)" src/prep/ functions/api/prep/ functions/prep/ \
+  | sed 's/^[^:]*:[0-9]*://' \
   | grep -i "token\|code\|cookie\|link\|email" && echo "LEAK" || echo ok
 
 # nothing parses HTML anywhere on the client

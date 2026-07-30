@@ -45,6 +45,41 @@ export const skip =
 export const SEED_CLIENT =
   "INSERT INTO clients (id, name) VALUES ('c-1', 'Ashdown Park Community Healthcare')";
 
+/**
+ * The same client, but with a REAL note and a REAL allow-list — one section ticked, one not.
+ *
+ * `SEED_CLIENT` inserts `(id, name)` only, so `client.note` is the column default `''`. For the
+ * auth and purge callers that is correct and irrelevant. For #22's send path it is a trap:
+ * `visibleFields('', anything)` returns `[]` whatever the second argument is, so
+ * `candidate_role.ethos_text` comes out `''` whether the #18 gate is applied or replaced with
+ * `String(client.note ?? "")` — decision 2's whole mechanism deleted, and nothing fails.
+ *
+ * So this seed exists to make the gate observable. Two headings, exactly one ticked, and the
+ * keys are the two `source_field_key` values test/fixtures/prep-payload.json's PanelBrief
+ * already names — so one panel claim must verify against the database's list and the other must
+ * demote, which is what proves the list is read from D1 rather than from the body.
+ *
+ * `what-they-actually-care-about` is deliberately a REAL heading the recruiter did not tick,
+ * not an invented key: that is the case the gate exists for, and the one that leaks if it goes.
+ */
+export const SEED_CLIENT_WITH_NOTE = `
+INSERT INTO clients (id, name, note) VALUES ('c-1', 'Ashdown Park Community Healthcare',
+'## Their process
+Two stages, both in person. Dr Anwar sits in on the second and asks about lone visits.
+
+## What they actually care about
+Careful record-keeping. The last two hires were let go over their notes.');
+INSERT INTO note_visibility (client_id, field_key) VALUES ('c-1', 'their-process');
+`;
+
+/** The strings the seed above is asserted with, so a caller cannot drift from the note text. */
+export const NOTE_TICKED = { key: "their-process", heading: "Their process", text: "Dr Anwar" };
+export const NOTE_UNTICKED = {
+  key: "what-they-actually-care-about",
+  heading: "What they actually care about",
+  text: "let go over their notes",
+};
+
 /** ~20 lines wrapping DatabaseSync in the D1 shape src/portal/store.js expects. */
 export function d1Shape(db) {
   return {

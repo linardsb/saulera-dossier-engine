@@ -202,12 +202,24 @@ export async function persistHandover(
       // `stage` and `success_rate` are left to their DDL defaults: this ticket does not own
       // them, and binding a column you have no value for is how a default quietly stops being
       // the one place that decides.
+      //
+      // `importance` is bound to the SCHEMA'S OWN VOCABULARY — integer 1..5 — and not merely to
+      // "a finite number". This is the trap DIFFICULTY above describes, one bind along: the
+      // column is INTEGER and SQLite affinity does not reject what does not fit it. `2.5` and
+      // `1e21` both store as REAL, and `"3"` fails Number.isFinite and lands as 0, which is a
+      // LOST score rather than a visible error. `assertBrief` cannot help here — the enum lives
+      // in BRIEF_SCHEMA, enforced by the decoder at request time, which the browser round trip
+      // does not go through.
       .bind(
         competencyRowId,
         roleId,
         String(competency.label ?? ""),
         String(competency.source_quote ?? ""),
-        Number.isFinite(competency.importance) ? competency.importance : 0,
+        Number.isInteger(competency.importance) &&
+          competency.importance >= 1 &&
+          competency.importance <= 5
+          ? competency.importance
+          : 0,
       )
       .run();
 

@@ -180,7 +180,16 @@ export async function sendInviteEmail(
   { to, agencyName, roleTitle, interviewAt, link } = {},
 ) {
   const agency = String(agencyName || "").trim() || "your recruitment agency";
-  const role = String(roleTitle || "").trim();
+  // `role` reaches a HEADER — it is the whole variable half of the subject line — and it arrives
+  // in the browser's payload, unbounded. `mailFrom` strips, caps and quotes the same class of
+  // value for the same reason and this was the one place that did not, which made the discipline
+  // inconsistent rather than absent. A CR or LF in a header field is the injection; the cap
+  // keeps a runaway role title out of a Resend rejection the recruiter cannot diagnose.
+  const role = String(roleTitle || "")
+    .replace(CONTROLS, " ")
+    .trim()
+    .slice(0, NAME_MAX)
+    .trim();
   const url = String(link ?? "");
   // The date as the recruiter entered it, day-only: the stamp is stored to the second for the
   // retention arithmetic, but a candidate reading "2026-08-12 00:00:00" learns nothing from

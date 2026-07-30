@@ -430,7 +430,10 @@ the dashboard.
 | `400 {"error":"nothing_to_send"}` from `/api/prep/send` | every competency was struck | tick at least one back on — a prep brief with nothing to drill is not a prep brief |
 | `503 {"error":"not_configured"}` from `/api/prep/send` **specifically** | the `RESEND_API_KEY` secret is not set in this environment | section 5b. Nothing was written and nothing was counted; the send is safe to retry once the key is set. Note this shares a code with the DB-binding row above — the difference is that only this route answers it while `/api/clients` is healthy |
 | `502 {"error":"mail_failed"}` from `/api/prep/send` | Resend rejected the message — **almost always an unverified sending domain (their 403)** | verify the domain in Resend and add its SPF and DKIM records (section 5b). The invite and the whole candidate scope were rolled back, so nothing is orphaned and the count did not move; the recruiter can retry without regenerating |
-| a candidate's magic link points at a preview URL | `PREP_BASE_URL` is unset, so the link was built from the origin the recruiter's browser used | set `PREP_BASE_URL` on production (section 5b). Links already sent cannot be repointed; the candidate can sign in at `<origin>/prep/login` with a code instead |
+| `503 {"error":"no_base_url"}` from `/api/prep/send` | `PREP_BASE_URL` is unset, or is not a bare `https://host` origin | set it in this environment (section 5b) and redeploy. It is REQUIRED as of 30 Jul 2026 — the route no longer falls back to the request's own origin, because that origin is the `Host` header the caller sent. Nothing was written, minted or counted, so the send is safe to retry |
+| a candidate's magic link points at a preview URL | an invite sent BEFORE 30 Jul 2026, when the link fell back to the origin the recruiter's browser used | links already sent cannot be repointed; the candidate can sign in at `<origin>/prep/login` with a code instead. New sends cannot reach this state — see the row above |
+| `400 {"error":"interview_too_far"}` from `/api/prep/prepare` or `/api/prep/send` | the interview date is more than 24 months ahead, which is a mistyped year essentially always | correct the year. The bound exists because `interview_at` is the clock the 30-day purge runs on: `2226` for `2026` keeps the candidate's CV and a live link in D1 for two centuries, silently |
+| `502 {"error":"bad_brief"}` from `/api/prep/prepare` | the model's answer was a valid JSON payload that broke a rule the schema cannot state — a competency with no questions, a non-core `axis`, or two competencies sharing an id | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis. This used to surface as `500 internal`, which sent you to the migration row below for a model output problem |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
 
@@ -519,16 +522,33 @@ PREP_BASE_URL = https://<project>.pages.dev
 It is the origin `POST /api/prep/send` builds the invite's magic link against —
 `<PREP_BASE_URL>/prep/auth/enter?t=<token>`.
 
-**Until it is set, nothing is broken.** The link is built from the origin the recruiter's
-browser used, which is correct on production and wrong only on a preview deployment — where a
-candidate would be sent a link to a preview URL that later disappears. So: set it in
-production, and leave it unset in previews if you would rather previews mint links against
-themselves.
+**REQUIRED — set it in every environment that will send.** Until it is set, `POST
+/api/prep/send` answers `503 {"error":"no_base_url"}` and sends nothing.
 
-A malformed value is **ignored rather than concatenated**. `send.js` accepts it only if it
-parses as an `https:` URL with no path, query or fragment, and otherwise falls back to the
-request origin — a broken override would otherwise mint links nobody notices until a candidate
-clicks one.
+This changed on 30 Jul 2026 (PR #32 review). It used to fall back to the origin the recruiter's
+browser used, which read as harmless — right on production, wrong only on a preview. It is not
+harmless: that origin is the `Host` header the edge saw, and `Host` is set by the caller. The
+sibling route `functions/prep/auth/enter.js` refuses the identical move in so many words, and it
+is only building a *redirect*; this one builds a **sign-in link, emailed to a candidate, carrying
+a live token**. The failure is also silent — a wrong link looks exactly like a right one until
+somebody clicks it. So the route now refuses rather than guesses, which is one variable for an
+operator and no signal at all for a candidate.
+
+A malformed value is **refused, not concatenated and not fallen back from**. `send.js` accepts it
+only if it parses as an `https:` URL with no path, query or fragment; anything else is the same
+`503 no_base_url`. A broken override would otherwise mint `https://example.com/prep/prep/auth
+/enter` — links nobody notices until a candidate clicks one.
+
+Nothing is written, minted or counted when it answers 503, so a send is safe to retry the moment
+the variable is set and the deployment has rolled. The check is the **last** gate before the
+token is minted, not the first — every 400 above it still answers by name, so an off-vocabulary
+body is still `unexpected_fields` and not a configuration answer, and `sameOrigin` still runs in
+front of both.
+
+**Locally, `scripts/dev.py` does not set it**, so `npm run dev` answers `no_base_url` on a real
+send. That is not a regression in what worked: local dev has no `RESEND_API_KEY` either, so the
+send already stopped one step further on. Every 400 gate on `/api/prep/send` and
+`/api/prep/prepare` is still exercisable locally, which is what the smoke-test sweep below uses.
 
 ---
 
