@@ -30,7 +30,7 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
  * already carries a zone (an ISO 'Z' or a ±hh:mm offset) is left alone — it says what it means
  * and we are not entitled to overwrite it.
  */
-function toUtcDate(value) {
+export function toUtcDate(value) {
   const iso = String(value ?? "").trim().replace(" ", "T");
   if (!iso) return null;
   const stamped = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`;

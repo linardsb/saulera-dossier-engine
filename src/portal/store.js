@@ -444,3 +444,197 @@ export async function consumeOtp(db, { inviteId, codeHash, maxAttempts } = {}) {
   await db.prepare("DELETE FROM otp WHERE id = ?").bind(row.id).run();
   return { ok: true };
 }
+
+// ── the session engine (#23) ───────────────────────────────────────────────────────────
+//
+// Reads and writes for the drill: everything the targeting/ladder/habits modules consume
+// arrives through here, already shaped (numeric difficulty, oldest-first attempts), and
+// everything the engine decides lands through here. No D1 batch, for the reason
+// src/store.js:376-379 gives: the test fake cannot drive it. There is no transaction on
+// D1/Pages either — the callers order their writes so a crash leaves a stale CACHE, never
+// wrong TRUTH (see functions/prep/api/turn.js).
+
+/**
+ * The two values the engine needs about an invite's role — and NEVER `cv_text`,
+ * `ethos_text` or `jd_text`, which live in the same row and have no business near a
+ * session response (briefJsonByInviteId's discipline, restated because it is one lazy
+ * `SELECT *` away from being lost). Null when the handover has not been written.
+ */
+export async function roleByInviteId(db, inviteId) {
+  return db
+    .prepare(
+      `SELECT candidate_role.id AS role_id, invite.interview_at
+         FROM candidate_role JOIN invite ON invite.id = candidate_role.invite_id
+        WHERE candidate_role.invite_id = ?`,
+    )
+    .bind(String(inviteId ?? ""))
+    .first();
+}
+
+/** The ranking's inputs: id, label, importance, and the cached stage/rate columns. */
+export async function competenciesByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      `SELECT id, label, importance, stage, success_rate
+         FROM competency WHERE role_id = ? ORDER BY id`,
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return results ?? [];
+}
+
+/** Every question under the role, core and variants alike, in serving order. */
+export async function questionsByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      `SELECT q.id, q.competency_id, q.text, q.axis, q.difficulty, q.variant_of
+         FROM question q JOIN competency c ON c.id = q.competency_id
+        WHERE c.role_id = ?
+        ORDER BY q.competency_id, q.difficulty, q.id`,
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return results ?? [];
+}
+
+/**
+ * The whole attempt log, oldest first, each row carrying the attempted question's `axis`
+ * (LEFT JOIN — the ladder's variant rules read it). The `id` tiebreak matters:
+ * `created_at` has 1-second resolution and two turns can land in one tick, and a replay
+ * over a nondeterministically-ordered log is a nondeterministic stage.
+ */
+export async function attemptsByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.competency_id, a.question_id, a.mode, a.rating, a.created_at,
+              q.axis
+         FROM attempt a
+         JOIN competency c ON c.id = a.competency_id
+         LEFT JOIN question q ON q.id = a.question_id
+        WHERE c.role_id = ?
+        ORDER BY a.created_at, a.id`,
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return results ?? [];
+}
+
+/**
+ * THE OWNERSHIP CHECK: the question row only if its competency belongs to this role, else
+ * null — turn.js answers 404 on null, so one candidate cannot attempt (or enumerate)
+ * another invite's questions. The competency label rides along because every model prompt
+ * needs it and a second query would re-ask the same join.
+ */
+export async function questionForRole(db, { questionId, roleId } = {}) {
+  return db
+    .prepare(
+      `SELECT q.id, q.competency_id, q.text, q.axis, q.difficulty,
+              c.label AS competency_label
+         FROM question q JOIN competency c ON c.id = q.competency_id
+        WHERE q.id = ? AND c.role_id = ?`,
+    )
+    .bind(String(questionId ?? ""), String(roleId ?? ""))
+    .first();
+}
+
+/**
+ * One attempt row — the unit of record. `competencyId` is ALWAYS the one from
+ * `questionForRole`'s row, never a client-supplied value: turn.js's body has no
+ * competency field at all, because an attempt filed under the wrong competency corrupts
+ * the replay silently.
+ *
+ * `rating` is bound to the schema's own 1..4 or NULL — the INTEGER-affinity trap
+ * DIFFICULTY documents: SQLite stores `2.5` or `"3"` without complaint, and the replay
+ * would read them as it pleases. NULL is legal and meaningful (an empty revealed turn).
+ */
+export async function recordAttempt(db, { competencyId, questionId, mode, rating, note } = {}) {
+  requireFields({ competencyId, questionId, mode });
+  await db
+    .prepare(
+      `INSERT INTO attempt (competency_id, question_id, mode, rating, note)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      competencyId,
+      questionId,
+      mode,
+      Number.isInteger(rating) && rating >= 1 && rating <= 4 ? rating : null,
+      String(note ?? ""),
+    )
+    .run();
+  return { ok: true };
+}
+
+/**
+ * The cache write: both columns at once, always from `replayProgress` of the log — never
+ * incremented in place. If this write is lost, the next turn's replay heals it.
+ */
+export async function setCompetencyProgress(db, { competencyId, stage, successRate } = {}) {
+  requireFields({ competencyId });
+  await db
+    .prepare("UPDATE competency SET stage = ?, success_rate = ? WHERE id = ?")
+    .bind(String(stage ?? ""), Number(successRate) || 0, competencyId)
+    .run();
+  return { ok: true };
+}
+
+/**
+ * A minted variant becomes a question like any other (decision 6's "generated live",
+ * persisted so the next serve is free and the purge takes it with the scope).
+ *
+ * The id is `${competencyId}#v-<uuid>` — it cannot collide with `#${index}` core ids and
+ * is unique across re-mints, unlike a count-derived suffix. `axis` is checked BEFORE the
+ * insert so a bad value is this store's 400, not the CHECK's raw ERR_SQLITE_ERROR.
+ * `difficulty` goes through DIFFICULTY — the same affinity trap as ever.
+ */
+export async function insertVariant(db, { competencyId, text, variantOf, axis, difficulty } = {}) {
+  requireFields({ competencyId, text, variantOf, axis });
+  if (axis !== "lateral" && axis !== "vertical") {
+    throw new StoreError("missing_fields", 400, "axis: must be lateral or vertical");
+  }
+  const id = `${competencyId}#v-${crypto.randomUUID()}`;
+  await db
+    .prepare(
+      `INSERT INTO question (id, competency_id, text, variant_of, axis, difficulty)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, competencyId, String(text), variantOf, axis, DIFFICULTY[difficulty] ?? null)
+    .run();
+  return { id, text: String(text) };
+}
+
+/**
+ * One observation of a habit: +1 on an ACTIVE row with this label, else a fresh row at
+ * the DDL's default 1. The count read back is what lets turn.js announce a habit exactly
+ * once — on the observation that made it 2 (the moment noise becomes a pattern).
+ */
+export async function observeHabit(db, { roleId, label } = {}) {
+  requireFields({ roleId, label });
+  const updated = await db
+    .prepare(
+      "UPDATE habit SET evidence_count = evidence_count + 1 WHERE role_id = ? AND label = ? AND active = 1",
+    )
+    .bind(roleId, label)
+    .run();
+  if ((updated.meta?.changes ?? 0) === 0) {
+    await db.prepare("INSERT INTO habit (role_id, label) VALUES (?, ?)").bind(roleId, label).run();
+  }
+  const evidenceCount = await db
+    .prepare(
+      "SELECT evidence_count FROM habit WHERE role_id = ? AND label = ? AND active = 1",
+    )
+    .bind(roleId, label)
+    .first("evidence_count");
+  return { evidenceCount: evidenceCount ?? 1 };
+}
+
+/** The standing habit list, for session GET's plain-language surface. */
+export async function habitsByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      "SELECT label, evidence_count, active FROM habit WHERE role_id = ? ORDER BY id",
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return results ?? [];
+}
