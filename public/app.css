@@ -811,8 +811,12 @@ a {
   white-space: nowrap;
 }
 
+/* --brief is act 4's word for the same fact act 3 calls --cv or --note: found, literally, in
+   the material. It shares --verified rather than earning a fourth colour, because a fourth
+   provenance colour would mean a fourth thing to tell apart for no extra meaning. */
 .mark-cv,
-.mark-note { color: var(--verified); }
+.mark-note,
+.mark-brief { color: var(--verified); }
 .mark-unverified { color: var(--unverified); }
 .mark-failed { color: var(--failed); }
 
@@ -850,6 +854,138 @@ a {
 }
 
 .pack-questions li { margin-bottom: var(--space-2); }
+
+/* ── act 4: send to candidate ──────────────────────────────────────────────────────────── */
+
+/* The preview is a second zone inside act 4, so the step between it and the two fields above
+   is a whole rhythm step larger than the spacing within it — CRAFT's "rhythm between zones
+   must be visibly larger than spacing within them", using whitespace rather than a rule. */
+.send-preview { margin-top: var(--space-8); }
+
+/* The competency rows ARE provenance rows, so they reuse .claim / .claim-head / .claim-text /
+   .claim-source / .mark verbatim from act 3. That reuse is the point: the recruiter has just
+   read the pack in exactly this grammar, and a second, similar-but-different treatment for
+   the same idea is how one system starts reading as two. */
+.strike-list {
+  list-style: none;
+  margin: 0 0 var(--space-6);
+  padding: 0;
+}
+
+/* The whole row is the label, so the hit area is the text and not just the 13px box —
+   CRAFT's ≥44px effective target, met by the row rather than by growing the control. */
+.strike-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+  min-width: 0;
+  cursor: pointer;
+}
+
+/* flex-shrink: 0 keeps the box square beside a long competency label, exactly as the
+   /clients visibility list does. */
+.strike-box { flex-shrink: 0; }
+
+/* A competency label is model-written and can be long; min-width: 0 lets it wrap inside the
+   row instead of widening the column and pushing the mark off the edge. */
+.strike-row .claim-text { overflow-wrap: anywhere; }
+
+/* The quote sits under the row it belongs to, indented past the checkbox so the eye reads it
+   as that row's evidence rather than as a new item. */
+.strike-row .claim-source { margin-left: calc(var(--space-4) + var(--space-2)); }
+
+.send-fields {
+  margin: 0 0 var(--space-6);
+}
+
+.send-legend {
+  padding: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.send-fields-note {
+  color: var(--text-muted);
+  font-size: var(--text-body);
+  max-width: 60ch;
+  margin: var(--space-2) 0;
+}
+
+/* Mirrors .visibility-list label's row grammar — the same shape carrying the same two facts,
+   minus the checkbox, because nothing here is tickable: this list reports what the toggle on
+   /clients already decided. */
+.send-field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+  font-size: var(--text-body);
+  min-width: 0;
+}
+
+/* The two inputs are act 4's only fields and sit in a narrow column: a date and an email
+   address are both short, and a full-width input over a 65ch measure reads as a mistake. */
+#interview-date,
+#candidate-email {
+  max-width: 32ch;
+}
+
+/* ── the counts page ───────────────────────────────────────────────────────────────────── */
+
+/* Wide content scrolls inside its own box rather than widening the page — CRAFT's rule, and
+   a four-column table with agency-authored client names is exactly the case it names. */
+.counts {
+  max-width: 65ch;
+  overflow-x: auto;
+}
+
+.counts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body);
+}
+
+/* The caption carries the scope of the numbers, so the claim above and the bounds below it
+   are both readable without a legend somewhere else. */
+.counts-caption {
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  padding-bottom: var(--space-3);
+}
+
+/* One hairline under the head, which is the grouping whitespace cannot encode in a table:
+   without it the header row reads as the first data row. */
+.counts-table thead th {
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+}
+
+.counts-table tbody th,
+.counts-table tbody td {
+  text-align: left;
+  font-weight: 400;
+  border-bottom: 1px solid var(--border-hairline);
+  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+  min-height: var(--tap-target);
+}
+
+/* A client name is agency-authored and need contain no spaces at all — the same reasoning as
+   .visibility-name, and the same fix. */
+.counts-table tbody th { overflow-wrap: anywhere; }
+
+/* Tabular figures so the columns line up digit-for-digit; right-aligned because these are
+   quantities being compared down a column, not labels being read across. */
+.counts-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-right: 0;
+}
+
+.counts .save-state { margin-top: var(--space-4); }
 
 /* ── mobile density ────────────────────────────────────────────────────────────────────── */
 

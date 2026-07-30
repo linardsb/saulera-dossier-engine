@@ -119,6 +119,160 @@ export async function createInvite(db, { id, clientId, email, interviewAt, token
   return { ok: true };
 }
 
+// ── the handover (#22) ─────────────────────────────────────────────────────────────────
+//
+// What Send persists once the invite row exists: the privileged inputs (decision 14 — the CV
+// travels, and dies with the same purge), the composed brief, and the core question bank
+// decision 6 caches here so #23 never pays for it again.
+//
+// It is written AFTER the invite deliberately. There is no transaction available, so the
+// rollback is `deleteInviteByTokenHash` and the cascade — which only works if the invite is
+// the thing already standing. See the failure ordering in functions/api/prep/send.js.
+
+/**
+ * The payload's difficulty vocabulary, as the column's.
+ *
+ * #19's schema calls difficulty `gentle|standard|probing` (src/prep/schema.js:309) and 0002
+ * declares the column INTEGER. This is not tidiness: SQLite type affinity does not REJECT a
+ * string in an INTEGER column — it stores `'standard'` as text, silently, and nothing fails
+ * until #23 runs `ORDER BY difficulty` and gets a text sort over a column every reader
+ * believes is numeric. Same class of trap as mintOtpCode's note about `Number('000123')`.
+ *
+ * Exported so #23 reads the same map rather than inventing a second one.
+ */
+export const DIFFICULTY = { gentle: 1, standard: 2, probing: 3 };
+
+/**
+ * The whole handover for one invite: the role row, its competencies, and their questions.
+ *
+ * Sequential single statements, and deliberately not D1's multi-statement batch API — the
+ * argument src/store.js:376-379 makes: test/helpers/fake-d1.js does not implement batch, and
+ * a store the test fake cannot drive is a store with untested SQL.
+ *
+ * `candidate_role.invite_id` is UNIQUE, so a second call for one invite fails loudly. That is
+ * right: two handovers for one invite would mean two briefs behind one link.
+ *
+ * @returns `{ roleId, competencies, questions }` — the counts, so a caller can assert.
+ */
+export async function persistHandover(
+  db,
+  { inviteId, jdText, ethosText, cvText, payload } = {},
+) {
+  requireFields({ inviteId });
+  const roleId = crypto.randomUUID();
+
+  await db
+    .prepare(
+      `INSERT INTO candidate_role (id, invite_id, jd_text, ethos_text, cv_text, brief_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      roleId,
+      inviteId,
+      String(jdText ?? ""),
+      String(ethosText ?? ""),
+      String(cvText ?? ""),
+      JSON.stringify(payload ?? {}),
+    )
+    .run();
+
+  const competencies = payload?.competencies ?? [];
+  const questions = payload?.questions ?? [];
+  let questionCount = 0;
+
+  for (const competency of competencies) {
+    // R2 — THE PRIMARY KEY COLLISION, and the subtlest thing in this ticket.
+    //
+    // `competency.id` is TEXT PRIMARY KEY and the payload's ids are MODEL-CHOSEN SLUGS
+    // ('stakeholder-management'). The first candidate for a client works. The second
+    // candidate for the same client, with a similar brief, produces the same slug — and the
+    // insert fails on a constraint, in production, on the recruiter's second-ever Send.
+    // test/helpers/fake-d1.js returns `{changes: 1}` and enforces nothing, so a suite built
+    // on it passes while this is broken; test/prep-send.test.js proves it on node:sqlite.
+    //
+    // `roleId` is a UUID and contains no colon, so the join is unambiguous and #23 can derive
+    // the row id from `candidate_role.id` plus the payload it reads.
+    const competencyRowId = `${roleId}:${competency.id}`;
+
+    await db
+      .prepare(
+        `INSERT INTO competency (id, role_id, label, source_quote, importance)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      // `stage` and `success_rate` are left to their DDL defaults: this ticket does not own
+      // them, and binding a column you have no value for is how a default quietly stops being
+      // the one place that decides.
+      //
+      // `importance` is bound to the SCHEMA'S OWN VOCABULARY — integer 1..5 — and not merely to
+      // "a finite number". This is the trap DIFFICULTY above describes, one bind along: the
+      // column is INTEGER and SQLite affinity does not reject what does not fit it. `2.5` and
+      // `1e21` both store as REAL, and `"3"` fails Number.isFinite and lands as 0, which is a
+      // LOST score rather than a visible error. `assertBrief` cannot help here — the enum lives
+      // in BRIEF_SCHEMA, enforced by the decoder at request time, which the browser round trip
+      // does not go through.
+      .bind(
+        competencyRowId,
+        roleId,
+        String(competency.label ?? ""),
+        String(competency.source_quote ?? ""),
+        Number.isInteger(competency.importance) &&
+          competency.importance >= 1 &&
+          competency.importance <= 5
+          ? competency.importance
+          : 0,
+      )
+      .run();
+
+    const mine = questions.filter((q) => q.competency_id === competency.id);
+    for (const [index, question] of mine.entries()) {
+      await db
+        .prepare(
+          `INSERT INTO question (id, competency_id, text, axis, difficulty)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        // R3 — `axis` is NULL, NOT 'core'.
+        //
+        // The column carries CHECK (axis IN ('lateral','vertical')) and 'core' is not in it:
+        // 0002 deliberately reserves that column for #23's variants, and the core bank is the
+        // rows with a NULL axis and no variant_of. NULL is storable because `NULL IN (…)`
+        // evaluates to NULL, and A CHECK THAT EVALUATES TO NULL IS NOT A VIOLATION. That
+        // parenthetical is here on purpose: without it the next reader assumes this got lucky
+        // and "fixes" it to 'core', which fails at insert on the recruiter's first Send.
+        //
+        // `difficulty` goes through DIFFICULTY above — see the note there for why the map is
+        // correctness rather than neatness.
+        .bind(
+          `${competencyRowId}#${index}`,
+          competencyRowId,
+          String(question.text ?? ""),
+          null,
+          DIFFICULTY[question.difficulty] ?? null,
+        )
+        .run();
+      questionCount += 1;
+    }
+  }
+
+  return { roleId, competencies: competencies.length, questions: questionCount };
+}
+
+/**
+ * The stored brief for an invite, as raw JSON text — or null.
+ *
+ * ONE COLUMN, and never `SELECT *`. `cv_text`, `jd_text` and `ethos_text` live in the same row
+ * and have no business in a response headed for a browser: the CV is the candidate's own, but
+ * the ethos text is the agency's private read on a client, filtered once already by #18's
+ * gate, and re-serving it whole would undo that filter in one line. This is
+ * `listVisibleKeys`'s stated discipline (src/store.js:283-289) applied to the portal's most
+ * sensitive row.
+ */
+export async function briefJsonByInviteId(db, inviteId) {
+  return db
+    .prepare("SELECT brief_json FROM candidate_role WHERE invite_id = ?")
+    .bind(String(inviteId ?? ""))
+    .first("brief_json");
+}
+
 /**
  * The invite a token hash belongs to, or null.
  *

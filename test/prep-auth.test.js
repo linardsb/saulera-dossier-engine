@@ -15,16 +15,12 @@
 // between portal-store.test.js and portal-purge.test.js.
 //
 // Engine: node:sqlite, which this machine's default Node 20 does not have — every test skips
-// there with the remedy in the message, and Node 24 proves the rest. The D1 gotcha that makes
-// the adapter non-optional: D1 enforces PRAGMA foreign_keys = ON by default and plain SQLite
-// defaults OFF, so without the pragma the cascade assertion at the bottom would pass while
-// proving nothing.
+// there with the remedy in the message, and Node 24 proves the rest. The harness itself
+// (the adapter, the migrations, the PRAGMA foreign_keys gotcha, the skip) moved to
+// test/helpers/sqlite-d1.js when #22 became its third caller; the reasoning went with it.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   consumeOtp,
@@ -40,57 +36,7 @@ import {
 import { hashOtpCode, mintToken, SESSION_COOKIE } from "../src/prep/tokens.js";
 import { sessionFromRequest, requireSession } from "../src/prep/session.js";
 import { onRequestPost as deleteRoute } from "../functions/prep/api/delete.js";
-
-const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-
-let DatabaseSync;
-try {
-  ({ DatabaseSync } = await import("node:sqlite"));
-} catch {
-  // Node < 22.5: ERR_UNKNOWN_BUILTIN_MODULE. The skip below carries the remedy.
-}
-const skip = !DatabaseSync && "node:sqlite unavailable (Node < 22.5); run under Node 24 for full coverage";
-
-/** ~20 lines wrapping DatabaseSync in the D1 shape src/portal/store.js expects. */
-function d1Shape(db) {
-  return {
-    prepare(sql) {
-      let args = [];
-      const statement = {
-        bind(...bound) {
-          args = bound;
-          return statement;
-        },
-        async first(column) {
-          const row = db.prepare(sql).get(...args) ?? null;
-          return column === undefined || row === null ? row : row[column];
-        },
-        async all() {
-          return { results: db.prepare(sql).all(...args), success: true, meta: {} };
-        },
-        async run() {
-          const { changes } = db.prepare(sql).run(...args);
-          return { success: true, meta: { changes: Number(changes) } };
-        },
-      };
-      return statement;
-    },
-  };
-}
-
-/** EVERY migration in wrangler's order — 0004 widens otp, and this file is about otp. */
-function openMigrated() {
-  const db = new DatabaseSync(":memory:");
-  db.exec("PRAGMA foreign_keys = ON"); // D1's default; SQLite's is OFF
-  for (const file of readdirSync(migrations).filter((f) => f.endsWith(".sql")).sort()) {
-    db.exec(readFileSync(join(migrations, file), "utf8"));
-  }
-  db.exec("INSERT INTO clients (id, name) VALUES ('c-1', 'Ashdown Park Community Healthcare')");
-  return db;
-}
-
-/** A UTC timestamp in SQLite's own datetime('now') format, offset by whole days. */
-const at = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
 
 const rowOf = (db, id) => db.prepare("SELECT * FROM invite WHERE id = ?").get(id);
 const otpRows = (db, inviteId) => db.prepare("SELECT * FROM otp WHERE invite_id = ?").all(inviteId);

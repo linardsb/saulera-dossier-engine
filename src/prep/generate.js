@@ -123,7 +123,22 @@ export async function generateBrief(
   // Shape first, then sourcing, then return — the payload is verified BEFORE it is returned, and
   // an unsourceable competency comes back marked, never dropped and never silently promoted.
   // The CLEANED brief is the haystack, because the cleaned brief is what the model was given.
-  const { payload, failures } = verifyBrief(assertBrief(parsed), {
+  //
+  // `assertBrief` throws a plain Error by design (schema.js:218: "a shape bug, not an HTTP
+  // outcome"), so the translation happens here, where every other model failure in this function
+  // is already a 502. It is also the likeliest of them: the per-competency question rule, the
+  // `axis` rule, id uniqueness and reference resolution are all rules BRIEF_SCHEMA cannot state,
+  // so a payload the decoder accepted can still fail. Unwrapped it reaches `errorResponse` as
+  // `500 internal`, which DEPLOY.md's triage table reads as "the migration did not run" and
+  // sends the operator to `npm run db:remote` for a model output problem.
+  let shaped;
+  try {
+    shaped = assertBrief(parsed);
+  } catch (err) {
+    throw new StoreError("bad_brief", 502, String(err?.message ?? "the model's answer is not a prep brief"));
+  }
+
+  const { payload, failures } = verifyBrief(shaped, {
     brief: inputs.brief,
     fieldKeys: inputs.visibleFields.map((f) => f.key),
   });

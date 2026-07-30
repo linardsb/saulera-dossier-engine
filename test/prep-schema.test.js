@@ -121,6 +121,32 @@ test("a competency with an empty or missing source_quote is rejected", () => {
   assert.match(messageOf(() => assertBrief(missing)), /competencies\[1\]\.source_quote is empty/);
 });
 
+test("two competencies sharing an id are rejected", () => {
+  // The ids are MODEL-CHOSEN SLUGS, and nothing in BRIEF_SCHEMA can say "unique" — structured
+  // outputs reject the constraint vocabulary that would. Downstream, `${roleId}:${competency.id}`
+  // meets `competency.id TEXT PRIMARY KEY` (src/portal/store.js:195) and the second INSERT throws
+  // a raw ERR_SQLITE_ERROR: a 500 for a model output problem, on a send the recruiter has
+  // already paid for. The strike is wrong too — src/prep/strike.js filters by id, so unticking
+  // one of a pair removes both.
+  // The realistic shape, and the one no other guard can see: the model emits the same slug
+  // twice. Every reference still resolves — the id exists, twice — and both copies carry a
+  // quote, so without this check the payload is valid all the way to the constraint.
+  const duped = payload();
+  duped.competencies.push({ ...duped.competencies[2] });
+  assert.match(
+    messageOf(() => assertBrief(duped)),
+    /competencies\[3\]\.id is comp-documentation, which is already taken/,
+  );
+
+  // Uniqueness is checked BEFORE references resolve, so the other form — a rename that also
+  // strands the questions pointing at the old id — is still reported as the duplicate it is
+  // rather than as a dangling reference two guards later, which would send the reader to the
+  // wrong half of the payload.
+  const renamed = payload();
+  renamed.competencies[1].id = renamed.competencies[0].id;
+  assert.match(messageOf(() => assertBrief(renamed)), /competencies\[1\]\.id is .* already taken/);
+});
+
 test("a dangling competency reference is rejected wherever it appears", () => {
   // A dangling id renders as a hole in #21's registry, and nothing downstream catches it.
   const q = payload();

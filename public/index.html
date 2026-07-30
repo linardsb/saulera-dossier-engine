@@ -21,6 +21,7 @@
     <nav class="topbar-nav" aria-label="Screens">
       <a href="/" aria-current="page">Submission pack</a>
       <a href="/clients">Client knowledge</a>
+      <a href="/counts">Prep sent</a>
     </nav>
   </div>
 </header>
@@ -40,6 +41,7 @@
       <li><span class="act-num" aria-hidden="true">1</span>Pick a client and add the brief and the CV</li>
       <li><span class="act-num" aria-hidden="true">2</span>Generate the pack and wait a minute or two</li>
       <li><span class="act-num" aria-hidden="true">3</span>Copy the pack once every claim is checked</li>
+      <li><span class="act-num" aria-hidden="true">4</span>Send the candidate their prep once the interview is booked</li>
     </ol>
   </div>
 
@@ -174,6 +176,52 @@
           <button class="btn" type="button" id="start-again-2">Start again</button>
           <span class="renderer-note" id="renderer-note"></span>
           <span class="save-state" id="pack-state" role="status"></span>
+        </div>
+      </section>
+
+      <!-- ── act 4 ────────────────────────────────────────────────────────────────────── -->
+      <!-- Appears with the pack and disappears on Start again, because architecture §1 puts
+           the Send after a pack exists: "the recruiter, having generated a submission pack,
+           presses Send to Candidate once an interview is confirmed". Decision 9 is the
+           date-gated CTA; decision 15 is why there is a preview between the button and the
+           send. -->
+      <section class="act" id="act-send" aria-labelledby="send-head" hidden>
+        <h2 class="act-head" id="send-head"><span class="act-num" aria-hidden="true">4</span>Send the candidate their prep</h2>
+
+        <p class="act-note">This sends the candidate a private preparation page of their own,
+          built from the brief, their CV, and the parts of your client note you ticked as
+          shareable. It never sends the pack, and never anything you did not tick.</p>
+
+        <label class="field" for="interview-date">When is the interview?</label>
+        <input class="input" type="date" id="interview-date" name="interview-date">
+
+        <label class="field" for="candidate-email">The candidate's email address</label>
+        <input class="input" type="email" id="candidate-email" name="candidate-email" autocomplete="off">
+
+        <div class="act-row">
+          <button class="btn btn-primary" type="button" id="prepare-send" aria-disabled="true">Send to candidate</button>
+          <span class="save-state" id="send-state" role="status"></span>
+          <span class="elapsed" id="send-elapsed" aria-hidden="true"></span>
+        </div>
+
+        <!-- The preview. Built only after the model call has run, because the competencies do
+             not exist before it — which is also why Send is two steps rather than one. -->
+        <div class="send-preview" id="send-preview" hidden>
+          <p class="act-note" id="send-preview-lede"></p>
+
+          <ul class="strike-list" id="strike-list"></ul>
+
+          <fieldset class="visibility send-fields" id="send-fields">
+            <legend class="send-legend">From your client note</legend>
+            <p class="send-fields-note" id="send-fields-note"></p>
+            <ul class="visibility-list" id="send-fields-list"></ul>
+            <p class="send-fields-note"><a id="send-note-link" href="/clients">Read the note</a></p>
+          </fieldset>
+
+          <div class="act-row">
+            <button class="btn btn-primary" type="button" id="confirm-send">Send it</button>
+            <button class="btn" type="button" id="cancel-send">Not yet</button>
+          </div>
         </div>
       </section>
 

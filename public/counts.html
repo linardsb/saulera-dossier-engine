@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Prep sent · saulera dossier engine</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<!-- The same chrome as the other two screens. Static aria-current, because each file knows
+     which screen it is. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Dossier engine</span>
+    <nav class="topbar-nav" aria-label="Screens">
+      <a href="/">Submission pack</a>
+      <a href="/clients">Client knowledge</a>
+      <a href="/counts" aria-current="page">Prep sent</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-head">
+    <h1>Prep sent</h1>
+    <!-- Decision 23's claim, stated plainly and bounded in the same breath. The second
+         sentence is not a disclaimer bolted on: decision 3 makes it the actual design, and a
+         recruiter who expects to see how a candidate is getting on should learn here that
+         they never will. -->
+    <p class="page-sub">How many candidates we sent prep to, and how many opened it. Nothing
+      about what any candidate did.</p>
+  </div>
+
+  <div class="counts">
+    <table class="counts-table" id="counts-table">
+      <caption class="counts-caption">Per client, since this deployment started counting.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Client</th>
+          <th scope="col" class="counts-number">Packs</th>
+          <th scope="col" class="counts-number">Prep sent</th>
+          <th scope="col" class="counts-number">Prep opened</th>
+        </tr>
+      </thead>
+      <tbody id="counts-body"></tbody>
+    </table>
+
+    <p class="save-state" id="counts-state" role="status"></p>
+  </div>
+
+</main>
+<script src="/counts.js"></script>
+</body>
+</html>

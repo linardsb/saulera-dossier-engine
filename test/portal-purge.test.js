@@ -8,9 +8,13 @@
 //
 // Engine: `node:sqlite`, which this machine's default Node 20 does not have — every test
 // skips there with the remedy in the message, and CI/dev runs under Node 24 prove the rest.
-// The D1 gotcha that makes the adapter non-optional: D1 enforces PRAGMA foreign_keys = ON by
-// default, plain SQLite defaults OFF, and without the pragma every cascade assertion below
-// would pass while proving nothing.
+// The adapter and the skip come from test/helpers/sqlite-d1.js, where the PRAGMA
+// foreign_keys gotcha that makes them non-optional is written down.
+//
+// `openMigrated` is deliberately NOT the shared one. The helper applies every migration and
+// then seeds; this file has to seed BETWEEN 0001 and 0002, because the ALTER landing on an
+// events table that already has rows is one of the things AC #1 asserts. Sharing the helper
+// here would delete the assertion rather than reuse a fixture.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,6 +23,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { deleteInviteByTokenHash, hashToken, purgeExpired } from "../src/portal/store.js";
+import { d1Shape, skip } from "./helpers/sqlite-d1.js";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
@@ -26,9 +31,8 @@ let DatabaseSync;
 try {
   ({ DatabaseSync } = await import("node:sqlite"));
 } catch {
-  // Node < 22.5: ERR_UNKNOWN_BUILTIN_MODULE. The skip below carries the remedy.
+  // Node < 22.5: ERR_UNKNOWN_BUILTIN_MODULE. `skip` above carries the remedy.
 }
-const skip = !DatabaseSync && "node:sqlite unavailable (Node < 22.5); run under Node 24 for full coverage";
 
 const PORTAL_TABLES = ["invite", "candidate_role", "competency", "question", "attempt", "habit", "otp"];
 
@@ -44,33 +48,6 @@ const SCOPE_KEY = {
   otp: (r) => r.invite_id,
 };
 const inviteOf = (row, table) => SCOPE_KEY[table](row).split("-")[1];
-
-/** ~20 lines wrapping DatabaseSync in the D1 shape src/portal/store.js expects. */
-function d1Shape(db) {
-  return {
-    prepare(sql) {
-      let args = [];
-      const statement = {
-        bind(...bound) {
-          args = bound;
-          return statement;
-        },
-        async first(column) {
-          const row = db.prepare(sql).get(...args) ?? null;
-          return column === undefined || row === null ? row : row[column];
-        },
-        async all() {
-          return { results: db.prepare(sql).all(...args), success: true, meta: {} };
-        },
-        async run() {
-          const { changes } = db.prepare(sql).run(...args);
-          return { success: true, meta: { changes: Number(changes) } };
-        },
-      };
-      return statement;
-    },
-  };
-}
 
 /**
  * Both migrations, in wrangler's order, onto a database that is POPULATED between them —

@@ -132,6 +132,24 @@ test("a panel claim naming a field that was not handed in is blanked and reporte
   );
 });
 
+test("the idempotence guard cannot be forged into a way past the allow-list", () => {
+  // The guard exists so a re-verified payload keeps its diagnostic. Keyed on mere PRESENCE it
+  // was also a hole: `{"failed_field_key": null}` is legal JSON, survives readJson and
+  // assertBrief, and returned here before the allow-list was consulted — so a payload coming
+  // back through the browser round trip could name a HIDDEN note section and have it verify
+  // with zero failures, contradicting the guarantee functions/api/prep/send.js advertises.
+  const forged = payload();
+  forged.blocks[2].props.panel[0].source_field_key = "why-candidates-have-been-turned-down";
+  forged.blocks[2].props.panel[0].failed_field_key = null;
+  const { payload: out, failures } = verifyBrief(forged, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+
+  assert.equal(out.blocks[2].props.panel[0].source_field_key, "", "a hidden key does not verify");
+  assert.ok(
+    failures.some((f) => f.kind === "panel_source" && f.key === "why-candidates-have-been-turned-down"),
+    "and it is reported rather than passed through in silence",
+  );
+});
+
 test("an empty visible slice demotes every panel claim rather than throwing", () => {
   // A recruiter who shares nothing has made a legitimate choice (decision 2), and the brief still
   // generates from the JD and the CV. Every note-derived claim is then unsourceable, which is a

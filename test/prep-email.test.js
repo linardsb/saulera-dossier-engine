@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { StoreError } from "../src/store.js";
-import { MAIL_FROM_DEFAULT, sendEmail, sendOtpEmail } from "../src/prep/email.js";
+import { MAIL_FROM_DEFAULT, mailFrom, sendEmail, sendInviteEmail, sendOtpEmail } from "../src/prep/email.js";
 
 const ENV = { RESEND_API_KEY: "re_test_key_123" };
 const MESSAGE = { to: "candidate@example.com", subject: "Hello", text: "body", html: "<p>body</p>" };
@@ -169,4 +169,179 @@ test("sendEmail refuses an incomplete message before spending a request", async 
     assert.equal(result.error?.code, "missing_fields", `a blank ${missing} should be rejected`);
     assert.equal(calls.length, 0, `nothing may be sent with a blank ${missing}`);
   }
+});
+
+// ── the invite email (#22, decision 10) ────────────────────────────────────────────────
+//
+// The class of failure here is a header. `mailFrom` takes AGENCY-AUTHORED text and puts it
+// into From:, which makes it the one place in this repo where a customer's typing reaches a
+// protocol field. A newline in it is a second header; a comma in it is a malformed address.
+// Both are invisible until an agency is called "Ashdown, Park & Co".
+//
+// The second failure is quieter: an invite whose link exists only inside an <a href>. It
+// looks perfect in Gmail and is unusable in a plain-text client, which is exactly the reader
+// most likely to be on a work machine that strips HTML.
+
+const INVITE = {
+  to: "candidate@example.com",
+  agencyName: "Ashdown Recruitment",
+  roleTitle: "Community Staff Nurse",
+  interviewAt: "2026-08-12 00:00:00",
+  link: "https://engine.pages.dev/prep/auth/enter?t=abc123",
+};
+
+/** The JSON body of the nth (default first) recorded Resend call. */
+const bodyOf = (calls, n = 0) => JSON.parse(calls[n].init.body);
+
+test("mailFrom puts the agency in the display name and keeps the configured address", () => {
+  assert.equal(mailFrom({}, "Ashdown Recruitment"), '"Ashdown Recruitment" <prep@saulera.com>');
+});
+
+test("R8: a name carrying CR or LF cannot open a second header", () => {
+  // The whole reason this function exists rather than a template literal. Unstripped, this
+  // name adds a Bcc to every invite the agency ever sends.
+  const value = mailFrom({}, "Evil\r\nBcc: attacker@example.com");
+
+  assert.ok(!value.includes("\r"), "no carriage return survives");
+  assert.ok(!value.includes("\n"), "no line feed survives");
+  assert.equal(value.split(/\r?\n/).length, 1, "the header is a single line");
+  assert.ok(!/^Bcc:/im.test(value), "and no second header was opened");
+  assert.ok(value.endsWith("<prep@saulera.com>"), "the real address is still the address");
+});
+
+test("R8: a name that is legal English is legal RFC 5322", () => {
+  // A comma reads as an address separator unquoted; a full stop is a `.` in an atom, which
+  // is not permitted either. Both are ordinary agency names.
+  for (const name of ["Ashdown, Park & Co", "A.B. Recruitment", "O'Neill Search"]) {
+    const value = mailFrom({}, name);
+    assert.ok(value.startsWith(`"${name}"`), `${name} must be wrapped in a quoted-string`);
+  }
+});
+
+test("R8: quotes and backslashes inside a name are escaped, not passed through", () => {
+  assert.equal(mailFrom({}, 'A "quoted" name'), '"A \\"quoted\\" name" <prep@saulera.com>');
+  // The backslash is escaped FIRST, or the escaping of the quote gets escaped in turn.
+  assert.equal(mailFrom({}, "back\\slash"), '"back\\\\slash" <prep@saulera.com>');
+});
+
+test("mailFrom with no usable name falls back to the configured string unchanged", () => {
+  // A nameless agency gets today's behaviour rather than a broken header — which is also
+  // what happens when the name is nothing but control characters.
+  for (const name of ["", "   ", null, undefined, "\r\n"]) {
+    assert.equal(mailFrom({}, name), MAIL_FROM_DEFAULT, `${JSON.stringify(name)} falls back`);
+  }
+});
+
+test("mailFrom reads a bare address as well as a Name <address> form", () => {
+  assert.equal(
+    mailFrom({ PREP_MAIL_FROM: "prep@agency.co.uk" }, "X"),
+    '"X" <prep@agency.co.uk>',
+    "a configured bare address is wrapped, not treated as a display name",
+  );
+  assert.equal(
+    mailFrom({ PREP_MAIL_FROM: "Agency Mail <hello@agency.co.uk>" }, "X"),
+    '"X" <hello@agency.co.uk>',
+    "and a configured display name is replaced rather than doubled up",
+  );
+});
+
+test("mailFrom caps a name that is no longer a display name", () => {
+  const value = mailFrom({}, "A".repeat(500));
+  assert.ok(value.length < 200, "an unbounded header field is a header field nobody reads");
+  assert.ok(value.endsWith("<prep@saulera.com>"));
+});
+
+test("AC #5: the invite's TEXT half carries the URL as bare text on its own line", () => {
+  return withFetch(ok, () => sendInviteEmail(ENV, INVITE)).then(({ calls }) => {
+    const body = bodyOf(calls);
+    // A plain-text client renders exactly this. A link that lives only in the html half is a
+    // link that reader cannot follow.
+    assert.ok(
+      body.text.split("\n").includes(INVITE.link),
+      `the link must stand alone on a line:\n${body.text}`,
+    );
+  });
+});
+
+test("AC #5: the invite's HTML half carries the URL inside an href", () => {
+  return withFetch(ok, () => sendInviteEmail(ENV, INVITE)).then(({ calls }) => {
+    const body = bodyOf(calls);
+    assert.ok(body.html.includes(`href="${INVITE.link}"`), "the html half links it");
+  });
+});
+
+test("the invite names the role, the date and the retention rule", async () => {
+  const { calls } = await withFetch(ok, () => sendInviteEmail(ENV, INVITE));
+  const body = bodyOf(calls);
+
+  assert.equal(body.subject, "Your interview prep for Community Staff Nurse");
+  assert.ok(body.text.includes("2026-08-12"), "the interview date, day-only");
+  assert.ok(!body.text.includes("00:00:00"), "and not the retention machinery's zeros");
+  assert.ok(/deleted 30 days/.test(body.text), "decision 13's retention sentence");
+  assert.ok(/delete-now/.test(body.text), "and the button that does it sooner");
+  assert.ok(body.text.includes("/prep/login"), "and where to go when the link stops working");
+});
+
+test("the invite's From carries the agency name; the OTP's does not change", async () => {
+  const { calls } = await withFetch(ok, () => sendInviteEmail(ENV, INVITE));
+  assert.equal(bodyOf(calls).from, '"Ashdown Recruitment" <prep@saulera.com>');
+
+  // The existing message is untouched by the `from` parameter being added to sendEmail.
+  const otp = await withFetch(ok, () => sendOtpEmail(ENV, { to: INVITE.to, code: "123456" }));
+  assert.equal(bodyOf(otp.calls).from, MAIL_FROM_DEFAULT);
+});
+
+test("R8, applied to the subject too: a role title cannot open a second header", async () => {
+  // `mailFrom` strips, caps and quotes the agency name for exactly this reason, and the subject
+  // was the one header field taking a browser-supplied value straight through. `role_title` is
+  // model-written and arrives in the send body — unbounded, and never checked for CR or LF.
+  const { calls } = await withFetch(ok, () =>
+    sendInviteEmail(ENV, { ...INVITE, roleTitle: "Nurse\r\nBcc: attacker@example.com" }),
+  );
+  const body = bodyOf(calls);
+
+  assert.ok(!body.subject.includes("\r"), "no carriage return survives");
+  assert.ok(!body.subject.includes("\n"), "no line feed survives");
+  assert.equal(body.subject.split(/\r?\n/).length, 1, "the subject is a single line");
+
+  // And it is capped, so a runaway title becomes a long subject rather than a provider
+  // rejection the recruiter cannot diagnose.
+  const long = await withFetch(ok, () =>
+    sendInviteEmail(ENV, { ...INVITE, roleTitle: "x".repeat(5_000) }),
+  );
+  assert.ok(bodyOf(long.calls).subject.length < 200, "the subject stays a subject");
+
+  // A legitimate title is untouched — the discipline must not cost the ordinary case.
+  const plain = await withFetch(ok, () => sendInviteEmail(ENV, INVITE));
+  assert.equal(bodyOf(plain.calls).subject, "Your interview prep for Community Staff Nurse");
+});
+
+test("an agency name cannot inject markup into the invite's html half", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendInviteEmail(ENV, { ...INVITE, agencyName: "<script>alert(1)</script>Agency" }),
+  );
+  const body = bodyOf(calls);
+  assert.ok(!body.html.includes("<script>"), "the tag does not survive as markup");
+  assert.ok(body.html.includes("&lt;script&gt;"), "it survives as text, which is the point");
+});
+
+test("a blank role title degrades to a subject that still says what this is", async () => {
+  const { calls } = await withFetch(ok, () => sendInviteEmail(ENV, { ...INVITE, roleTitle: "" }));
+  assert.equal(bodyOf(calls).subject, "Your interview prep");
+});
+
+test("with no RESEND_API_KEY the invite throws before any fetch", async () => {
+  // The same assertion the file already makes for sendEmail: the guard is BEFORE the request,
+  // so a misconfigured deployment does not spend an API call to find out.
+  const { calls, result } = await withFetch(ok, () => sendInviteEmail({}, INVITE));
+  assert.equal(calls.length, 0, "nothing may reach Resend without a key");
+  assert.ok(result.error instanceof StoreError);
+  assert.equal(result.error.code, "not_configured");
+});
+
+test("a 403 on the invite becomes mail_failed and leaks neither address nor provider text", async () => {
+  const { result } = await withFetch(() => status(403), () => sendInviteEmail(ENV, INVITE));
+  assert.equal(result.error.code, "mail_failed");
+  assert.equal(result.error.status, 502);
+  assert.ok(!String(result.error.message).includes(INVITE.to), "the recipient stays out of the error");
 });
