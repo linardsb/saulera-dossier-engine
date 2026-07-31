@@ -12,9 +12,10 @@
    constructors in registry.js build from. That vocabulary is shared on purpose — a rule that
    exists to style one block is the sign this file has started becoming a second app.css.
 
-   Every colour, size and space resolves through a custom property in tokens.css. Nothing here
-   animates: the reduced-motion MUST is inherited from app.css for free, and an entrance added
-   here would re-open it. */
+   Every colour, size and space resolves through a custom property in tokens.css. The one
+   animation is the block entrance below, and it lives entirely inside a
+   `prefers-reduced-motion: no-preference` guard — prep-registry.test.js enforces that any
+   other animation added here does the same. */
 
 /* ── the page ──────────────────────────────────────────────────────────────────────────── */
 
@@ -25,19 +26,80 @@
   min-width: 0;
 }
 
+/* The page head is the one zone that is not a card: the role title, what this page is, and
+   the single action. The step below it is the largest on the page, so the head and the block
+   stack read as two acts rather than one scroll of text. */
+.brief .page-head { margin-bottom: var(--space-12); }
+
+/* The cover line. A role title is the one heading on these pages a candidate is preparing
+   their life around this week, and it takes the ramp's top step — still the ramp, never a
+   one-off size. */
+.brief .page-head h1,
+.session .page-head h1 {
+  font-size: var(--text-h1);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* The one action on the page, held clear of the copy above it. */
+.brief-cta { margin: var(--space-6) 0 0; }
+
 /* ── the block landmark ────────────────────────────────────────────────────────────────── */
 
 /* Each block is a `<section>` named by its own heading, so it is a region in a landmark list.
-   The rhythm BETWEEN blocks is a full step larger than anything inside one: the blocks are the
-   page's zones, and CRAFT asks for that separation to be carried by whitespace rather than by
-   a rule across the page. */
-.block { margin-bottom: var(--space-12); }
+   Each takes the deployment's card grammar (the same --shadow-card and --radius every card
+   lifts with), because whitespace alone left six blocks of prose reading as one essay: the
+   card edge is what makes each section a place rather than a paragraph. */
+.block {
+  margin-bottom: var(--space-8);
+  padding: var(--space-6);
+  background: var(--background);
+  border: var(--hairline) solid var(--border-hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
 .block:last-child { margin-bottom: 0; }
+
+/* The signature card. The FIRST block is always the stage-setter — the primer on the brief,
+   the question in the drill — and it is the one place the page spends its boldness: the
+   accent-tinted surface with the accent's own edge, everything else stays quiet. One per
+   page by construction. Every text token already holds its contrast floor on this surface
+   (measured in tokens.css), so nothing inside needs recolouring. */
+.block:first-of-type {
+  background: var(--surface-signature);
+  border-color: var(--border-signature);
+  border-left: var(--space-1) solid var(--accent);
+}
+
+.block:first-of-type .block-head { border-bottom-color: var(--border-signature); }
+
+/* One authored entrance: the cards rise into place once, on the discrete render after the
+   fetch (the drill re-renders per turn, which is a new question arriving — a designed moment,
+   not an input tick). Compositor props only, ends at rest, and skipped entirely under reduced
+   motion. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes block-in {
+    from { opacity: 0; transform: translateY(var(--space-2)); }
+  }
+
+  .block { animation: block-in 400ms var(--ease-out) backwards; }
+  .block:nth-of-type(2) { animation-delay: 60ms; }
+  .block:nth-of-type(3) { animation-delay: 120ms; }
+  .block:nth-of-type(4) { animation-delay: 180ms; }
+  .block:nth-of-type(5) { animation-delay: 240ms; }
+  .block:nth-of-type(n+6) { animation-delay: 300ms; }
+}
 
 .block-head {
   font-family: var(--font-ui);
   font-size: var(--text-h3);
+  font-weight: 500;
+  letter-spacing: -0.01em;
   margin: 0 0 var(--space-4);
+  /* The hairline ties the heading to its own card's content, the one grouping the card edge
+     cannot carry by itself once every block has an edge. */
+  padding-bottom: var(--space-3);
+  border-bottom: var(--hairline) solid var(--border-hairline);
   /* A heading built from model output can carry a long unbroken word; app.css:377-382 hit this
      on the client name and records the measurement. */
   overflow-wrap: anywhere;
@@ -170,6 +232,7 @@
    this page that is sized for a laptop. Nothing restructures — a single column already is the
    layout. */
 @media (max-width: 600px) {
-  .block { margin-bottom: var(--space-8); }
+  .block { margin-bottom: var(--space-6); padding: var(--space-4); }
+  .brief .page-head { margin-bottom: var(--space-8); }
   .prep-footer { margin-top: var(--space-8); }
 }

@@ -161,10 +161,17 @@ a {
      --space-8 is 32px and the rendered button was 39px. */
   min-height: var(--tap-target);
   transition: border-color var(--duration-1) var(--ease-out),
-              transform var(--duration-1) var(--ease-out);
+              transform var(--duration-1) var(--ease-out),
+              box-shadow var(--duration-1) var(--ease-out);
 }
 
-.btn:hover { border-color: var(--text-primary); }
+/* Hover lifts; press lands. The lift is motion and shadow ADDED on hover (never contrast
+   removed), and :active below overrides it so a held press always reads as down. */
+.btn:hover {
+  border-color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
+}
 
 .btn-primary {
   /* Near-black on the accent, not white. White on --accent measures 3.00:1 and fails the
@@ -184,7 +191,7 @@ a {
    from 5.62:1 to about 4.4:1, which is hover REMOVING contrast — the thing CRAFT.md forbids.
    The border is already there at 1px transparent, so nothing moves. */
 .btn-primary:hover { border-color: var(--text-primary); }
-.btn:active { transform: translateY(1px); }
+.btn:active { transform: translateY(1px); box-shadow: none; }
 
 /* Muted colour rather than opacity: opacity dims the label below its contrast floor, and
    stackai names opacity-for-disabled as an anti-pattern.
@@ -202,7 +209,12 @@ a {
 
 .btn[disabled]:active,
 .btn[aria-disabled="true"]:active { transform: none; }
-.btn[aria-disabled="true"]:hover { border-color: var(--border); }
+.btn[disabled]:hover,
+.btn[aria-disabled="true"]:hover {
+  border-color: var(--border);
+  transform: none;
+  box-shadow: none;
+}
 
 /* ── fields ────────────────────────────────────────────────────────────────────────────── */
 

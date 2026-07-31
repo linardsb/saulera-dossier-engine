@@ -770,11 +770,30 @@ test("prep.css carries no raw colour and no raw size", () => {
   assert.doesNotMatch(declarations, /\d+px/, "a raw px belongs in tokens.css");
 });
 
-test("prep.css does not fight app.css's one focus rule, and does not animate", () => {
+test("prep.css does not fight app.css's one focus rule, and animates only behind reduced-motion", () => {
   assert.doesNotMatch(PREP_CSS, /outline\s*:\s*none/);
   assert.doesNotMatch(PREP_CSS, /:focus/, "app.css:71-77 is the one focus rule for everything");
   assert.doesNotMatch(PREP_CSS, /transition\s*:\s*all/);
-  assert.doesNotMatch(PREP_CSS, /transition|animation|@keyframes/, "nothing in #21 animates");
+  // #21 shipped this file fully static. The owner's 31 Jul call added one authored entrance,
+  // so the invariant is now the guard, not the ban: any animation lives inside a
+  // `prefers-reduced-motion: no-preference` block, and nothing transitions.
+  let outsideGuard = PREP_CSS;
+  for (
+    let at = outsideGuard.search(/@media[^{]*prefers-reduced-motion:\s*no-preference/);
+    at !== -1;
+    at = outsideGuard.search(/@media[^{]*prefers-reduced-motion:\s*no-preference/)
+  ) {
+    let depth = 0;
+    let end = outsideGuard.indexOf("{", at);
+    do {
+      const ch = outsideGuard[end];
+      if (ch === "{") depth += 1;
+      if (ch === "}") depth -= 1;
+      end += 1;
+    } while (depth > 0 && end < outsideGuard.length);
+    outsideGuard = outsideGuard.slice(0, at) + outsideGuard.slice(end);
+  }
+  assert.doesNotMatch(outsideGuard, /transition|animation|@keyframes/, "animation must sit behind the reduced-motion guard");
 });
 
 test("prep.css restates no selector app.css already owns", () => {

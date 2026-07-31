@@ -28,7 +28,16 @@
      textareas keep --border, which is what holds the 3:1 non-text floor. That is why this
      token is deliberately NOT in test/tokens.test.js's PAIRINGS. */
   --border-hairline: #e3e3e3;
+  /* Its width, tokenised so component files can draw a hairline without a raw px. */
+  --hairline: 1px;
   --danger:       #78350f;
+
+  /* The signature surface: one card per candidate page renders on this accent-tinted
+     ground. Measured 31 Jul 2026: --text-primary 15.25:1, --text-muted 4.82:1, and all
+     three provenance colours ≥5.7:1 on it, so every existing text token holds its floor
+     unchanged. The border is decorative, same licence as --border-hairline. */
+  --surface-signature: #eaf5ff;
+  --border-signature:  #cbe2f3;
 
   /* stackai's soft layered card shadow, one token so every card lifts identically. Alpha hex
      is fine here: the contrast gate reads single whole-value hex tokens only, and a shadow is
@@ -50,6 +59,7 @@
   --text-h4:      17px;
   --text-h3:      20px;   /* the selected client's name */
   --text-h2:      24px;   /* page h1, matching index.html's existing 24px */
+  --text-h1:      29px;   /* the next 1.2 step up: the candidate pages' role title */
 
   /* provenance status. Whether a claim is sourced is this product's core distinction, so these
      are text colours and are held to the 4.5:1 body-text floor rather than to the 3:1 a
