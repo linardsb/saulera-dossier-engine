@@ -1,0 +1,32 @@
+# #36 — the authoritative run. Node 24, because node:sqlite (the real-SQL integrity tests'
+# engine) needs >= 22.5 and package.json's engines.node says so. The second gate is the
+# honest-coverage rule from #33: the skip guard in test/helpers/sqlite-d1.js is graceful by
+# design, and `node --test` exits 0 on skips — so a run that skipped ANYTHING is refused
+# here, whatever the reason. test/node-version.test.js is the same rule on the laptop.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: npm test — and refuse a run that skipped anything
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+          # The summary line is "# skipped N" under TAP (no TTY) or "ℹ skipped N" under the
+          # spec reporter — match either, take the last (the roll-up), demand exactly 0.
+          skipped=$(sed -n -E 's/^[^a-zA-Z]*skipped[[:space:]]+([0-9]+).*/\1/p' test-output.txt | tail -1)
+          if [ "$skipped" != "0" ]; then
+            echo "::error::this run skipped ${skipped:-an unknown number of} tests — it proves less than it says (#33)"
+            exit 1
+          fi
