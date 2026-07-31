@@ -534,3 +534,19 @@ test("suggest_close flips on the 6th attempt-turn of the session; nothing is blo
   }
   assert.ok(body.next_question !== undefined, "the 7th turn was served — the UI decides, not us");
 });
+
+test("day-before shortens the close: suggest_close flips on the 3rd turn at at(1)", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1, { interviewAt: at(1) });
+  const question = (await questionsByRole(d1, roleId))[0];
+  const client = fakeClient({ feedback: FEEDBACK_OK(2) });
+
+  let body;
+  for (let turn = 1; turn <= 4; turn++) {
+    body = await (await postTurn(d1, client, attemptBody(question.id), token)).json();
+    assert.equal(body.turns_this_session, turn);
+    assert.equal(body.suggest_close, turn >= 3, `turn ${turn}: the day-before threshold is 3, not 6`);
+  }
+  assert.ok(body.next_question !== undefined, "the 4th turn was still served — suggest, never block");
+});

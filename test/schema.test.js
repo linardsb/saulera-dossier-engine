@@ -186,7 +186,10 @@ const EXPECTED_COLUMNS = {
   // There is deliberately no `visible` boolean — presence IS permission, so there is no
   // default to get the wrong way round and no NULL to interpret.
   note_visibility: ["client_id", "created_at", "field_key"],
-  invite: ["client_id", "email", "expires_at", "id", "interview_at", "opened_at", "sent_at", "status", "token_hash"],
+  // #25 adds reminder_sent_at: the nullable set-exactly-once stamp that IS decision 17's
+  // idempotency (claimed with UPDATE ... WHERE reminder_sent_at IS NULL). Still no plaintext
+  // token, and the column dies with the row.
+  invite: ["client_id", "email", "expires_at", "id", "interview_at", "opened_at", "reminder_sent_at", "sent_at", "status", "token_hash"],
   candidate_role: ["brief_json", "cv_text", "ethos_text", "id", "invite_id", "jd_text"],
   competency: ["id", "importance", "label", "role_id", "source_quote", "stage", "success_rate"],
   question: ["axis", "competency_id", "difficulty", "id", "text", "variant_of"],

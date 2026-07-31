@@ -626,6 +626,53 @@ export async function observeHabit(db, { roleId, label } = {}) {
   return { evidenceCount: evidenceCount ?? 1 };
 }
 
+// ── the one reminder (#25, decision 17) ────────────────────────────────────────────────
+
+/**
+ * The invites due their single reminder: interview tomorrow (UTC calendar, SQLite's own
+ * clock) and never reminded. Wrapping interview_at in `date()` defeats `invite_by_interview`
+ * — a full scan, purgeExpired's deliberate trade restated: the schema admits both the space
+ * and 'T' stamp forms, which raw string comparison would misorder, and invite-count scale
+ * makes the scan free. No status filter needed — expiry
+ * is interview + 14 days, so a day-before invite is live by construction, and a deleted
+ * invite has no row. id + email and NOTHING else: the email builder needs nothing more,
+ * and `role_title` lives only inside brief_json, deliberately not parsed in a sweep.
+ *
+ * ONE row per email (decision 17 is per-candidate, not per-invite): a re-sent "lost"
+ * invite is a second row for the same person, and two rows must not mean two emails on
+ * the same evening. The group spans claimed rows too — `HAVING max(reminder_sent_at)
+ * IS NULL` — because filtering claimed rows in the WHERE would promote the duplicate
+ * to due on the very next sweep. min(id) makes the chosen row deterministic.
+ */
+export async function dueReminders(db) {
+  const { results } = await db
+    .prepare(
+      `SELECT min(id) AS id, email FROM invite
+        WHERE date(interview_at) = date('now', '+1 day')
+        GROUP BY email
+       HAVING max(reminder_sent_at) IS NULL`,
+    )
+    .all();
+  return results ?? [];
+}
+
+/**
+ * The atomic claim, openInvite's move restated: exactly one caller finds the column still
+ * NULL, and the loser sees changes === 0. There is no read-then-write window to lose, which
+ * is what makes decision 17's "exactly one reminder" structural rather than hopeful. The
+ * claim is at-most-once BY DESIGN — the caller never rolls it back on a failed send.
+ */
+export async function claimReminder(db, inviteId) {
+  const result = await db
+    .prepare(
+      `UPDATE invite SET reminder_sent_at = datetime('now')
+        WHERE id = ? AND reminder_sent_at IS NULL`,
+    )
+    .bind(String(inviteId ?? ""))
+    .run();
+  return (result.meta?.changes ?? 0) === 1;
+}
+
 /** The standing habit list, for session GET's plain-language surface. */
 export async function habitsByRole(db, roleId) {
   const { results } = await db

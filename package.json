@@ -17,7 +17,8 @@
     "db:preview": "python3 scripts/dev.py --migrate-remote preview",
     "db:remote": "python3 scripts/dev.py --migrate-remote production",
     "purge:preview": "python3 scripts/purge.py preview",
-    "purge:remote": "python3 scripts/purge.py production"
+    "purge:remote": "python3 scripts/purge.py production",
+    "remind:remote": "python3 scripts/remind.py"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0"

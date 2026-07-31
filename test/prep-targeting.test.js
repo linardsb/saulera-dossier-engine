@@ -19,6 +19,10 @@ import {
   movement,
   closePayload,
   SESSION_GAP_MINUTES,
+  SUGGEST_CLOSE_TURNS,
+  DAY_BEFORE_CLOSE_TURNS,
+  isDayBefore,
+  confidenceQuestion,
 } from "../src/prep/targeting.js";
 
 const NOW = Date.parse("2026-07-30T12:00:00Z");
@@ -120,6 +124,69 @@ test("all cooling -> the top-ranked one is served anyway (a session must never b
 test("never attempted means never cooling", () => {
   const open = eligible(withLast(null), { daysToInterview: 30, now });
   assert.equal(open.length, 4);
+});
+
+/* ── day-before (#25) ──────────────────────────────────────────────────────────────────── */
+
+test("isDayBefore: day-of and tomorrow only — negatives and 2+ days are normal sessions", () => {
+  // Days 2–3 keep the top-half pool via eligible but do NOT get the day-before shape.
+  for (const [days, expected] of [[-1, false], [0, true], [1, true], [2, false], [3, false]]) {
+    assert.equal(isDayBefore(days), expected, `isDayBefore(${days})`);
+  }
+});
+
+test("DAY_BEFORE_CLOSE_TURNS is pinned below the normal threshold", () => {
+  assert.equal(DAY_BEFORE_CLOSE_TURNS, 3, "a run-through is half a drill");
+  assert.ok(DAY_BEFORE_CLOSE_TURNS < SUGGEST_CLOSE_TURNS, "day-before is provably shorter");
+});
+
+test("confidenceQuestion picks the highest-readiness competency with a success", () => {
+  // B is readier than D (0.3 vs 0.25); A has no success at all.
+  const ranked = rankCompetencies([A, B, D]);
+  const questionsBy = new Map([
+    ["a", [core("a#0", 1)]],
+    ["b", [{ ...core("b#0", 1), competency_id: "b" }]],
+    ["d", [{ ...core("d#0", 1), competency_id: "d" }]],
+  ]);
+  const attemptsBy = new Map([
+    ["a", []],
+    ["b", [attempt({ question_id: "b#0", rating: 4 })]],
+    ["d", [attempt({ question_id: "d#0", rating: 3 })]],
+  ]);
+  const pick = confidenceQuestion({ ranked, questionsBy, attemptsBy });
+  assert.equal(pick.id, "b#0", "the strongest covered competency opens the session");
+});
+
+test("confidenceQuestion serves the least-recently-attempted question within the pick", () => {
+  const ranked = rankCompetencies([B]);
+  const questions = [
+    { ...core("b#0", 1), competency_id: "b" },
+    { ...core("b#1", 2), competency_id: "b" },
+  ];
+  const attemptsBy = new Map([
+    ["b", [attempt({ question_id: "b#1", rating: 4, created_at: stamp(-5) })]],
+  ]);
+  const pick = confidenceQuestion({ ranked, questionsBy: new Map([["b", questions]]), attemptsBy });
+  assert.equal(pick.id, "b#0", "unattempted counts as oldest");
+});
+
+test("confidenceQuestion returns null with no prior success — caller falls back", () => {
+  const ranked = rankCompetencies([A, C]);
+  const questionsBy = new Map([["a", [core("a#0", 1)]], ["c", []]]);
+  const attemptsBy = new Map([
+    ["a", [attempt({ question_id: "a#0", rating: 1 })]],
+    ["c", []],
+  ]);
+  assert.equal(confidenceQuestion({ ranked, questionsBy, attemptsBy }), null);
+});
+
+test("confidenceQuestion ignores revealed-mode 'successes' — the honesty rule holds here too", () => {
+  const ranked = rankCompetencies([B]);
+  const questionsBy = new Map([["b", [{ ...core("b#0", 1), competency_id: "b" }]]]);
+  const attemptsBy = new Map([
+    ["b", [attempt({ question_id: "b#0", mode: "revealed", rating: 4 })]],
+  ]);
+  assert.equal(confidenceQuestion({ ranked, questionsBy, attemptsBy }), null);
 });
 
 /* ── variant demand ────────────────────────────────────────────────────────────────────── */

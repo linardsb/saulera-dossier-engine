@@ -12,7 +12,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { StoreError } from "../src/store.js";
-import { MAIL_FROM_DEFAULT, mailFrom, sendEmail, sendInviteEmail, sendOtpEmail } from "../src/prep/email.js";
+import {
+  MAIL_FROM_DEFAULT,
+  mailFrom,
+  sendEmail,
+  sendInviteEmail,
+  sendOtpEmail,
+  sendReminderEmail,
+} from "../src/prep/email.js";
 
 const ENV = { RESEND_API_KEY: "re_test_key_123" };
 const MESSAGE = { to: "candidate@example.com", subject: "Hello", text: "body", html: "<p>body</p>" };
@@ -344,4 +351,62 @@ test("a 403 on the invite becomes mail_failed and leaks neither address nor prov
   assert.equal(result.error.code, "mail_failed");
   assert.equal(result.error.status, 502);
   assert.ok(!String(result.error.message).includes(INVITE.to), "the recipient stays out of the error");
+});
+
+// ── the reminder (#25, decision 17) ────────────────────────────────────────────────────
+//
+// The third email, the third rule: a PLAIN portal-entry link, never a token. And the
+// hardest tone gate of the three — this message lands the evening before an interview.
+
+const REMINDER = {
+  to: "candidate@example.com",
+  agencyName: "Ashdown Recruitment",
+  link: "https://engine.pages.dev/prep/login",
+};
+
+test("the reminder hits the endpoint with the bearer key and the exact subject", async () => {
+  const { calls } = await withFetch(ok, () => sendReminderEmail(ENV, REMINDER));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.resend.com/emails");
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${ENV.RESEND_API_KEY}`);
+  assert.equal(bodyOf(calls).subject, "Your interview is tomorrow");
+});
+
+test("the reminder's link is bare text in the text half and an anchor in the html half", async () => {
+  const { calls } = await withFetch(ok, () => sendReminderEmail(ENV, REMINDER));
+  const body = bodyOf(calls);
+  assert.ok(body.text.split("\n").includes(REMINDER.link), "bare on its own line, for plain-text clients");
+  assert.ok(body.html.includes(`href="${REMINDER.link}"`), "the html half links it");
+});
+
+test("the reminder carries no token-shaped query param anywhere", async () => {
+  const { calls } = await withFetch(ok, () => sendReminderEmail(ENV, REMINDER));
+  const whole = JSON.stringify(bodyOf(calls));
+  // Only the hash of a token ever rests; there is nothing to send, and minting one would
+  // rotate token_hash under a live session.
+  assert.ok(!whole.includes("t="), "no ?t= — the reminder is not a magic link");
+});
+
+test("the reminder's From carries the agency name through mailFrom", async () => {
+  const { calls } = await withFetch(ok, () => sendReminderEmail(ENV, REMINDER));
+  assert.equal(bodyOf(calls).from, '"Ashdown Recruitment" <prep@saulera.com>');
+
+  const bare = await withFetch(ok, () => sendReminderEmail(ENV, { ...REMINDER, agencyName: "" }));
+  assert.equal(bodyOf(bare.calls).from, MAIL_FROM_DEFAULT, "a nameless agency falls back");
+  assert.ok(bodyOf(bare.calls).text.includes("your recruitment agency"), "and the sign-off still parses");
+});
+
+test("with no RESEND_API_KEY the reminder makes zero fetch calls", async () => {
+  const { calls, result } = await withFetch(ok, () => sendReminderEmail({}, REMINDER));
+  assert.equal(calls.length, 0);
+  assert.equal(result.error?.code, "not_configured");
+});
+
+test("the reminder's tone: no exclamation mark, no pressure, in either half", async () => {
+  const { calls } = await withFetch(ok, () => sendReminderEmail(ENV, REMINDER));
+  const body = bodyOf(calls);
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(!content.includes("!"), `no exclamation mark in the ${part} half`);
+    assert.ok(!/streak|don't forget|good luck|you've got this/i.test(content), `no pressure in the ${part} half`);
+  }
 });

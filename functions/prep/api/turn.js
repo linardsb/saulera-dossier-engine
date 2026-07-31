@@ -46,7 +46,14 @@ import {
 } from "../../../src/portal/store.js";
 import { requireSession } from "../../../src/prep/session.js";
 import { replayProgress } from "../../../src/prep/ladder.js";
-import { drillState, movement, SUGGEST_CLOSE_TURNS } from "../../../src/prep/targeting.js";
+import {
+  drillState,
+  movement,
+  daysToInterview,
+  isDayBefore,
+  SUGGEST_CLOSE_TURNS,
+  DAY_BEFORE_CLOSE_TURNS,
+} from "../../../src/prep/targeting.js";
 import { HABIT_LABELS, PATTERN_THRESHOLD } from "../../../src/prep/habits.js";
 import { feedbackOnAttempt, mintNudge, mintReveal, mintVariant } from "../../../src/prep/drill.js";
 import { json, readJson, sameOrigin, errorResponse } from "../../../src/http.js";
@@ -209,13 +216,16 @@ export async function onRequestPost(context) {
     const current = state.sessions[state.sessions.length - 1] ?? [];
     const moved = movement(mine, current[0]?.created_at ?? now) === "up";
 
+    // The day-before close threshold (#25), derived the same way session GET derives it.
+    const dayBefore = isDayBefore(daysToInterview(role.interview_at, now));
+
     return json({
       feedback: feedback ? { worked: feedback.worked, improvement: feedback.improvement } : null,
       habit,
       next_question: nextQuestion,
       competency: { id: question.competency_id, label: question.competency_label, moved },
       turns_this_session: current.length,
-      suggest_close: current.length >= SUGGEST_CLOSE_TURNS,
+      suggest_close: current.length >= (dayBefore ? DAY_BEFORE_CLOSE_TURNS : SUGGEST_CLOSE_TURNS),
     });
   } catch (err) {
     return errorResponse(err);
