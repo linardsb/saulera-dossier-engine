@@ -650,6 +650,10 @@ export async function observeHabit(db, { roleId, label } = {}) {
  * bring this candidate an email?" of the NEWEST invite, in the HAVING like the clause
  * above it — a per-row filter in the WHERE would leave an older invite due while
  * today's re-send just mailed, the same evening's second email through the side door.
+ * `datetime()` inside the max for the reason the WHERE wraps interview_at in date():
+ * the schema admits both stamp forms, and raw TEXT max would misorder them. "Today" is
+ * SQLite's today, UTC — a UK invite sent in the small hours of the eve lands on
+ * yesterday's UTC date and is still reminded; accepted, the sweep's whole clock is UTC.
  * The cost, stated openly: an eve-created invite is never reminded at all, because the
  * sweep's window IS the eve — the invite email is that evening's email.
  */
@@ -660,7 +664,7 @@ export async function dueReminders(db) {
         WHERE date(interview_at) = date('now', '+1 day')
         GROUP BY email
        HAVING max(reminder_sent_at) IS NULL
-          AND date(max(sent_at)) < date('now')`,
+          AND date(max(datetime(sent_at))) < date('now')`,
     )
     .all();
   return results ?? [];
