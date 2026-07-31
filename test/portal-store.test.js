@@ -267,6 +267,27 @@ test("issueOtp refuses a TTL that is not a positive integer", async () => {
   }
 });
 
+test("issueOtp refuses a cooldown that is negative, fractional, or >= the TTL", async () => {
+  // The cooldown rides the same bound-modifier idiom as the TTL, so it gets the same guard —
+  // and >= TTL is refused because freshness implying liveness depends on cooldown < TTL.
+  for (const bad of [-1, 1.5, 10, 11]) {
+    const db = fakeD1([null, null]);
+    assert.equal(
+      await codeOf(() => issueOtp(db, { inviteId: "inv-1", codeHash: HASH, ttlMinutes: 10, cooldownMinutes: bad })),
+      "missing_fields",
+      `cooldownMinutes ${JSON.stringify(bad)} should be rejected`,
+    );
+    assert.equal(db.calls.length, 0, "a bad cooldown must not delete the code the candidate already has");
+  }
+  // Zero and omitted are both today's behaviour, exactly — every pre-existing caller keeps it.
+  for (const fine of [{ cooldownMinutes: 0 }, {}]) {
+    const db = fakeD1([null, null]);
+    const result = await issueOtp(db, { inviteId: "inv-1", codeHash: HASH, ttlMinutes: 10, ...fine });
+    assert.deepEqual(result, { ok: true, issued: true });
+    assert.equal(db.calls.length, 2, "no freshness read on the zero-cooldown path: delete, then insert");
+  }
+});
+
 test("consumeOtp reads the row's liveness and attempt count before deciding anything", async () => {
   const db = fakeD1([{ id: 7, code_hash: HASH, attempts: 0, live: 1 }, null]);
   const result = await consumeOtp(db, { inviteId: "inv-1", codeHash: HASH, maxAttempts: 5 });

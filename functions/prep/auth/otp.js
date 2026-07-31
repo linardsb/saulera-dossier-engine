@@ -26,6 +26,12 @@ const ALLOWED = new Set(["email"]);
 // It is one constant and one test away from changing.
 export const OTP_TTL_MINUTES = 10;
 
+// One minute: an attacker can rotate the candidate's code at most once per minute, so the
+// code in the newest email always survives long enough to type — and every email goes to
+// the invite's address, never the requester's. A candidate whose first email went astray
+// waits out the same minute for a fresh one. It is one constant and one test away from changing.
+export const OTP_COOLDOWN_MINUTES = 1;
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -48,26 +54,30 @@ export async function onRequestPost(context) {
     const invite = await inviteByEmail(env.DB, email);
     if (invite) {
       const code = mintOtpCode();
-      await issueOtp(env.DB, {
+      const { issued } = await issueOtp(env.DB, {
         inviteId: invite.id,
         codeHash: await hashOtpCode(invite.id, code),
         ttlMinutes: OTP_TTL_MINUTES,
+        cooldownMinutes: OTP_COOLDOWN_MINUTES,
       });
-      try {
-        // The agency's name makes the email recognisable rather than anonymous. Its absence
-        // is not worth failing a sign-in over — sendOtpEmail has a neutral fallback.
-        const agency = await getAgency(env.DB).catch(() => null);
-        await sendOtpEmail(env, { to: invite.email, code, agencyName: agency?.name });
-      } catch (err) {
-        // A mail failure still answers 202. The candidate's remedy is to try again either
-        // way, and the operator's signal is this line plus the status src/prep/email.js
-        // already logged — a 500 here would say "that address exists, and our mail is down".
-        const reason = err?.code ?? "unknown";
-        console.error("otp mail not sent:", reason);
+      if (issued) {
+        try {
+          // The agency's name makes the email recognisable rather than anonymous. Its absence
+          // is not worth failing a sign-in over — sendOtpEmail has a neutral fallback.
+          const agency = await getAgency(env.DB).catch(() => null);
+          await sendOtpEmail(env, { to: invite.email, code, agencyName: agency?.name });
+        } catch (err) {
+          // A mail failure still answers 202. The candidate's remedy is to try again either
+          // way, and the operator's signal is this line plus the status src/prep/email.js
+          // already logged — a 500 here would say "that address exists, and our mail is down".
+          const reason = err?.code ?? "unknown";
+          console.error("otp mail not sent:", reason);
+        }
       }
     }
 
-    // The identical answer, on both branches, deliberately. Do not add a hint.
+    // The identical answer, on all three branches — no invite, issued, cooling down —
+    // deliberately. Do not add a hint.
     return json({ ok: true }, 202);
   } catch (err) {
     return errorResponse(err);

@@ -321,6 +321,93 @@ test("requesting a second code kills the first, and only one row ever exists", {
   assert.deepEqual(await consumeOtp(d1, { inviteId: "inv-L", codeHash: second, maxAttempts: 5 }), { ok: true });
 });
 
+test("a fresh code inside the cooldown blocks rotation — the lockout attack buys nothing", { skip }, async () => {
+  const db = openMigrated();
+  const { d1 } = await seed(db);
+  const first = await hashOtpCode("inv-L", "111111");
+  const second = await hashOtpCode("inv-L", "222222");
+
+  assert.deepEqual(
+    await issueOtp(d1, { inviteId: "inv-L", codeHash: first, ttlMinutes: 10, cooldownMinutes: 1 }),
+    { ok: true, issued: true },
+  );
+  // The repeat request inside the minute: answered ok, but the standing row is untouched —
+  // it is the code the candidate is currently typing.
+  assert.deepEqual(
+    await issueOtp(d1, { inviteId: "inv-L", codeHash: second, ttlMinutes: 10, cooldownMinutes: 1 }),
+    { ok: true, issued: false },
+  );
+  const rows = otpRows(db, "inv-L");
+  assert.equal(rows.length, 1, "the coalesced request neither deleted nor inserted");
+  assert.equal(rows[0].code_hash, first, "the ORIGINAL code stands");
+  assert.deepEqual(await consumeOtp(d1, { inviteId: "inv-L", codeHash: first, maxAttempts: 5 }), { ok: true });
+});
+
+test("a code older than the cooldown rotates as before", { skip }, async () => {
+  const db = openMigrated();
+  const { d1 } = await seed(db);
+  const first = await hashOtpCode("inv-L", "111111");
+  const second = await hashOtpCode("inv-L", "222222");
+
+  await issueOtp(d1, { inviteId: "inv-L", codeHash: first, ttlMinutes: 10, cooldownMinutes: 1 });
+  // Backdate the mint past the cooldown by shrinking expires_at (TTL 10, expires in 8 ⇒
+  // minted 2 minutes ago) — the direct-write idiom above, because issueOtp cannot mint stale.
+  db.prepare("UPDATE otp SET expires_at = datetime('now', '+8 minutes') WHERE invite_id = 'inv-L'").run();
+
+  assert.deepEqual(
+    await issueOtp(d1, { inviteId: "inv-L", codeHash: second, ttlMinutes: 10, cooldownMinutes: 1 }),
+    { ok: true, issued: true },
+  );
+  const rows = otpRows(db, "inv-L");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].code_hash, second, "past the cooldown, rotation resumes");
+});
+
+test("a coalesced reissue preserves the guess budget — attempts no longer resets on demand", { skip }, async () => {
+  const db = openMigrated();
+  const { d1 } = await seed(db);
+  await issueOtp(d1, {
+    inviteId: "inv-L",
+    codeHash: await hashOtpCode("inv-L", "049217"),
+    ttlMinutes: 10,
+    cooldownMinutes: 1,
+  });
+  for (let i = 0; i < 2; i++) {
+    await consumeOtp(d1, { inviteId: "inv-L", codeHash: await hashOtpCode("inv-L", "000000"), maxAttempts: 5 });
+  }
+  assert.equal(otpRows(db, "inv-L")[0].attempts, 2);
+
+  // The sentence #31 exists to make true: requesting a new code no longer resets the counter.
+  assert.deepEqual(
+    await issueOtp(d1, {
+      inviteId: "inv-L",
+      codeHash: await hashOtpCode("inv-L", "999999"),
+      ttlMinutes: 10,
+      cooldownMinutes: 1,
+    }),
+    { ok: true, issued: false },
+  );
+  assert.equal(otpRows(db, "inv-L")[0].attempts, 2, "the 5-guess budget survives the coalesced request");
+});
+
+test("cooldown 0 keeps the lockout semantics — the old world, opted into explicitly", { skip }, async () => {
+  const db = openMigrated();
+  const { d1 } = await seed(db);
+  const first = await hashOtpCode("inv-L", "111111");
+  const second = await hashOtpCode("inv-L", "222222");
+
+  await issueOtp(d1, { inviteId: "inv-L", codeHash: first, ttlMinutes: 10, cooldownMinutes: 0 });
+  assert.deepEqual(
+    await issueOtp(d1, { inviteId: "inv-L", codeHash: second, ttlMinutes: 10, cooldownMinutes: 0 }),
+    { ok: true, issued: true },
+  );
+  assert.deepEqual(
+    await consumeOtp(d1, { inviteId: "inv-L", codeHash: first, maxAttempts: 5 }),
+    { ok: false, reason: "invalid_code" },
+    "with no cooldown the second issue still kills the first code",
+  );
+});
+
 test("a code issued for one invite cannot be spent on another", { skip }, async () => {
   const db = openMigrated();
   const { d1 } = await seed(db);
