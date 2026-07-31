@@ -5,7 +5,13 @@
 // Structured outputs reject recursive schemas and numeric/length constraints, and every
 // object needs additionalProperties: false.
 
+import { ROLE_SHAPES } from "./domain.js";
+
 export const SOURCE_TYPES = ["cv", "client_note", "unverified"];
+
+// Re-exported so render code (#49) can take the role-shape contract from the pack contract
+// rather than reaching into the parser.
+export { ROLE_SHAPES };
 
 const claim = (extra = {}) => ({
   type: "object",
@@ -71,6 +77,13 @@ export const PACK_SCHEMA = {
       description: "What the recruiter should confirm before sending. Plain strings.",
       items: { type: "string" },
     },
+    role_shape: {
+      type: "string",
+      enum: ROLE_SHAPES,
+      description:
+        "'locum' if the brief is temporary/agency cover, 'permanent' for a substantive post, " +
+        "'unknown' only if the brief genuinely does not say. Read it from the brief.",
+    },
   },
   required: [
     "candidate_ref",
@@ -80,6 +93,7 @@ export const PACK_SCHEMA = {
     "process_fit",
     "gaps",
     "open_questions",
+    "role_shape",
   ],
 };
 
@@ -113,5 +127,11 @@ export function assertPack(pack) {
     }
   }
   if (!Array.isArray(pack.open_questions)) throw new Error("pack: open_questions");
+  // Tolerant on absence, strict on presence: packs generated before role_shape shipped (the
+  // spike pack, a paste from a tab opened pre-deploy) still verify; consumers read
+  // `pack.role_shape ?? "unknown"`.
+  if (pack.role_shape !== undefined && !ROLE_SHAPES.includes(pack.role_shape)) {
+    throw new Error(`pack: role_shape is ${pack.role_shape}`);
+  }
   return pack;
 }

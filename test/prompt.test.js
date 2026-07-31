@@ -19,9 +19,11 @@ import {
   buildMessages,
   buildPastePrompt,
   cleanInput,
+  domainBlock,
   inputsBlock,
   noteBlock,
 } from "../src/prompt.js";
+import { briefProfile } from "../src/domain.js";
 import { PACK_SCHEMA, assertPack } from "../src/pack.js";
 import { extractPack } from "../src/paste.js";
 import { StoreError } from "../src/store.js";
@@ -143,6 +145,59 @@ test("the two blocks are the only place the wording lives", () => {
     "notes:\n\n<client_note>\nY\n</client_note>");
   assert.match(inputsBlock("B", "C"), /^Here is the client's brief:/);
   assert.match(inputsBlock("B", "C"), /Write the submission pack\.$/);
+});
+
+// ── the imaging domain block (#46) ─────────────────────────────────────────────────────
+
+const IMAGING_INPUTS = {
+  clientName: "East Sussex Imaging",
+  clientNote: "## Their process\n\nInformal call with the modality lead.",
+  brief:
+    "Locum MRI/CT Radiographer. Siemens Aera and Vida plus Canon CT and one GE MRI. " +
+    "HCPC registration essential. Day rate DOE.",
+  cv:
+    "HCPC-registered Diagnostic Radiographer, 8 years. Siemens and GE MRI; Canon CT. " +
+    "IV cannulation certified.",
+};
+
+test("an imaging brief's paste prompt carries HCPC and the never-NMC instruction", () => {
+  const prompt = buildPastePrompt(IMAGING_INPUTS);
+  assert.match(prompt, /HCPC \(Health and Care Professions Council\)/);
+  assert.match(prompt, /Never write about NMC registration/);
+});
+
+test("the domain block rides the second content item; the cached note block is untouched", () => {
+  // The cache-prefix pin: system + note is the byte-identical prefix. A brief-dependent
+  // string in content[0] would fork the prefix per submission and cache nothing.
+  const [message] = buildMessages(IMAGING_INPUTS);
+  assert.equal(
+    message.content[0].text,
+    noteBlock(IMAGING_INPUTS.clientName, IMAGING_INPUTS.clientNote),
+  );
+  assert.deepEqual(message.content[0].cache_control, { type: "ephemeral" });
+  assert.match(message.content[1].text, /HCPC/);
+});
+
+test("the locum bullet appears for a locum brief and not for a permanent one", () => {
+  const locum = domainBlock(briefProfile(IMAGING_INPUTS.brief, IMAGING_INPUTS.cv));
+  assert.match(locum, /a locum booking, not a permanent hire/);
+
+  const permanent = domainBlock(
+    briefProfile("Permanent Band 7 MRI Radiographer, salary per annum. HCPC essential."),
+  );
+  assert.match(permanent, /HCPC/);
+  assert.doesNotMatch(permanent, /locum booking/);
+});
+
+test("the domain block is empty for the nursing inputs, so the perm prompt is unchanged", () => {
+  assert.equal(domainBlock(briefProfile(INPUTS.brief, INPUTS.cv)), "");
+  assert.doesNotMatch(buildPastePrompt(INPUTS), /HCPC/);
+});
+
+test("both shapes carry the same domain text, so they cannot drift", () => {
+  const [message] = buildMessages(IMAGING_INPUTS);
+  const prompt = buildPastePrompt(IMAGING_INPUTS);
+  assert.ok(prompt.includes(message.content[1].text), "the domain+inputs block differs");
 });
 
 // ── the input guard ────────────────────────────────────────────────────────────────────
