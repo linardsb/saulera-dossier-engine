@@ -1680,6 +1680,7 @@
    *  whatever the button would have done can reach it. */
   function dropPreparedSend() {
     state.sendPrepared = null;
+    state.sendKey = null;
     state.sendStruck = null;
     el.sendPreview.hidden = true;
     el.strikeList.textContent = "";

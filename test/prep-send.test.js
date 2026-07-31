@@ -931,6 +931,23 @@ test("#34: key-less sends keep today's behaviour — NULLs never collide", { ski
   assert.equal(countOf(db, "invite"), 2);
 });
 
+test("#34: a UNIQUE trip that is NOT send_key stays an error, even with a key in hand", { skip }, async () => {
+  // The 409 mapping requires BOTH halves of the match. Simplify it to /UNIQUE/i alone and a
+  // token_hash collision (or any future constraint) would wear already_sent's success copy —
+  // this is the assertion that fails first.
+  const db = openMigrated();
+  const d1 = faultyD1(db, (sql) =>
+    sql.includes("INSERT INTO invite")
+      ? new Error("UNIQUE constraint failed: invite.token_hash")
+      : null,
+  );
+  const { result } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody({ send_key: "key-5" })), env: ENV(d1) }),
+  );
+  assert.equal(result.status, 500, "a different constraint is an internal error, not a duplicate");
+  assert.deepEqual(await result.json(), { error: "internal" });
+});
+
 test("#34: a malformed key is refused before anything is written or sent", { skip }, async () => {
   const db = openMigrated();
   const d1 = d1Shape(db);

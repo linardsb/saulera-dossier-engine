@@ -148,6 +148,12 @@ function cleanText(value, field) {
  * The message is the D1 error's own, which names the constraint or the connection. It carries
  * no bound parameters, so the hash does not travel; the log line itself stays clear of the
  * words the Level 1 credential grep looks for.
+ *
+ * WHAT THE SWALLOW COSTS SINCE #34: the orphaned row keeps its `send_key`, so the browser's
+ * retry of this same payload is answered `409 already_sent` — success copy for a send whose
+ * email never went out. The 409 branch logs when it fires and the recruiter's recovery is a
+ * fresh prepare; accepted, because the alternative (rethrowing here) buys the worse trade
+ * this comment opens with.
  */
 async function rollbackInvite(env, tokenHash) {
   try {
@@ -320,10 +326,25 @@ export async function onRequestPost(context) {
         sendKey,
       });
     } catch (err) {
+      // Both halves required, so a UNIQUE trip on invite.id or invite.token_hash (fresh
+      // randoms — negligible, but not this branch's to claim) surfaces as the error it is.
+      // Message shapes this was checked against: node:sqlite says "UNIQUE constraint failed:
+      // invite.send_key"; D1 wraps it as "D1_ERROR: UNIQUE constraint failed:
+      // invite.send_key: SQLITE_CONSTRAINT". A future wrapping that matches neither degrades
+      // to a 500 and a retry loop — never to a second invite; the INDEX enforces, not this.
       const reason = err?.message ?? "";
       if (sendKey && /UNIQUE/i.test(reason) && /send_key/.test(reason)) {
         // 409, not 201: the browser reads this as success (the candidate HAS their link),
         // but the server must not pretend it did work it refused — and must not count it.
+        //
+        // THE RESIDUAL THIS BRANCH CARRIES: "standing key" is evidence the earlier send
+        // fully succeeded ONLY because the failure paths below roll the row back. If that
+        // rollback itself failed (it is swallowed, see rollbackInvite) or the isolate died
+        // mid-send, the key stands for a send whose email never went out — and this 409
+        // then wears success copy for a candidate with an empty inbox. Low odds, wrong
+        // direction, so it is logged here to be diagnosable, and the recruiter's recovery
+        // is a fresh prepare (Start again), which mints a fresh key.
+        console.error("prep/send: duplicate send_key refused as already_sent for client", client.id);
         return json({ error: "already_sent" }, 409);
       }
       throw err;
