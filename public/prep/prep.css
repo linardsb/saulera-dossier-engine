@@ -62,22 +62,16 @@
 
 /* The signature card. The FIRST block is always the stage-setter — the primer on the brief,
    the question in the drill — and it is the one place the page spends its boldness: the
-   inverse surface, everything else stays quiet. One per page by construction. */
+   accent-tinted surface with the accent's own edge, everything else stays quiet. One per
+   page by construction. Every text token already holds its contrast floor on this surface
+   (measured in tokens.css), so nothing inside needs recolouring. */
 .block:first-of-type {
-  background: var(--surface-inverse);
-  border-color: var(--surface-inverse);
-  color: var(--text-on-inverse);
+  background: var(--surface-signature);
+  border-color: var(--border-signature);
+  border-left: var(--space-1) solid var(--accent);
 }
 
-.block:first-of-type .block-head { border-bottom-color: var(--border-on-inverse); }
-
-.block:first-of-type .prep-label,
-.block:first-of-type .prep-caption { color: var(--text-muted-on-inverse); }
-
-.block:first-of-type .claim-source {
-  color: var(--text-muted-on-inverse);
-  border-left-color: var(--border-on-inverse);
-}
+.block:first-of-type .block-head { border-bottom-color: var(--border-signature); }
 
 /* One authored entrance: the cards rise into place once, on the discrete render after the
    fetch (the drill re-renders per turn, which is a new question arriving — a designed moment,

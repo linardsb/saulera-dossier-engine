@@ -32,14 +32,12 @@
   --hairline: 1px;
   --danger:       #78350f;
 
-  /* The inverse surface: one card per candidate page renders dark, and these four are its
-     whole palette. Muted-on-inverse is #b3b3b3, 6.9:1 on the inverse surface, holding the
-     4.5:1 body floor; the border is decorative on that surface, same licence as
-     --border-hairline. */
-  --surface-inverse:        #1d1d1d;
-  --text-on-inverse:        #ffffff;
-  --text-muted-on-inverse:  #b3b3b3;
-  --border-on-inverse:      #444444;
+  /* The signature surface: one card per candidate page renders on this accent-tinted
+     ground. Measured 31 Jul 2026: --text-primary 15.25:1, --text-muted 4.82:1, and all
+     three provenance colours ≥5.7:1 on it, so every existing text token holds its floor
+     unchanged. The border is decorative, same licence as --border-hairline. */
+  --surface-signature: #eaf5ff;
+  --border-signature:  #cbe2f3;
 
   /* stackai's soft layered card shadow, one token so every card lifts identically. Alpha hex
      is fine here: the contrast gate reads single whole-value hex tokens only, and a shadow is
