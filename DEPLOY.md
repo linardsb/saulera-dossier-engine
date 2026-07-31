@@ -281,10 +281,28 @@ consequences of this section, so they are recorded here rather than in the code:
   total guess budget. `attempts` defaults to 0 on the fresh row, so requesting a new code
   resets the counter — the cap is five guesses **per code**, not five per invite.
 
-**The counterweight, not yet applied:** one Cloudflare rate-limiting rule on `/prep/auth/*`
-keyed on client IP covers both bullets, and belongs beside the bypass apps in
-`scripts/setup-access.py`. No column, no cleanup, no code. Tracked as its own change — do not
-assume it is live because this section describes it.
+  *What changed (31 Jul 2026, #31):* the loop attack now buys at most one rotation per minute
+  and one email per minute, both to the candidate's own address — see the counterweight below.
+  The premise paragraph above stays as the record of why.
+
+**The counterweight, applied 31 Jul 2026 (#31):** a 1-minute per-invite reissue cooldown
+inside `issueOtp` (`OTP_COOLDOWN_MINUTES` in `functions/prep/auth/otp.js`). While a code
+minted less than a minute ago stands, a repeat request answers the same `202` but neither
+rotates the code nor sends mail — the lockout dies, mail spend is bounded, and `attempts` no
+longer resets on demand. No new column (the mint time is derivable: `expires_at − TTL`), no
+cleanup, and `scripts/setup-access.py` is unchanged because there is nothing edge-side to
+create.
+
+The edge rule this section previously promised is **unbuildable on this deployment — do not
+re-attempt it**: WAF rate-limiting rules live in the `http_ratelimit` phase of a **zone's**
+ruleset, and `saulera-dossier-engine.pages.dev` is a hostname in Cloudflare's own zone (the
+custom domain is deliberately deferred — see "Deliberately deferred" at the end of this file). Account-level rate-limiting rulesets are
+Enterprise-with-add-on only and deploy only to your own Enterprise zones; the Workers
+rate-limiting binding is not in the Pages Functions supported-bindings list. Even with a
+custom domain later, traffic hitting the `pages.dev` hostname bypasses the zone's WAF
+entirely — the rule would guard the door nobody is forced to use. The retention-sweep bullet
+above therefore remains **accepted, not mitigated**: it has no per-invite handle to hang a
+cooldown on, and stays cheap at invite-count scale with Cloudflare in front.
 
 ⚠ **Do not re-toggle** Pages → Settings → General → *Enable access policy*. The two gated
 applications are untouched by any of this; the bypass pair is added beside them.
@@ -647,6 +665,7 @@ Portal, unauthenticated (no Access login, no cookie):
 - [ ] The code email arrives, carries six digits, and contains **no link** (needs 5b's
       `RESEND_API_KEY` and a verified sending domain)
 - [ ] Six wrong codes: five answer `401`, the sixth `429`
+- [ ] Two code requests within a minute: both answer `202`, one email arrives — the second request neither rotates the code nor sends
 
 Access — re-verify after any change to the applications or the policy:
 
