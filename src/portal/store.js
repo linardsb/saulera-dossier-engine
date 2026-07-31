@@ -106,15 +106,21 @@ function equalHex(a, b) {
  * writer production uses, and so #22 inherits a tested one. `sent_at` is stamped now because
  * the row is created at the moment of sending — there is no draft state — and `status` opens
  * at 'sent' because 0002 deliberately left that vocabulary to this ticket.
+ *
+ * `sendKey` (#34) is the send's idempotency key, optional so every pre-#34 caller and every
+ * key-less browser keeps today's behaviour (NULL, which the UNIQUE index ignores). When a key
+ * is passed and already stands, the INSERT throws on `invite_send_key` — deliberately: the
+ * route reads that constraint as "the earlier send fully succeeded" and answers 409, because
+ * a rolled-back send frees its key when the rollback deletes the row.
  */
-export async function createInvite(db, { id, clientId, email, interviewAt, tokenHash, expiresAt } = {}) {
+export async function createInvite(db, { id, clientId, email, interviewAt, tokenHash, expiresAt, sendKey } = {}) {
   requireFields({ id, clientId, email, interviewAt, tokenHash, expiresAt });
   await db
     .prepare(
-      `INSERT INTO invite (id, client_id, token_hash, email, interview_at, sent_at, expires_at, status)
-       VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 'sent')`,
+      `INSERT INTO invite (id, client_id, token_hash, email, interview_at, sent_at, expires_at, status, send_key)
+       VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 'sent', ?)`,
     )
-    .bind(id, clientId, tokenHash, email, interviewAt, expiresAt)
+    .bind(id, clientId, tokenHash, email, interviewAt, expiresAt, sendKey ?? null)
     .run();
   return { ok: true };
 }

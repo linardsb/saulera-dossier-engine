@@ -143,12 +143,29 @@ test("createInvite writes one row, binds every value, and opens at status 'sent'
   assert.ok(sql.includes("datetime('now')"), "sent_at is the schema's clock, not a caller's");
   assert.deepEqual(
     args,
-    ["inv-1", "c-1", HASH, "a@example.com", "2026-08-04 09:00:00", "2026-08-18 09:00:00"],
-    "every value travels bound — an email in a SQL string is an injection and a log leak at once",
+    ["inv-1", "c-1", HASH, "a@example.com", "2026-08-04 09:00:00", "2026-08-18 09:00:00", null],
+    "every value travels bound — an email in a SQL string is an injection and a log leak at once; " +
+      "a key-less caller binds NULL, which the #34 unique index ignores",
   );
   // The raw token must never reach the statement. Only its hash was passed in, and this is
   // the assertion that fails if someone "helpfully" adds a token column later.
   assert.ok(!sql.includes("token,"), "invite has no plaintext token column and never will");
+});
+
+test("createInvite binds the #34 idempotency key when one is passed", async () => {
+  const db = fakeD1([null]);
+  await createInvite(db, {
+    id: "inv-1",
+    clientId: "c-1",
+    email: "a@example.com",
+    interviewAt: "2026-08-04 09:00:00",
+    tokenHash: HASH,
+    expiresAt: "2026-08-18 09:00:00",
+    sendKey: "key-abc",
+  });
+  const { sql, args } = db.calls[0];
+  assert.match(sql, /send_key/i, "the key has a column, not a template slot");
+  assert.equal(args[args.length - 1], "key-abc", "and it travels bound like everything else");
 });
 
 test("createInvite refuses a half-built invite rather than writing one", async () => {

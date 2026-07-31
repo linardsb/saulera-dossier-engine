@@ -64,6 +64,7 @@ const ALLOWED = new Set([
   "cv",
   "payload",
   "strike",
+  "send_key",
 ]);
 
 /** Decision 11: active until interview + 14 days, which covers a second stage. */
@@ -218,6 +219,18 @@ export async function onRequestPost(context) {
       throw new StoreError("missing_fields", 400, "strike: more ids than there are competencies");
     }
 
+    // #34: the idempotency key, one per PREPARED payload. Optional, because a browser that
+    // predates it (or a curl) simply gets today's behaviour — NULL, which the UNIQUE index
+    // ignores. Bounded like everything else in this request: a key is a UUID's worth of
+    // opaque string, not a free text field.
+    let sendKey = null;
+    if (body.send_key != null) {
+      if (typeof body.send_key !== "string" || !body.send_key.trim() || body.send_key.length > 64) {
+        throw new StoreError("missing_fields", 400, "send_key: must be a non-blank string of at most 64 characters");
+      }
+      sendKey = body.send_key;
+    }
+
     const client = await getClient(env.DB, body.client_id);
 
     // R4 — THE ONE THAT MATTERS. The visible-field keys are read from the DATABASE, never from
@@ -291,14 +304,30 @@ export async function onRequestPost(context) {
     // The invite is written FIRST because it is the scope everything else hangs off: there is
     // no transaction available at the edge, so the rollback is one delete by a hash we already
     // hold, and the schema's ON DELETE CASCADE removes whatever got written before the throw.
-    await createInvite(env.DB, {
-      id: inviteId,
-      clientId: client.id,
-      email,
-      interviewAt,
-      tokenHash,
-      expiresAt,
-    });
+    // #34's R7 closes HERE, on the first write. A retry of a send that fully succeeded finds
+    // its key already standing and trips `invite_send_key` before anything is written, sent
+    // or counted; a retry of a send that ROLLED BACK finds the key free again, because the
+    // rollback deleted the row that held it. That is the exact retry-vs-resend distinction —
+    // a deliberate re-send is a new prepared payload carrying a new key, and sails through.
+    try {
+      await createInvite(env.DB, {
+        id: inviteId,
+        clientId: client.id,
+        email,
+        interviewAt,
+        tokenHash,
+        expiresAt,
+        sendKey,
+      });
+    } catch (err) {
+      const reason = err?.message ?? "";
+      if (sendKey && /UNIQUE/i.test(reason) && /send_key/.test(reason)) {
+        // 409, not 201: the browser reads this as success (the candidate HAS their link),
+        // but the server must not pretend it did work it refused — and must not count it.
+        return json({ error: "already_sent" }, 409);
+      }
+      throw err;
+    }
 
     try {
       // Decision 16's toggle half: the ethos material is the visible slice rendered as text.
