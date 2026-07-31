@@ -174,6 +174,39 @@ test("the system prompt is the spike's, unrewritten", async () => {
   assert.match(db.calls[0].system, /NEVER write a claim you cannot source/);
 });
 
+/* ── the imaging domain read (#46) ─────────────────────────────────────────────────────── */
+
+const IMAGING_INPUTS = {
+  clientName: "East Sussex Imaging",
+  clientNote: NOTE,
+  brief: "Locum MRI/CT Radiographer. Siemens Aera and Vida, Canon CT. HCPC essential. Day rate.",
+  cv: "HCPC-registered Diagnostic Radiographer. Siemens and GE MRI; Canon CT.",
+};
+
+test("an imaging brief puts the domain block in the request, after the cached note", async () => {
+  const db = fakeAnthropic(ok());
+  await generatePack(db, IMAGING_INPUTS);
+  const blocks = db.calls[0].messages[0].content;
+
+  assert.ok(blocks[1].text.includes("HCPC"), "the domain guidance rides the second block");
+  // The cached prefix stays brief-independent: bare note block, breakpoint intact.
+  assert.ok(!blocks[0].text.includes("HCPC"));
+  assert.deepEqual(blocks[0].cache_control, { type: "ephemeral" });
+});
+
+test("the result carries the deterministic brief profile", async () => {
+  const imaging = await generatePack(fakeAnthropic(ok()), IMAGING_INPUTS);
+  assert.equal(imaging.brief_profile.role_shape, "locum");
+  assert.equal(imaging.brief_profile.imaging, true);
+
+  const nursing = await generatePack(fakeAnthropic(ok()), INPUTS);
+  assert.equal(nursing.brief_profile.imaging, false);
+  // And the nursing request itself is untouched by the imaging vocabulary.
+  const db = fakeAnthropic(ok());
+  await generatePack(db, INPUTS);
+  assert.ok(!JSON.stringify(db.calls[0].messages).includes("HCPC"));
+});
+
 /* ── the verifier runs before the pack is returned (AC6) ───────────────────────────────── */
 
 test("a fabricated citation is demoted, not returned as sourced", async () => {

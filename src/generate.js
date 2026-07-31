@@ -15,6 +15,7 @@
 // request and written nowhere — not to D1, not to a log line, not to an error message. The
 // event counter is the only thing that persists, and it carries neither.
 
+import { briefProfile } from "./domain.js";
 import { PACK_SCHEMA, assertPack } from "./pack.js";
 import { SYSTEM, buildMessages, cleanInput } from "./prompt.js";
 import { verifyPack, provenanceSummary } from "./provenance.js";
@@ -75,6 +76,12 @@ export async function generatePack(client, { clientName, clientNote, brief, cv }
     throw new StoreError("note_empty", 400, "client: no note written yet");
   }
 
+  // The deterministic read of the brief, returned so callers can branch without a model in
+  // the loop. buildMessages computes its own — the parse is cheap, and threading it through
+  // would change a signature for nothing. Derived from candidate text, so it must never
+  // reach a log line or an error message.
+  const profile = briefProfile(inputs.brief, inputs.cv);
+
   const startedAt = Date.now();
 
   // The cache breakpoint lives in buildMessages(), on the client note, because the note is the
@@ -134,6 +141,7 @@ export async function generatePack(client, { clientName, clientNote, brief, cv }
   return {
     pack,
     failures,
+    brief_profile: profile,
     provenance: provenanceSummary(pack),
     duration_ms: durationMs,
     usage: message.usage ?? null,

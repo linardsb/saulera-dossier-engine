@@ -177,3 +177,33 @@ test("a fenced spike/pack.json survives extraction, assertPack and verifyPack", 
   });
   assert.deepEqual(failures, [], "the real pack must survive the paste path intact");
 });
+
+// ── role_shape on the round trip (#46) ─────────────────────────────────────────────────
+//
+// Absence-tolerance is already proven above: spike/pack.json has no role_shape and passes
+// assertPack untouched. That case is load-bearing beyond the spike — a paste from a tab
+// opened before role_shape shipped arrives without the field, and must still verify.
+
+const FULL_PACK = {
+  candidate_ref: "C-9",
+  role_title: "Locum MRI Radiographer",
+  headline: "HCPC-registered, available now.",
+  evidence: [],
+  process_fit: [],
+  gaps: [],
+  open_questions: [],
+};
+
+test("a pack carrying role_shape survives extraction with the field intact", () => {
+  const raw = "```json\n" + JSON.stringify({ ...FULL_PACK, role_shape: "locum" }) + "\n```";
+  const pack = assertPack(extractPack(raw));
+  assert.equal(pack.role_shape, "locum");
+});
+
+test("a wrong-case role_shape is rejected, naming the field", () => {
+  // The shape an improvising chat session produces: "Locum" instead of the enum's "locum".
+  assert.throws(
+    () => assertPack({ ...FULL_PACK, role_shape: "Locum" }),
+    /role_shape/,
+  );
+});

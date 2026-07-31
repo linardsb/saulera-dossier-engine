@@ -10,6 +10,7 @@
 // them: the two shapes cannot drift into two different prompts, and the one that was validated
 // is the one both send.
 
+import { briefProfile } from "./domain.js";
 import { PACK_SCHEMA } from "./pack.js";
 import { StoreError } from "./store.js";
 
@@ -57,11 +58,48 @@ export const inputsBlock = (brief, cv) =>
   `Here is the candidate's CV:\n\n<cv>\n${cv}\n</cv>\n\nWrite the submission pack.`;
 
 /**
+ * Imaging-locum guidance, appended to the per-submission block. Empty for every other
+ * brief — that emptiness is what keeps the perm-nursing prompt byte-identical to the
+ * shape the spike validated, and it is pinned by test/prompt.test.js.
+ */
+export const domainBlock = (profile) => {
+  if (!profile.imaging) return "";
+  const lines = [
+    "This brief is for a UK diagnostic imaging role. Domain rules, on top of everything above:",
+    "",
+    "- Registration is with the HCPC (Health and Care Professions Council). Never write" +
+      " about NMC registration or an \"NMC pin\" — that is nursing vocabulary and reads as" +
+      " a category error to an imaging manager. Where the CV evidences it, sonographer" +
+      " accreditation (e.g. a CASE-accredited postgraduate qualification) is worth surfacing.",
+    "- Modality and specialism are the core of the match. Say which modalities (MRI, CT," +
+      " ultrasound) and which lists (MSK, obstetric, general) the candidate actually" +
+      " covers, with evidence.",
+    "- Scanner makes and models are material evidence, not trivia. If the brief names a" +
+      " fleet, map the candidate's hands-on experience to it explicitly; scanners on the" +
+      " CV that the brief does not name are still worth a line.",
+  ];
+  if (profile.role_shape === "locum") {
+    lines.push(
+      "- This is a locum booking, not a permanent hire. The client's question is \"can" +
+        " they start and run the list on day one\", not \"should we invest in them\"." +
+        " Lead with availability, compliance status (HCPC registration, DBS, occupational" +
+        " health, mandatory training), IV cannulation where relevant, and independent" +
+        " reporting or solo scanning. Verify experience; do not sell potential.",
+    );
+  }
+  return lines.join("\n");
+};
+
+/**
  * The client note goes FIRST and is the cache breakpoint: it is the one input reused
  * across every pack for the same client, and the prefix has to be byte-identical for a
  * cache read. Brief and CV vary per submission and therefore come after it.
  */
 export function buildMessages({ brief, cv, clientNote, clientName }) {
+  // The domain block rides in the SECOND item, never the first: system + note is the
+  // byte-identical cached prefix, and a brief-dependent string in it would silently kill
+  // the cache for every mixed-desk client.
+  const domain = domainBlock(briefProfile(brief, cv));
   return [
     {
       role: "user",
@@ -73,7 +111,7 @@ export function buildMessages({ brief, cv, clientNote, clientName }) {
         },
         {
           type: "text",
-          text: inputsBlock(brief, cv),
+          text: [domain, inputsBlock(brief, cv)].filter(Boolean).join("\n\n"),
         },
       ],
     },
@@ -107,12 +145,17 @@ export const OUTPUT_INSTRUCTION =
  * it is the lens everything after it is read through.
  */
 export function buildPastePrompt({ clientName, clientNote, brief, cv } = {}) {
+  // Domain guidance sits between the note and the inputs: no cache on this path, so the
+  // ordering is purely the reader's — meet the lens before the text it reads.
   return [
     SYSTEM,
     noteBlock(String(clientName ?? ""), String(clientNote ?? "")),
+    domainBlock(briefProfile(brief, cv)),
     inputsBlock(String(brief ?? ""), String(cv ?? "")),
     OUTPUT_INSTRUCTION,
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // A brief and a CV are pasted by a recruiter, so they are bounded by what a person pastes
