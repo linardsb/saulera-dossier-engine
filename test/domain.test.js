@@ -62,6 +62,17 @@ test("'General Hospital' is a place, not a specialism; per annum reads permanent
   assert.equal(profile.imaging, true);
 });
 
+test("'p.a.' salary shorthand reads permanent (PR #51 review, medium)", () => {
+  const profile = briefProfile("Band 7 MRI radiographer. Salary £38k p.a. plus benefits.");
+  assert.equal(profile.role_shape, "permanent");
+});
+
+test("a hospital name near an imaging noun is still a place (PR #51 review, low)", () => {
+  const profile = briefProfile("Sonographer post at West Suffolk General Hospital. HCPC required.");
+  assert.ok(!profile.specialisms.includes("general"), "the hospital lookahead failed");
+  assert.equal(profile.imaging, true);
+});
+
 test("scanner makes are read from the CV when the brief does not name a fleet", () => {
   const profile = briefProfile(
     "Locum MRI Radiographer, HCPC required.",

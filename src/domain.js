@@ -29,8 +29,8 @@ const MODALITIES = [
 const SPECIALISMS = [
   ["msk",       /\bMSK\b|musculoskeletal/i],
   ["obstetric", /obstetric|antenatal|f(?:o)?etal (?:anomaly|medicine|scan)/i],
-  ["general",   /\bgeneral\b[^.\n]{0,40}(?:sonograph|ultrasound|abdominal|scan|list)/i],
-  ["general",   /(?:sonograph\w*|ultrasound|abdominal)[^.\n]{0,40}\bgeneral\b/i],
+  ["general",   /\bgeneral\b(?!\s+hospital\b|\s+infirmary\b)[^.\n]{0,40}(?:sonograph|ultrasound|abdominal|scan|list)/i],
+  ["general",   /(?:sonograph\w*|ultrasound|abdominal)[^.\n]{0,40}\bgeneral\b(?!\s+hospital\b|\s+infirmary\b)/i],
   ["general",   /\bgeneral\b\s*(?:&|and)\s*msk/i],
 ];
 
@@ -52,7 +52,9 @@ const LOCUM = [
 ];
 const PERMANENT = [
   /\bpermanent\b/i, /\bperm\b/i, /\bsubstantive\b/i,
-  /per annum|\bp\.a\.\b|annual salary/i,
+  // "p.a." needs the lookahead, not \b: after a literal "." a \b would demand a word
+  // character next, so "£38k p.a. plus benefits" would never match.
+  /per annum|\bp\.a\.(?!\w)|annual salary/i,
 ];
 
 // imaging: any modality or specialism hit, or an imaging-department term in the brief.
