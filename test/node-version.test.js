@@ -27,7 +27,9 @@ test("the running Node satisfies engines.node, or this suite is not measuring wh
   assert.ok(floor, `engines.node ${JSON.stringify(range)} is not a plain >= floor; update this gate with it`);
 
   const need = [Number(floor[1]), Number(floor[2] ?? 0), Number(floor[3] ?? 0)];
-  const have = process.versions.node.split(".").map(Number);
+  // parseInt, not Number: a pre-release build reports "24.0.0-nightly…", and Number("0-…")
+  // is NaN — which would fail a Node well above the floor with a message blaming the version.
+  const have = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
   const satisfied =
     have[0] !== need[0] ? have[0] > need[0] : have[1] !== need[1] ? have[1] > need[1] : have[2] >= need[2];
 
