@@ -35,8 +35,15 @@ async function withFetch(respond, fn) {
 
 const ok = () => new Response(JSON.stringify({ id: "msg_1" }), { status: 200 });
 
-/** An invite seeded through the production writer, interview `days` out. */
-async function seedInvite(d1, { id = "inv-1", days = 1, email = "c@example.com" } = {}) {
+/**
+ * An invite seeded through the production writer, interview `days` out.
+ *
+ * `sentDaysAgo` backdates `sent_at` by direct write (the writer stamps NOW, always) and
+ * defaults to 1, because #39 made "sent today" mean "skip the reminder" — an eve-created
+ * invite's evening email is the invite itself. Every sweep test here wants an invite the
+ * candidate was NOT emailed about today; the #39 tests pass 0 to opt into today explicitly.
+ */
+async function seedInvite(d1, { id = "inv-1", days = 1, email = "c@example.com", sentDaysAgo = 1 } = {}) {
   await createInvite(d1, {
     id,
     clientId: "c-1",
@@ -45,6 +52,9 @@ async function seedInvite(d1, { id = "inv-1", days = 1, email = "c@example.com" 
     tokenHash: await hashToken(`token-${id}`),
     expiresAt: at(days + 14),
   });
+  if (sentDaysAgo !== 0) {
+    await d1.prepare("UPDATE invite SET sent_at = ? WHERE id = ?").bind(at(-sentDaysAgo), id).run();
+  }
 }
 
 const ENV = (d1) => ({ DB: d1, RESEND_API_KEY: "re_test_key", PREP_BASE_URL: BASE });
@@ -195,6 +205,41 @@ test("dueReminders selects id and email and nothing else", { skip }, async () =>
   const due = await dueReminders(d1);
   assert.equal(due.length, 1);
   assert.deepEqual(Object.keys(due[0]).sort(), ["email", "id"], "data minimisation, structurally");
+});
+
+// ── #39: no reminder on the day the invite itself arrived ──────────────────────────────
+
+test("#39: an invite created on the eve is skipped — its evening email is the invite", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await seedInvite(d1, { sentDaysAgo: 0 });
+
+  assert.deepEqual(await dueReminders(d1), [], "sent today means not due");
+  const { calls } = await withFetch(ok, () => sendDueReminders(ENV(d1)));
+  assert.equal(calls.length, 0, "no back-to-back second email");
+});
+
+test("#39: an invite sent yesterday is still due — the skip is same-day only", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await seedInvite(d1, { sentDaysAgo: 1 });
+
+  const { calls } = await withFetch(ok, () => sendDueReminders(ENV(d1)));
+  assert.equal(calls.length, 1, "yesterday's invite gets its reminder as before");
+});
+
+test("#39: a re-send TODAY silences the whole candidate, not just today's row", { skip }, async () => {
+  // The clause lives in the HAVING over max(sent_at) precisely for this: a per-row WHERE
+  // would leave the older invite due while today's re-send just mailed — the same evening's
+  // second email, back through the side door.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await seedInvite(d1, { id: "inv-old", sentDaysAgo: 1 });
+  await seedInvite(d1, { id: "inv-new", sentDaysAgo: 0 });
+
+  assert.deepEqual(await dueReminders(d1), [], "the candidate was emailed today; that is the evening's email");
+  const { calls } = await withFetch(ok, () => sendDueReminders(ENV(d1)));
+  assert.equal(calls.length, 0);
 });
 
 test("the copy passes the tone gate: no exclamation, no streak, the subject exact", { skip }, async () => {

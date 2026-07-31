@@ -10,17 +10,21 @@ import { onRequest } from "../functions/prep/_middleware.js";
 import { createInvite, hashToken } from "../src/portal/store.js";
 import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
 
-const seedInvite = (d1, { id, days }) =>
-  hashToken(`token-${id}`).then((tokenHash) =>
-    createInvite(d1, {
-      id,
-      clientId: "c-1",
-      email: "c@example.com",
-      interviewAt: at(days),
-      tokenHash,
-      expiresAt: at(days + 14),
-    }),
-  );
+// sent_at is backdated to yesterday because #39 made "sent today" mean "no reminder" — the
+// writer stamps NOW, and an un-backdated seed here would leave nothing due, which this
+// file's first test would wait on forever (its release loop spins until the send starts).
+const seedInvite = async (d1, { id, days }) => {
+  const tokenHash = await hashToken(`token-${id}`);
+  await createInvite(d1, {
+    id,
+    clientId: "c-1",
+    email: "c@example.com",
+    interviewAt: at(days),
+    tokenHash,
+    expiresAt: at(days + 14),
+  });
+  await d1.prepare("UPDATE invite SET sent_at = ? WHERE id = ?").bind(at(-1), id).run();
+};
 
 test("the response does not wait for the sends: the sweep rides waitUntil", { skip }, async () => {
   const db = openMigrated();

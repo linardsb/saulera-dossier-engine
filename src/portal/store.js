@@ -643,6 +643,15 @@ export async function observeHabit(db, { roleId, label } = {}) {
  * the same evening. The group spans claimed rows too — `HAVING max(reminder_sent_at)
  * IS NULL` — because filtering claimed rows in the WHERE would promote the duplicate
  * to due on the very next sweep. min(id) makes the chosen row deterministic.
+ *
+ * And no reminder on the day the candidate was already emailed (#39): an invite created
+ * on the eve is immediately due, which mailed the invite and "Your interview is
+ * tomorrow" back to back. `date(max(sent_at)) < date('now')` asks "did today already
+ * bring this candidate an email?" of the NEWEST invite, in the HAVING like the clause
+ * above it — a per-row filter in the WHERE would leave an older invite due while
+ * today's re-send just mailed, the same evening's second email through the side door.
+ * The cost, stated openly: an eve-created invite is never reminded at all, because the
+ * sweep's window IS the eve — the invite email is that evening's email.
  */
 export async function dueReminders(db) {
   const { results } = await db
@@ -650,7 +659,8 @@ export async function dueReminders(db) {
       `SELECT min(id) AS id, email FROM invite
         WHERE date(interview_at) = date('now', '+1 day')
         GROUP BY email
-       HAVING max(reminder_sent_at) IS NULL`,
+       HAVING max(reminder_sent_at) IS NULL
+          AND date(max(sent_at)) < date('now')`,
     )
     .all();
   return results ?? [];
