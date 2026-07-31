@@ -108,15 +108,19 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
 
 // ── the invite (#22, decision 10) ──────────────────────────────────────────────────────
 //
-// TWO EMAILS, TWO RULES, ON PURPOSE. `sendOtpEmail` above deliberately carries NO link, and
-// test/prep-email.test.js asserts that absence for a stated anti-phishing reason. This
-// message's link is its entire mechanism: it is the one click the whole portal exists to
-// make work, and it arrives unprompted rather than in answer to a code request.
+// THREE EMAILS, THREE RULES, ON PURPOSE. `sendOtpEmail` above deliberately carries NO link,
+// and test/prep-email.test.js asserts that absence for a stated anti-phishing reason. The
+// invite's tokenized link is its entire mechanism: it is the one click the whole portal
+// exists to make work, and it arrives unprompted rather than in answer to a code request.
+// The reminder (#25, below) carries a PLAIN portal-entry link and never a token — no raw
+// token exists to send (only its hash rests), and minting one would rotate `token_hash`
+// under a live session.
 //
-// The two are different BY DESIGN. Neither should be "harmonised" toward the other —
-// removing this link breaks the product, and adding one to the OTP mail teaches candidates
-// that a message asking them to click is normal, which is the lesson a phishing email needs
-// them to have already learned.
+// The three are different BY DESIGN. None should be "harmonised" toward another —
+// removing the invite's link breaks the product, adding one to the OTP mail teaches
+// candidates that a message asking them to click is normal (the lesson a phishing email
+// needs them to have already learned), and a tokenized reminder link would be a second
+// credential in flight for a message that only needs to say "it is ready".
 
 /** How long an agency name may get before it stops being a display name. */
 const NAME_MAX = 120;
@@ -232,4 +236,52 @@ export async function sendInviteEmail(
   ].join("\n");
 
   return sendEmail(env, { to, subject, text, html, from: mailFrom(env, agencyName) });
+}
+
+// ── the reminder (#25, decision 17) ────────────────────────────────────────────────────
+
+/**
+ * The single reminder: the interview is tomorrow and the day-before session is ready.
+ *
+ * One calm paragraph and the portal-entry link — `${base}/prep/login`, NEVER a token (see
+ * the three-emails note above). SPEC's tone rules hold hardest here: no deadline pressure,
+ * no "don't forget", no exclamation marks, no streak language, and nothing that implies
+ * the tool predicts the outcome. Decision 17 says this is the only nudge that will ever
+ * exist, so it reads like a courtesy, not a campaign.
+ *
+ * Never logs the link or the recipient. `sendEmail` logs the status alone.
+ */
+export async function sendReminderEmail(env, { to, agencyName, link } = {}) {
+  const agency = String(agencyName || "").trim() || "your recruitment agency";
+  const url = String(link ?? "");
+
+  const text = [
+    "Hello,",
+    "",
+    "Your interview is tomorrow. Your day-before session is ready — a short run through",
+    "what you already have, and the practical details for the day.",
+    "",
+    "Open it here:",
+    url,
+    "",
+    `— ${agency}`,
+  ].join("\n");
+
+  // Inline styles, as ever: mail clients strip <style> blocks and resolve no custom
+  // property, so public/tokens.css cannot reach here (sendOtpEmail's note).
+  const html = [
+    `<p>Hello,</p>`,
+    `<p>Your interview is tomorrow. Your day-before session is ready — a short run through`,
+    `what you already have, and the practical details for the day.</p>`,
+    `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your day-before session</a></p>`,
+    `<p style="color:#666666;font-size:13px">— ${escapeHtml(agency)}</p>`,
+  ].join("\n");
+
+  return sendEmail(env, {
+    to,
+    subject: "Your interview is tomorrow",
+    text,
+    html,
+    from: mailFrom(env, agencyName),
+  });
 }

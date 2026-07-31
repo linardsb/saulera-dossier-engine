@@ -72,6 +72,12 @@ export const COPY = {
   habitLine: "A pattern worth knowing about: ",
   coveredPrefix: "Covered so far: ",
 
+  dayBeforeIntro:
+    "Your interview is tomorrow. This is a short run through what you already have — not new " +
+    "practice.",
+  dayBeforeNote:
+    "Keep it brief and stop when the page suggests it. What you have is enough to work from.",
+
   closeImproved: "What improved today",
   closeHonest:
     "Rates move over several attempts, and today's attempts are what move them. It will not " +
@@ -162,6 +168,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
     moved: [], // labels whose rate moved this session
     habits: [], // standing habits plus any announced this session
     inFlight: false, // one attempt at a time
+    dayBefore: false, // the GET's day_before flag, fixed at load (#25)
   };
 
   // Seeds each renderBlocks call's ids. The transcript accumulates entries and the hidden prime
@@ -231,6 +238,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
     }
 
     state.session = payload;
+    state.dayBefore = payload.day_before === true;
     state.habits = (Array.isArray(payload.habits) ? payload.habits : []).map(String);
     for (const competency of payload.competencies) {
       if (competency.covered) state.covered.push(String(competency.label));
@@ -260,6 +268,32 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
   function renderPrime(brief) {
     state.phase = "prime";
     const payload = state.session;
+
+    // The day-before prime (#25) is a run-through's, not a drill's: the practical details
+    // first, then the day-before block, then the start button — no PrimerCard (no
+    // re-priming the day before), no progress, no habits, no last close.
+    if (state.dayBefore) {
+      const blocks = [];
+      const logistics = (brief?.blocks ?? []).find((b) => b && b.name === "LogisticsRail");
+      if (logistics) blocks.push({ name: "LogisticsRail", props: logistics.props });
+      blocks.push({
+        name: "DayBeforeMode",
+        props: {
+          intro: COPY.dayBeforeIntro,
+          focus: (Array.isArray(payload.day_before_focus) ? payload.day_before_focus : []).map(String),
+          note: COPY.dayBeforeNote,
+        },
+      });
+      renderBlocks({ blocks, competencies: [] }, primeMount, { doc, idPrefix: "prime" });
+
+      if (!payload.next_question) {
+        state.phase = "done";
+        startButton.hidden = true;
+        primeMount.appendChild(el(doc, "p", "prep-caption", COPY.doneForNow));
+      }
+      actPrime.hidden = false;
+      return;
+    }
 
     const blocks = [];
     const primer = (brief?.blocks ?? []).find((b) => b && b.name === "PrimerCard");
@@ -581,7 +615,8 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
       // SPEC's "say so, because it won't feel like progress": the honest line, not silence.
       closeMount.appendChild(el(doc, "p", "prep-body", COPY.closeHonest));
     }
-    if (state.currentQuestion) {
+    // No "queued for next time" the day before — there is no next time (#25).
+    if (state.currentQuestion && !state.dayBefore) {
       closeMount.appendChild(el(doc, "p", "prep-label", COPY.closeNext));
       closeMount.appendChild(el(doc, "p", "prep-body", state.currentQuestion.text));
     }

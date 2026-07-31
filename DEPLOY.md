@@ -550,6 +550,34 @@ send. That is not a regression in what worked: local dev has no `RESEND_API_KEY`
 send already stopped one step further on. Every 400 gate on `/api/prep/send` and
 `/api/prep/prepare` is still exercisable locally, which is what the smoke-test sweep below uses.
 
+### The one reminder email (#25, decision 17)
+
+The deployment sends a third mail: **"Your interview is tomorrow"**, once per invite, ever.
+There is no cron on Pages, so the trigger is the same lazy pattern as the retention purge —
+`functions/prep/_middleware.js` runs `sendDueReminders` on **every** `/prep/*` request, static
+assets included. Any portal traffic at all on the day before a candidate's interview delivers
+their reminder, whether or not the candidate themselves ever comes back.
+
+**The documented limitation:** a candidate is only reminded if *some* portal traffic occurs on
+the day before their interview, or the operator pokes the deployment. The assurance path is
+`scripts/remind.py` (`npm run remind:remote`, reads `PREP_BASE_URL`) — one GET at
+`/prep/login`, which runs the middleware and therefore the sweep. Run it on a calendar reminder
+each morning and the promise holds through a zero-traffic week. It cannot print a sent count
+(the middleware is silent by design); the operator's assurance is the claim column:
+
+```bash
+npx wrangler d1 execute dossier-engine --remote \
+  --command "SELECT count(*) FROM invite WHERE reminder_sent_at IS NOT NULL"
+```
+
+**At-most-once, deliberately.** The sweep claims `invite.reminder_sent_at` atomically *before*
+sending, and a failed send (a Resend outage during the one attempt) is logged and **skipped,
+not retried** — decision 17's "exactly one reminder" outranks delivery, because a
+rollback-and-retry could double-send when Resend accepted but the response read failed. The
+sweep also bails **before claiming** unless `DB`, `RESEND_API_KEY` and a valid `PREP_BASE_URL`
+are all present, so a half-configured deployment cannot burn an invite's one reminder on
+nothing. The reminder links to `/prep/login` (the OTP way back in), never a tokenized link.
+
 ---
 
 ## 6. Smoke-test checklist

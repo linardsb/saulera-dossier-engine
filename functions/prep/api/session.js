@@ -1,5 +1,6 @@
 // GET /prep/api/session -> 200 { competencies, next_question, habits, last_close,
-//                                turns_this_session, suggest_close }
+//                                turns_this_session, suggest_close, day_before,
+//                                day_before_focus }
 //
 // The drill's resume point (#23): everything a candidate's browser needs to pick the
 // session back up, derived entirely from D1 — there is no session table, so there is
@@ -32,8 +33,12 @@ import {
   leastRecentlyAttempted,
   movement,
   closePayload,
+  daysToInterview,
+  isDayBefore,
+  confidenceQuestion,
   SESSION_GAP_MINUTES,
   SUGGEST_CLOSE_TURNS,
+  DAY_BEFORE_CLOSE_TURNS,
 } from "../../../src/prep/targeting.js";
 import { surfacedHabits, HABIT_LABELS } from "../../../src/prep/habits.js";
 import { toUtcDate } from "../../../src/prep/dates.js";
@@ -59,6 +64,10 @@ export async function onRequestGet(context) {
     const habitRows = await habitsByRole(env.DB, role.role_id);
 
     const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now });
+
+    // Day-before is DERIVED, never stored (#25): the same route `now`, the same stamp the
+    // spacing already reads. Day-of counts; post-interview does not.
+    const dayBefore = isDayBefore(daysToInterview(role.interview_at, now));
 
     // The session boundary is derived, never stored: the last block of attempts is the
     // CURRENT session only while its last attempt is under 30 minutes old.
@@ -95,8 +104,20 @@ export async function onRequestGet(context) {
       }
     }
 
+    // The confidence rep (#25): a day-before session that has not started yet opens on the
+    // candidate's strongest covered competency, and falls back to normal targeting when no
+    // competency has a success to open on.
+    let nextQuestion = null;
+    if (dayBefore && !current) {
+      nextQuestion = confidenceQuestion({
+        ranked: state.ranked,
+        questionsBy: state.questionsBy,
+        attemptsBy: state.attemptsBy,
+      });
+    }
+
     // Zero model calls: a {mint} demand degrades to re-serving, never to the sdk.
-    let nextQuestion = state.demand.question ?? null;
+    if (!nextQuestion) nextQuestion = state.demand.question ?? null;
     if (!nextQuestion && state.demand.mint && state.target) {
       nextQuestion = leastRecentlyAttempted(
         state.questionsBy.get(state.target.id) ?? [],
@@ -115,7 +136,13 @@ export async function onRequestGet(context) {
       habits: surfacedHabits(habitRows).map((h) => HABIT_LABELS[h.label] ?? h.label),
       last_close: lastClose,
       turns_this_session: current ? current.length : 0,
-      suggest_close: current ? current.length >= SUGGEST_CLOSE_TURNS : false,
+      suggest_close: current
+        ? current.length >= (dayBefore ? DAY_BEFORE_CLOSE_TURNS : SUGGEST_CLOSE_TURNS)
+        : false,
+      day_before: dayBefore,
+      // Labels in RANK order, because `competencies` above is store order (by id) — the
+      // DayBeforeMode focus list must name the top-ranked ones. Labels only, never a rank.
+      day_before_focus: dayBefore ? state.ranked.slice(0, 3).map((c) => c.label) : [],
     });
   } catch (err) {
     return errorResponse(err);

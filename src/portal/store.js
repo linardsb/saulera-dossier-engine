@@ -626,6 +626,44 @@ export async function observeHabit(db, { roleId, label } = {}) {
   return { evidenceCount: evidenceCount ?? 1 };
 }
 
+// ── the one reminder (#25, decision 17) ────────────────────────────────────────────────
+
+/**
+ * The invites due their single reminder: interview tomorrow (UTC calendar, SQLite's own
+ * clock) and never reminded. `date()` parses both the space and 'T' stamp forms the schema
+ * admits, and the comparison rides `invite_by_interview`. No status filter needed — expiry
+ * is interview + 14 days, so a day-before invite is live by construction, and a deleted
+ * invite has no row. id + email and NOTHING else: the email builder needs nothing more,
+ * and `role_title` lives only inside brief_json, deliberately not parsed in a sweep.
+ */
+export async function dueReminders(db) {
+  const { results } = await db
+    .prepare(
+      `SELECT id, email FROM invite
+        WHERE reminder_sent_at IS NULL
+          AND date(interview_at) = date('now', '+1 day')`,
+    )
+    .all();
+  return results ?? [];
+}
+
+/**
+ * The atomic claim, openInvite's move restated: exactly one caller finds the column still
+ * NULL, and the loser sees changes === 0. There is no read-then-write window to lose, which
+ * is what makes decision 17's "exactly one reminder" structural rather than hopeful. The
+ * claim is at-most-once BY DESIGN — the caller never rolls it back on a failed send.
+ */
+export async function claimReminder(db, inviteId) {
+  const result = await db
+    .prepare(
+      `UPDATE invite SET reminder_sent_at = datetime('now')
+        WHERE id = ? AND reminder_sent_at IS NULL`,
+    )
+    .bind(String(inviteId ?? ""))
+    .run();
+  return (result.meta?.changes ?? 0) === 1;
+}
+
 /** The standing habit list, for session GET's plain-language surface. */
 export async function habitsByRole(db, roleId) {
   const { results } = await db

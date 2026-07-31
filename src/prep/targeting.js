@@ -255,6 +255,45 @@ export function closePayload({ competencies, attemptsByCompetency, sessionStart,
 export const SUGGEST_CLOSE_TURNS = 6;
 
 /**
+ * The day-before session's close threshold — half the normal six, because SPEC's 1–3-day
+ * row says coverage beats depth: a day-before session is a run-through, not a drill.
+ */
+export const DAY_BEFORE_CLOSE_TURNS = 3;
+
+/**
+ * Whether `days` (from daysToInterview) puts a session in day-before shape. Day-of counts —
+ * opening the portal on the interview morning must not start a full drill. Negative days
+ * (post-interview drilling, decision 11) do not: that is a normal session again.
+ */
+export function isDayBefore(days) {
+  return days === 0 || days === 1;
+}
+
+/**
+ * The confidence rep (#25): the day-before session's FIRST question targets the candidate's
+ * STRONGEST competency that has at least one prior success — highest readiness, inverting
+ * the normal least-ready targeting — so the session opens on solid ground. Within it, the
+ * least-recently-attempted question. Ties on readiness fall to rank order, so the pick is
+ * deterministic. Returns the question row, or null when no competency has a non-revealed
+ * success yet — the caller falls back to normal targeting.
+ */
+export function confidenceQuestion({ ranked, questionsBy, attemptsBy }) {
+  let best = null;
+  let bestReadiness = -1;
+  for (const c of ranked) {
+    const attempts = attemptsBy.get(c.id) ?? [];
+    if (!attempts.some(isSuccess)) continue;
+    const r = readiness(c);
+    if (r > bestReadiness) {
+      bestReadiness = r;
+      best = c;
+    }
+  }
+  if (!best) return null;
+  return leastRecentlyAttempted(questionsBy.get(best.id) ?? [], attemptsBy.get(best.id) ?? []);
+}
+
+/**
  * The whole targeting derivation both routes share, composed once. src/http.js's header
  * rules out helper modules under functions/, and the two Functions repeating this walk is
  * how the two would drift — so it lives here, pure and tested.

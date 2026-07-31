@@ -100,13 +100,16 @@ function fakeClient(overrides = {}) {
 }
 
 /** A real invite + handover + live session cookie, all through production writers. */
-async function seed(d1, { payload = PAYLOAD(), inviteId = "inv-1", email = "c@example.com" } = {}) {
+async function seed(
+  d1,
+  { payload = PAYLOAD(), inviteId = "inv-1", email = "c@example.com", interviewAt = at(7) } = {},
+) {
   const token = mintToken();
   await createInvite(d1, {
     id: inviteId,
     clientId: "c-1",
     email,
-    interviewAt: at(7),
+    interviewAt,
     tokenHash: await hashToken(token),
     expiresAt: at(21),
   });
@@ -543,6 +546,95 @@ test("a double-clicked send spends one turn, and the button says so while in fli
   await Promise.all([inFlight, second]);
   assert.equal(attemptCount(db), 1, "one attempt, however many clicks");
   assert.equal(visibleYouEntries(s.log).length, 1);
+});
+
+/* ── group 5b: day-before mode (#25) ───────────────────────────────────────────────────── */
+
+test("day-before prime: LogisticsRail first, then DayBeforeMode, and no PrimerCard", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1, { interviewAt: at(1) });
+  const s = await boot({ d1, client: fakeClient(), token });
+
+  assert.equal(s.controller.state.dayBefore, true, "the GET's flag reached the controller");
+  const primeText = textOf(s.primeBlocks);
+  const logisticsAt = primeText.indexOf("The practical details");
+  const dayBeforeAt = primeText.indexOf("The day before");
+  assert.ok(logisticsAt >= 0, "the LogisticsRail rendered");
+  assert.ok(dayBeforeAt >= 0, "the DayBeforeMode rendered");
+  assert.ok(logisticsAt < dayBeforeAt, "the practical details come first");
+  assert.ok(!primeText.includes("What this role is really about"), "no PrimerCard — a run-through, not re-priming");
+  assert.ok(!primeText.includes(COPY.primeNote), "no ProgressStrip either");
+  assert.ok(primeText.includes(COPY.dayBeforeIntro));
+  assert.ok(primeText.includes(COPY.dayBeforeNote));
+});
+
+test("day-before focus lists the top-ranked competency labels, in rank order", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1, { interviewAt: at(1) });
+  const s = await boot({ d1, client: fakeClient(), token });
+
+  const focus = s.controller.state.session.day_before_focus;
+  assert.equal(focus[0], "Working autonomously on a rural caseload", "importance 5 ranks first");
+  assert.equal(focus.length, 3);
+  assert.ok(textOf(s.primeBlocks).includes(focus[0]), "the labels render under the focus head");
+});
+
+test("provably shorter: three turns suggest the close at at(1), and do not at at(7)", { skip }, async () => {
+  for (const [interviewAt, hiddenAfterThree] of [[at(1), false], [at(7), true]]) {
+    const db = openMigrated();
+    const d1 = d1Shape(db);
+    const { token } = await seed(d1, { interviewAt });
+    const s = await boot({ d1, client: fakeClient(), token });
+    s.controller.start();
+    for (let i = 0; i < 3; i += 1) {
+      s.answer.value = "An answer, toward the day-before threshold.";
+      await s.controller.submitAttempt();
+    }
+    assert.equal(
+      s.closeButton.hidden,
+      hiddenAfterThree,
+      `after 3 turns, closeButton.hidden should be ${hiddenAfterThree} with the interview at ${interviewAt}`,
+    );
+  }
+});
+
+test("the day-before close has no 'queued for next time' — there is no next time", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1, { interviewAt: at(1) });
+  const s = await boot({ d1, client: fakeClient(), token });
+  const { controller } = s;
+  controller.start();
+
+  for (let i = 0; i < 3; i += 1) {
+    s.answer.value = "An answer with the result first.";
+    await controller.submitAttempt();
+  }
+  assert.ok(controller.state.currentQuestion, "a question is on deck — the section WOULD render normally");
+  controller.closeSession();
+  const closeText = textOf(s.closeBody);
+  assert.ok(!closeText.includes(COPY.closeNext), "no queued section the day before");
+  assert.ok(
+    closeText.includes(COPY.closeImproved) || closeText.includes(COPY.closeHonest),
+    "the close still says something true about movement",
+  );
+});
+
+test("day-of gets the day-before shape; two days out does not", { skip }, async () => {
+  for (const [interviewAt, expected] of [[at(0), true], [at(2), false]]) {
+    const db = openMigrated();
+    const d1 = d1Shape(db);
+    const { token } = await seed(d1, { interviewAt });
+    const s = await boot({ d1, client: fakeClient(), token });
+    assert.equal(s.controller.state.dayBefore, expected, `day_before at ${interviewAt}`);
+    assert.equal(
+      textOf(s.primeBlocks).includes("The day before"),
+      expected,
+      `the prime branch at ${interviewAt}`,
+    );
+  }
 });
 
 /* ── group 6: the source scans and CSS gates ───────────────────────────────────────────── */
