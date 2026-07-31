@@ -36,6 +36,7 @@ import {
 import { hashOtpCode, mintToken, SESSION_COOKIE } from "../src/prep/tokens.js";
 import { sessionFromRequest, requireSession } from "../src/prep/session.js";
 import { onRequestPost as deleteRoute } from "../functions/prep/api/delete.js";
+import { onRequestPost as otpRoute } from "../functions/prep/auth/otp.js";
 import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
 
 const rowOf = (db, id) => db.prepare("SELECT * FROM invite WHERE id = ?").get(id);
@@ -406,6 +407,44 @@ test("cooldown 0 keeps the lockout semantics — the old world, opted into expli
     { ok: false, reason: "invalid_code" },
     "with no cooldown the second issue still kills the first code",
   );
+});
+
+test("the otp route: three branches, one answer, one email (PR #41 review, Medium 1)", { skip }, async () => {
+  const db = openMigrated();
+  const { d1 } = await seed(db);
+
+  // The route is where the cooldown's two halves meet: issueOtp decides, and the mail block
+  // obeys `issued`. This test pins the wiring — drop `cooldownMinutes` from the call, or move
+  // the 202 inside `if (issued)`, and this fails while every store-layer test stays green.
+  const sends = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sends.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ id: "email-1" }), { status: 200 });
+  };
+  try {
+    const env = { DB: d1, RESEND_API_KEY: "re_test" };
+    /** No Sec-Fetch-Site and no Origin is the curl path, as deleteRequest below notes. */
+    const requestFor = (email) => ({ headers: { get: () => null }, json: async () => ({ email }) });
+
+    const first = await otpRoute({ request: requestFor("live@example.com"), env });
+    const standing = otpRows(db, "inv-L")[0].code_hash;
+    const second = await otpRoute({ request: requestFor("live@example.com"), env });
+    const unknown = await otpRoute({ request: requestFor("nobody@example.com"), env });
+
+    // The anti-enumeration contract: issued, cooling down and no-invite are indistinguishable.
+    for (const response of [first, second, unknown]) {
+      assert.equal(response.status, 202);
+      assert.deepEqual(await response.json(), { ok: true });
+    }
+    assert.equal(sends.length, 1, "the coalesced repeat and the unknown address send nothing");
+    assert.equal(sends[0].to, "live@example.com", "and the one email went to the invite's address");
+    const rows = otpRows(db, "inv-L");
+    assert.equal(rows.length, 1, "one live code throughout");
+    assert.equal(rows[0].code_hash, standing, "the repeat request left the standing code alone");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("a code issued for one invite cannot be spent on another", { skip }, async () => {

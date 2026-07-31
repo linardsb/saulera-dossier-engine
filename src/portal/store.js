@@ -399,6 +399,17 @@ export async function issueOtp(db, { inviteId, codeHash, ttlMinutes, cooldownMin
     // cooldown" is `now < expires_at − (TTL − cooldown)`. No new column, and freshness
     // implies liveness because cooldown < TTL is enforced above. The bound is precomputed
     // to one integer for the same reason the TTL below is bound, not templated.
+    //
+    // Two accepted assumptions, weighed on review (PR #41):
+    // - The derivation uses THIS call's ttlMinutes, so a row minted under a different TTL
+    //   (i.e. OTP_TTL_MINUTES changed between deploys) gets a skewed window for up to one
+    //   TTL, then self-heals. It can never read a dead row as fresh — the bound is always
+    //   earlier than expires_at — so the skew delays or skips a coalesce, nothing worse.
+    // - This is a read-then-act with no transaction on D1, unlike openInvite's single
+    //   statement: parallel requests at a window boundary can each see no fresh row and all
+    //   rotate. The burst is bounded by concurrency, the newest email still holds the live
+    //   code, and the next window coalesces again — accepted over a WHERE-guarded DELETE
+    //   dance that would obscure the one decision this comment exists to explain.
     const fresh = await db
       .prepare(
         `SELECT 1 AS fresh FROM otp
