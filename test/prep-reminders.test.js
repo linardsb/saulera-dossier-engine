@@ -143,6 +143,51 @@ test("no further email, ever: the next day's sweep sends nothing, opened or not"
   assert.equal(second.calls.length, 0, "decision 17: no other nudge exists");
 });
 
+test("a re-sent invite is one candidate, not two emails: the due set dedupes by email", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await seedInvite(d1, { id: "inv-old" });
+  await seedInvite(d1, { id: "inv-new" }); // the re-sent "lost" invite: same email, tomorrow
+  await seedInvite(d1, { id: "inv-other", email: "other@example.com" });
+
+  const { calls } = await withFetch(ok, () => sendDueReminders(ENV(d1)));
+  assert.equal(calls.length, 2, "one email per candidate, not per invite row");
+  const recipients = calls.map((c) => JSON.parse(c.init.body).to).sort();
+  assert.deepEqual(recipients, ["c@example.com", "other@example.com"]);
+});
+
+test("the duplicate row is never promoted to due once its sibling is claimed", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await seedInvite(d1, { id: "inv-old" });
+  await seedInvite(d1, { id: "inv-new" });
+
+  // The trap a WHERE-side filter would fall into: sweep one claims a row, sweep two sees
+  // the unclaimed sibling as the new min and mails the same person again.
+  const { calls } = await withFetch(ok, async () => {
+    await sendDueReminders(ENV(d1));
+    await sendDueReminders(ENV(d1));
+  });
+  assert.equal(calls.length, 1, "one email across two sweeps, whichever row carries the claim");
+
+  const stamped = db
+    .prepare("SELECT COUNT(*) AS n FROM invite WHERE reminder_sent_at IS NOT NULL")
+    .get().n;
+  assert.equal(stamped, 1, "exactly one sibling is claimed; the other stays NULL and inert");
+});
+
+test("a quiet sweep costs one read: no agency fetch when nothing is due", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db); // no invites at all
+  const statements = [];
+  const spy = { prepare: (sql) => (statements.push(sql), d1.prepare(sql)) };
+
+  const { calls } = await withFetch(ok, () => sendDueReminders(ENV(spy)));
+  assert.equal(calls.length, 0, "nothing sent");
+  assert.equal(statements.length, 1, "dueReminders alone — the steady state pays one round-trip");
+  assert.ok(!/agency/i.test(statements[0]), "and it is not the agency read");
+});
+
 test("dueReminders selects id and email and nothing else", { skip }, async () => {
   const db = openMigrated();
   const d1 = d1Shape(db);

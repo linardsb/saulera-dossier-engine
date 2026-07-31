@@ -39,8 +39,11 @@ export async function sendDueReminders(env) {
   const base = baseUrl(env);
   if (!env?.DB || !env?.RESEND_API_KEY || !base) return;
 
-  const agency = await getAgency(env.DB).catch(() => null);
+  // Due first, agency only if anything is: the sweep rides every /prep/* request, so the
+  // steady-state quiet day must cost one D1 round-trip, not two.
   const due = await dueReminders(env.DB);
+  if (due.length === 0) return;
+  const agency = await getAgency(env.DB).catch(() => null);
 
   // Sequential on purpose: the due set is tiny, and a Promise.all would race the claims
   // for no gain. Two concurrent REQUESTS still cannot double-send — the claim has one

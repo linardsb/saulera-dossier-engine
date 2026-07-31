@@ -630,18 +630,27 @@ export async function observeHabit(db, { roleId, label } = {}) {
 
 /**
  * The invites due their single reminder: interview tomorrow (UTC calendar, SQLite's own
- * clock) and never reminded. `date()` parses both the space and 'T' stamp forms the schema
- * admits, and the comparison rides `invite_by_interview`. No status filter needed — expiry
+ * clock) and never reminded. Wrapping interview_at in `date()` defeats `invite_by_interview`
+ * — a full scan, purgeExpired's deliberate trade restated: the schema admits both the space
+ * and 'T' stamp forms, which raw string comparison would misorder, and invite-count scale
+ * makes the scan free. No status filter needed — expiry
  * is interview + 14 days, so a day-before invite is live by construction, and a deleted
  * invite has no row. id + email and NOTHING else: the email builder needs nothing more,
  * and `role_title` lives only inside brief_json, deliberately not parsed in a sweep.
+ *
+ * ONE row per email (decision 17 is per-candidate, not per-invite): a re-sent "lost"
+ * invite is a second row for the same person, and two rows must not mean two emails on
+ * the same evening. The group spans claimed rows too — `HAVING max(reminder_sent_at)
+ * IS NULL` — because filtering claimed rows in the WHERE would promote the duplicate
+ * to due on the very next sweep. min(id) makes the chosen row deterministic.
  */
 export async function dueReminders(db) {
   const { results } = await db
     .prepare(
-      `SELECT id, email FROM invite
-        WHERE reminder_sent_at IS NULL
-          AND date(interview_at) = date('now', '+1 day')`,
+      `SELECT min(id) AS id, email FROM invite
+        WHERE date(interview_at) = date('now', '+1 day')
+        GROUP BY email
+       HAVING max(reminder_sent_at) IS NULL`,
     )
     .all();
   return results ?? [];
