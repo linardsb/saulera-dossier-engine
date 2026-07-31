@@ -189,7 +189,11 @@ const EXPECTED_COLUMNS = {
   // #25 adds reminder_sent_at: the nullable set-exactly-once stamp that IS decision 17's
   // idempotency (claimed with UPDATE ... WHERE reminder_sent_at IS NULL). Still no plaintext
   // token, and the column dies with the row.
-  invite: ["client_id", "email", "expires_at", "id", "interview_at", "opened_at", "reminder_sent_at", "sent_at", "status", "token_hash"],
+  // #34 adds send_key: the browser-minted per-prepared-payload key whose UNIQUE index IS the
+  // send's idempotency — a standing key means the send fully succeeded (the rollback deletes
+  // the row and frees it), so a retry answers 409 already_sent instead of a second invite.
+  // Nullable, and NULL for every pre-#34 row and key-less caller.
+  invite: ["client_id", "email", "expires_at", "id", "interview_at", "opened_at", "reminder_sent_at", "send_key", "sent_at", "status", "token_hash"],
   candidate_role: ["brief_json", "cv_text", "ethos_text", "id", "invite_id", "jd_text"],
   competency: ["id", "importance", "label", "role_id", "source_quote", "stage", "success_rate"],
   question: ["axis", "competency_id", "difficulty", "id", "text", "variant_of"],

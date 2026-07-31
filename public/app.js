@@ -199,6 +199,13 @@
       return "Sent to " + email + ". They will get an email with a link to their own " +
         "preparation page. The Prep sent counter did not record this one.";
     },
+    // #34: the server refused a duplicate because the FIRST try landed — the retry after a
+    // timeout. Success wording, because from the recruiter's side it is: the candidate has
+    // their email, and nothing was sent or counted twice.
+    sendAlreadyDone: function (email) {
+      return "Already sent to " + email + " — your earlier try went through. They have " +
+        "their email with the link. To send another, press Start again.";
+    },
 
     // Failures. Each one names what happened AND what is still true, because the expensive
     // thing on this screen is the prepared brief and a recruiter who thinks it is gone will
@@ -297,6 +304,9 @@
     // file is the rule; this is the object it costs the most to obey it for.
     sendPrepared: null,
     sendStruck: null,
+    // #34: the idempotency key for the prepared payload above; minted in renderPreview,
+    // posted by confirmSend, lives and dies with sendPrepared.
+    sendKey: null,
     // R7's terminal flag. Set in the SUCCESS handler and NOWHERE ELSE — see confirmSend.
     sendDone: false,
     sendStartedAt: null,
@@ -517,6 +527,7 @@
     stopSendClock();
     state.sendPrepared = null;
     state.sendStruck = null;
+    state.sendKey = null;
     state.sendDone = false;
     state.sendStartedAt = null;
     el.interviewDate.value = "";
@@ -1386,6 +1397,10 @@
     // disagree about which day this is in which zone.
     state.sendPrepared = body;
     state.sendStruck = Object.create(null);
+    // #34: one idempotency key per PREPARED payload, minted here so a retry of this same
+    // payload carries the same key (the server answers 409 already_sent if the earlier try
+    // actually landed) while a fresh prepare — a deliberate re-send — mints a fresh one.
+    state.sendKey = crypto.randomUUID();
 
     var competencies = (body.payload && body.payload.competencies) || [];
     var unverified = competencies.filter(function (c) { return c.verified !== true; });
@@ -1562,11 +1577,12 @@
    * keeping the payload. So: SUCCESS SETS IT, FAILURE LEAVES IT FALSE and leaves the preview
    * live. This is the single line in act 4 that a tidy-up will break.
    *
-   * THE RESIDUAL THE GUARD DOES NOT CLOSE: a request that times out in this browser but
-   * succeeded on the server leaves sendDone false, so a retry sends a genuine second invite.
-   * There is no cheap client-side answer — a server-side `409 already_sent` is the answer and
-   * is deliberately not built in this ticket. Saying so rather than implying the guard is
-   * complete.
+   * THE RESIDUAL, CLOSED BY #34: a request that times out in this browser but succeeded on
+   * the server leaves sendDone false, so the retry goes out — and the server now recognises
+   * it by `send_key` (one per prepared payload, minted in renderPreview) and answers
+   * `409 already_sent`, which the catch below treats as the success it is. The guard here
+   * stays exactly as it was: it is still what stops the DOUBLE-CLICK, and the server key is
+   * what stops the double-SEND.
    */
   function confirmSend() {
     if (state.busy || state.sendDone) return;
@@ -1599,6 +1615,20 @@
     clearState(el.sendState);
     startSendClock();
 
+    // The terminal state, reached from the success handler and from 409 already_sent — the
+    // two ways this candidate ends up holding exactly one email.
+    function settleSent(message, warn) {
+      state.sendDone = true;
+      state.sendPrepared = null;
+      state.sendStruck = null;
+      state.sendKey = null;
+      el.sendPreview.hidden = true;
+      el.interviewDate.readOnly = true;
+      el.candidateEmail.readOnly = true;
+      setBusy(el.prepareSend, true);
+      showState(el.sendState, message, warn);
+    }
+
     postJson("/api/prep/send", {
       client_id: clientId,
       email: email,
@@ -1606,26 +1636,27 @@
       brief: state.sent.brief,
       cv: state.sent.cv,
       payload: state.sendPrepared.payload,
-      strike: strike
+      strike: strike,
+      send_key: state.sendKey
     })
       .then(function (body) {
         if (!mine()) return;
-        // THE ONLY PLACE sendDone IS SET. See the note above before moving this line.
-        state.sendDone = true;
-        state.sendPrepared = null;
-        state.sendStruck = null;
-        el.sendPreview.hidden = true;
-        el.interviewDate.readOnly = true;
-        el.candidateEmail.readOnly = true;
-        setBusy(el.prepareSend, true);
-        showState(
-          el.sendState,
+        // THE ONE SUCCESS SHAPE, shared with the already_sent branch below — sendDone is set
+        // HERE and in that branch and NOWHERE ELSE. See the note above before moving this.
+        settleSent(
           body.event_recorded ? COPY.sendDone(email) : COPY.sendDoneUncounted(email),
           !body.event_recorded,
         );
       })
       .catch(function (err) {
         if (!mine()) return;
+        // #34: the server refused a duplicate key, which means the try that timed out in
+        // THIS browser actually landed. From here that is success — the candidate has their
+        // email — so it takes the terminal shape, not the retry shape below.
+        if (err && err.code === "already_sent") {
+          settleSent(COPY.sendAlreadyDone(email), false);
+          return;
+        }
         // The payload, the strikes and the preview stay exactly as they are. One line, and
         // it will be deleted by accident if this comment is not here: it is the difference
         // between a DNS problem costing a retry and costing another two-minute model call.
@@ -1649,6 +1680,7 @@
    *  whatever the button would have done can reach it. */
   function dropPreparedSend() {
     state.sendPrepared = null;
+    state.sendKey = null;
     state.sendStruck = null;
     el.sendPreview.hidden = true;
     el.strikeList.textContent = "";

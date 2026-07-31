@@ -868,6 +868,100 @@ test("AC #4: invite_sent is recorded exactly once, under the right client", { sk
   assert.equal(counts.total, 0, "`total` sums packs alone");
 });
 
+// ── #34: the idempotency key — a retry is not a re-send ────────────────────────────────
+//
+// These run on real SQL because the whole mechanism is the `invite_send_key` UNIQUE index:
+// fake-d1 enforces nothing, so under it a duplicate key would "insert" happily and every
+// assertion below would pass while R7 stayed open.
+
+test("#34: a retried send with the same key answers 409 and writes, sends, counts nothing", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await send(d1, sendBody({ send_key: "key-1" }));
+
+  // The timed-out-but-succeeded case: the browser holds the same prepared payload and the
+  // same key, and posts it again.
+  const { calls, result } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody({ send_key: "key-1" })), env: ENV(d1) }),
+  );
+  assert.equal(result.status, 409);
+  assert.deepEqual(await result.json(), { error: "already_sent" });
+  assert.equal(calls.length, 0, "no second email — the candidate already has theirs");
+  assert.equal(countOf(db, "invite"), 1, "one candidate, ONE invite");
+  const counts = await eventCounts(d1);
+  assert.equal(counts.per_client[0].invites_sent, 1, "the metric the pilot is measured on did not inflate");
+});
+
+test("#34: a rolled-back send frees its key, so the honest retry goes through", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  // First try: mail fails, R9 rolls the invite back — the key must die with the row,
+  // because THIS retry is the one the whole keep-the-payload design exists to allow.
+  const { result: first } = await withFetch(mailForbidden, () =>
+    sendRoute({ request: sendRequest(sendBody({ send_key: "key-2" })), env: ENV(d1) }),
+  );
+  assert.equal(first.status, 502);
+  assert.equal(countOf(db, "invite"), 0, "the rollback stands");
+
+  const { response } = await send(d1, sendBody({ send_key: "key-2" }));
+  assert.equal(response.status, 201, "same key, but nothing landed last time — a retry, not a duplicate");
+  assert.equal(countOf(db, "invite"), 1);
+});
+
+test("#34: a deliberate re-send is a new prepared payload with a new key, and is allowed", { skip }, async () => {
+  // The product decision #22 deferred stays unmade: 409 must never mean "you may never
+  // re-send". The date moved, the CV changed — a fresh prepare mints a fresh key.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await send(d1, sendBody({ send_key: "key-3" }));
+  const { response } = await send(d1, sendBody({ send_key: "key-4" }));
+
+  assert.equal(response.status, 201);
+  assert.equal(countOf(db, "invite"), 2, "two deliberate sends, two invites — R2's world unchanged");
+});
+
+test("#34: key-less sends keep today's behaviour — NULLs never collide", { skip }, async () => {
+  // A cached pre-#34 browser (or a curl) posts no key. Degraded to exactly the old
+  // behaviour, not broken: the UNIQUE index admits any number of NULLs.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await send(d1);
+  const { response } = await send(d1);
+  assert.equal(response.status, 201);
+  assert.equal(countOf(db, "invite"), 2);
+});
+
+test("#34: a UNIQUE trip that is NOT send_key stays an error, even with a key in hand", { skip }, async () => {
+  // The 409 mapping requires BOTH halves of the match. Simplify it to /UNIQUE/i alone and a
+  // token_hash collision (or any future constraint) would wear already_sent's success copy —
+  // this is the assertion that fails first.
+  const db = openMigrated();
+  const d1 = faultyD1(db, (sql) =>
+    sql.includes("INSERT INTO invite")
+      ? new Error("UNIQUE constraint failed: invite.token_hash")
+      : null,
+  );
+  const { result } = await withFetch(mailOk, () =>
+    sendRoute({ request: sendRequest(sendBody({ send_key: "key-5" })), env: ENV(d1) }),
+  );
+  assert.equal(result.status, 500, "a different constraint is an internal error, not a duplicate");
+  assert.deepEqual(await result.json(), { error: "internal" });
+});
+
+test("#34: a malformed key is refused before anything is written or sent", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  for (const bad of [42, "", "   ", "x".repeat(65)]) {
+    const { calls, result } = await withFetch(mailOk, () =>
+      sendRoute({ request: sendRequest(sendBody({ send_key: bad })), env: ENV(d1) }),
+    );
+    assert.equal(result.status, 400, `send_key ${JSON.stringify(bad)} must be refused`);
+    assert.deepEqual(await result.json(), { error: "missing_fields" });
+    assert.equal(calls.length, 0, "no mail on a refused request");
+  }
+  assert.equal(countOf(db, "invite"), 0, "and nothing was written");
+});
+
 // ── the cascade, still whole ───────────────────────────────────────────────────────────
 
 test("AC #7: the purge takes every row this ticket wrote, in one statement", { skip }, async () => {
