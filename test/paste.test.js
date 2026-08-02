@@ -242,6 +242,24 @@ test("a malformed locum item is rejected naming the section", () => {
   );
 });
 
+test("a locum item missing its label field is rejected naming the field", () => {
+  // Valid claim fields, no label: without the label guard this passed assertPack and both
+  // renderers printed the literal "undefined:" to the client (PR #53 review, M2).
+  const claim = { text: "DBS clear.", source_quote: "", source_type: "unverified" };
+  assert.throws(
+    () => assertPack({ ...FULL_PACK, compliance: [claim] }),
+    /compliance\[0\]\.check/,
+  );
+  assert.throws(
+    () => assertPack({ ...FULL_PACK, booking: [claim] }),
+    /booking\[0\]\.item/,
+  );
+  assert.throws(
+    () => assertPack({ ...FULL_PACK, modality_matrix: [claim] }),
+    /modality_matrix\[0\]\.row/,
+  );
+});
+
 test("the legacy pack without the locum sections still passes", () => {
   const pack = assertPack(extractPack("```json\n" + JSON.stringify(FULL_PACK) + "\n```"));
   assert.equal(pack.compliance, undefined, "absence is preserved, not filled in");
