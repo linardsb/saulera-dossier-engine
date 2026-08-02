@@ -16,7 +16,13 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { fieldKey, parseNoteFields, visibleFields } from "../src/note-fields.js";
+import {
+  LOCUM_FIELDS,
+  fieldKey,
+  locumFieldFor,
+  parseNoteFields,
+  visibleFields,
+} from "../src/note-fields.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -341,6 +347,81 @@ test("visibleFields accepts a Set as readily as an array", () => {
   const asArray = visibleFields(REAL_NOTE, ["practical"]);
   const asSet = visibleFields(REAL_NOTE, new Set(["practical"]));
   assert.deepEqual(asSet, asArray);
+});
+
+// ── the locum vocabulary (#48) ──────────────────────────────────────────────────────────
+
+test("every canonical locum heading slugs cleanly, and the five keys cannot collide", () => {
+  // The editor inserts these headings verbatim; a canonical heading whose slug is null would
+  // be a prompt for a section that can never be ticked.
+  const keys = LOCUM_FIELDS.map((f) => fieldKey(f.heading));
+  for (let i = 0; i < keys.length; i += 1) {
+    assert.notEqual(keys[i], null, `"${LOCUM_FIELDS[i].heading}" must survive fieldKey`);
+  }
+  assert.equal(new Set(keys).size, LOCUM_FIELDS.length, "five headings, five distinct keys");
+});
+
+test("locumFieldFor recognises the canonical heading and the synonyms a recruiter would type", () => {
+  for (const field of LOCUM_FIELDS) {
+    assert.equal(locumFieldFor(field.heading), field.id, `canonical "${field.heading}"`);
+  }
+  const synonyms = {
+    "VMS": "vms",
+    "Portal used": "vms",
+    "Parking": "site-access",
+    "Getting in on day one": "site-access",
+    "Getting into the building": "site-access",
+    "Credentialing": "credentialing",
+    "Protocols": "protocols",
+    "Extension habits": "extensions",
+    "Extending bookings": "extensions",
+    "How they extend": "extensions",
+  };
+  for (const [heading, id] of Object.entries(synonyms)) {
+    assert.equal(locumFieldFor(heading), id, `synonym "${heading}"`);
+  }
+});
+
+test("locumFieldFor leaves the perm vocabulary and arbitrary text alone, and never throws", () => {
+  // The leak-shaped direction: a hospital name or an existing perm section reading as a locum
+  // field would put a false tick on the checklist.
+  for (const heading of [
+    "Their process",
+    "Why candidates were turned down",
+    "East Grinstead General Hospital",
+    "What they actually care about",
+    "Getting interview feedback",
+    "Extended team",
+    "",
+  ]) {
+    assert.equal(locumFieldFor(heading), null, `"${heading}" is not a locum field`);
+  }
+  assert.equal(locumFieldFor(null), null);
+  assert.equal(locumFieldFor(undefined), null);
+  assert.equal(locumFieldFor(42), null);
+});
+
+test("a heading matching two locum regexes takes the first — list order is precedence", () => {
+  // "credential" sits before "portal" in the list, so a heading naming both is credentialing.
+  assert.equal(locumFieldFor("Credentialing portal quirks"), "credentialing");
+});
+
+test("a locum heading is an ordinary field: parsed, keyed and tickable like any other", () => {
+  // Recognition composes with the gate rather than special-casing it. CRLF included, because
+  // that is how a note pasted out of Word arrives.
+  for (const note of [
+    "## VMS or portal\n\nAllocate, via the trust's MSP.",
+    "## VMS or portal\r\n\r\nAllocate, via the trust's MSP.",
+  ]) {
+    const [field] = parseNoteFields(note);
+    assert.equal(field.key, "vms-or-portal");
+    assert.equal(locumFieldFor(field.heading), "vms");
+    assert.deepEqual(
+      visibleFields(note, ["vms-or-portal"]).map((f) => f.key),
+      ["vms-or-portal"],
+      "tickable via visibleFields exactly like any heading",
+    );
+  }
 });
 
 test("the module never throws on content, however strange the note", () => {

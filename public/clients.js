@@ -85,6 +85,12 @@
     sectionMeta: function (chars) {
       return chars.toLocaleString("en-GB") + (chars === 1 ? " character" : " characters");
     },
+
+    // The locum checklist (#48). Same register as the visibility strings: what the row means
+    // and what to do next. Present/missing describes the SAVED note, like the list above it.
+    locumPresent: "In the note",
+    locumMissing: "Not in the note yet",
+    locumAdd: function (heading) { return "Add ## " + heading + " to the note"; },
   };
 
   var el = {
@@ -106,6 +112,9 @@
     visibilityList: document.getElementById("visibility-list"),
     visibilityEmpty: document.getElementById("visibility-empty"),
     visibilityState: document.getElementById("visibility-state"),
+    locumList: document.getElementById("locum-list"),
+    // Reserved for messages the checklist may need later; empty at every paint today.
+    locumState: document.getElementById("locum-state"),
   };
 
   // `togglingKeys` is a re-entrancy guard keyed on client id AND heading slug, not a single
@@ -338,7 +347,7 @@
         el.editorHead.textContent = body.client.name;
         el.note.value = body.client.note;
         showSaveState(body.client.note ? "" : COPY.notSaved, false);
-        paintFields(body.fields, fieldsAt);
+        paintFields(body, fieldsAt);
         showVisibilityState("", false);
         return refreshList();
       })
@@ -397,7 +406,7 @@
         // so re-read instead. A re-read rather than simply skipping the paint, because a save
         // is the one request that can RENAME headings: the rows themselves may be wrong here,
         // not just the ticks.
-        if (!paintFields(body.fields, fieldsAt)) repaintFields(savingId);
+        if (!paintFields(body, fieldsAt)) repaintFields(savingId);
         showVisibilityState(stillTyping ? COPY.visibilityStale : "", false);
 
         return refreshList();
@@ -492,18 +501,82 @@
   }
 
   /**
-   * Paint the list, unless newer truth has already been painted.
+   * The locum checklist (#48): which of the five named locum-supply facts the SAVED note
+   * records. Present/missing is server truth, exactly like the visibility list — inserting a
+   * heading only dirties the editor, and the row flips to present after Save.
+   *
+   * `locumFields` may be undefined if a stale server build answers; render nothing rather
+   * than throw.
+   */
+  function renderLocum(locumFields) {
+    var list = locumFields || [];
+
+    // Same focus rule as the rail and the visibility list: rebuilding destroys the button the
+    // keyboard was on, so remember which field it was and refocus its replacement.
+    var active = document.activeElement;
+    var focusedId = active && active.dataset && active.dataset.locumId
+      ? active.dataset.locumId
+      : null;
+    var refocus = null;
+
+    el.locumList.textContent = "";
+    el.locumList.hidden = list.length === 0;
+
+    list.forEach(function (field) {
+      var name = document.createElement("span");
+      name.className = "visibility-name";
+      // textContent, never innerHTML — same rule as every other rendered string here.
+      name.textContent = field.heading;
+
+      var meta = document.createElement("span");
+      meta.className = "visibility-meta";
+      meta.textContent = field.hint;
+
+      var item = document.createElement("li");
+      item.appendChild(name);
+      item.appendChild(meta);
+
+      var status = document.createElement("span");
+      status.className = "visibility-meta";
+      status.textContent = field.present ? COPY.locumPresent : COPY.locumMissing;
+      item.appendChild(status);
+
+      if (!field.present) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn";
+        button.dataset.heading = field.heading;
+        button.dataset.locumId = field.id;
+        button.textContent = COPY.locumAdd(field.heading);
+        if (field.id === focusedId) refocus = button;
+        item.appendChild(button);
+      }
+
+      el.locumList.appendChild(item);
+    });
+
+    if (refocus) refocus.focus();
+  }
+
+  /**
+   * Paint both lists that describe the saved note, unless newer truth has already been
+   * painted.
    *
    * `seen` is the value of `state.fieldsVersion` captured BEFORE the request that produced
-   * `fields` went out. If it has moved, something more recent has already been drawn and this
+   * `body` went out. If it has moved, something more recent has already been drawn and this
    * response is stale — it must not paint, whatever its own identity guard says.
+   *
+   * It takes the whole response body so the visibility list and the locum checklist always
+   * paint together, from the same answer, under the same version check — a checklist painted
+   * from a response the visibility list rejected as stale would be the recency bug again.
    *
    * Returns whether it painted, so a losing caller can decide to re-read instead of silently
    * dropping the answer.
    */
-  function paintFields(fields, seen) {
+  function paintFields(body, seen) {
     if (state.fieldsVersion !== seen) return false;
-    renderFields(fields);
+    renderFields(body.fields);
+    renderLocum(body.locum_fields);
     state.fieldsVersion += 1;
     return true;
   }
@@ -522,7 +595,7 @@
     return api("/api/clients/" + encodeURIComponent(clientId))
       .then(function (body) {
         if (state.selected !== clientId) return;
-        paintFields(body.fields, seen);
+        paintFields(body, seen);
       })
       .catch(function () {
         // Whatever message is on screen stands. This path exists to correct a stale PAINT, and
@@ -580,7 +653,7 @@
         if (state.selected !== savingId) return;
         // Re-rendered from what the server stored, never from the checkbox that was clicked —
         // and only if nothing newer has been painted since this toggle was sent.
-        if (!paintFields(body.fields, fieldsAt)) repaintFields(savingId);
+        if (!paintFields(body, fieldsAt)) repaintFields(savingId);
         // "Saved" must not overwrite the stale-list warning. The note can be dirty while a
         // toggle succeeds, and the list is still describing the note as it was saved — which is
         // the more important of the two things to be saying.
@@ -689,6 +762,19 @@
     var box = event.target;
     if (!box || box.type !== "checkbox" || !box.dataset.key) return;
     toggleField(box, box.dataset.key, box.checked);
+  });
+
+  // Delegated for the same reason as the visibility listener: the checklist is rebuilt on
+  // every paint. Inserting is an ordinary edit — it appends the heading, marks the note dirty
+  // and hands focus to the textarea with the caret at the end, where the body goes next. The
+  // row flips to present only after Save, because present describes the SAVED note.
+  el.locumList.addEventListener("click", function (event) {
+    var button = event.target;
+    if (!button || !button.dataset || !button.dataset.heading) return;
+    el.note.value += (el.note.value ? "\n\n" : "") + "## " + button.dataset.heading + "\n";
+    markDirty();
+    el.note.focus();
+    el.note.setSelectionRange(el.note.value.length, el.note.value.length);
   });
 
   el.deleteButton.addEventListener("click", function () {
