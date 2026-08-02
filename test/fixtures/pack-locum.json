@@ -1,0 +1,98 @@
+{
+  "candidate_ref": "C-5120",
+  "role_title": "Locum MRI/CT Radiographer — 3 months, full time",
+  "headline": "HCPC-registered radiographer with eight years of MRI and CT, hands-on with the Siemens fleet the brief names, and available from the 1st.",
+  "evidence": [
+    {
+      "requirement": "Imaging experience",
+      "text": "Eight years as a diagnostic radiographer across two acute trusts.",
+      "source_quote": "Diagnostic Radiographer, 2018 to present. Rotational MRI and CT across Queen Victoria Hospital and the community diagnostic centre.",
+      "source_type": "cv"
+    },
+    {
+      "requirement": "IV cannulation",
+      "text": "Cannulation certified and in regular contrast practice.",
+      "source_quote": "IV cannulation certified, contrast administration weekly",
+      "source_type": "cv"
+    }
+  ],
+  "process_fit": [
+    {
+      "text": "Bookings for this client go through their VMS, and profiles without an uploaded DBS certificate sit unreviewed — upload it with the submission.",
+      "source_quote": "All locum bookings via Allocate VMS. Profiles without the DBS cert attached just sit in the queue.",
+      "source_type": "client_note"
+    }
+  ],
+  "gaps": [
+    {
+      "text": "No obstetric ultrasound experience, which the brief lists as desirable.",
+      "source_quote": "",
+      "source_type": "unverified"
+    }
+  ],
+  "open_questions": [
+    "Confirm availability for the 1 September start before sending.",
+    "DBS status is unconfirmed — chase the certificate before submission."
+  ],
+  "compliance": [
+    {
+      "check": "HCPC registration",
+      "text": "HCPC-registered, renewal current.",
+      "source_quote": "HCPC registration RA12345, current to 2027",
+      "source_type": "cv"
+    },
+    {
+      "check": "DBS",
+      "text": "DBS status not evidenced in the CV or our note.",
+      "source_quote": "",
+      "source_type": "unverified"
+    },
+    {
+      "check": "Mandatory training",
+      "text": "Mandatory training completed within the last year.",
+      "source_quote": "Statutory and mandatory training completed March 2026",
+      "source_type": "cv"
+    },
+    {
+      "check": "Occupational health",
+      "text": "This client's compliance team asks for occupational health clearance dated within six months.",
+      "source_quote": "Their compliance team bounce OH clearances older than six months",
+      "source_type": "client_note"
+    }
+  ],
+  "booking": [
+    {
+      "item": "Availability",
+      "text": "Available full time from 1 September; current booking ends 29 August.",
+      "source_quote": "Available from 1 September 2026",
+      "source_type": "cv"
+    },
+    {
+      "item": "Rate",
+      "text": "Rate expectation not stated by the candidate; the brief offers a day rate DOE.",
+      "source_quote": "",
+      "source_type": "unverified"
+    }
+  ],
+  "modality_matrix": [
+    {
+      "row": "MRI — Siemens Aera",
+      "text": "Daily MRI lists on a Siemens Aera at the current trust.",
+      "source_quote": "MRI: Siemens Aera (1.5T), daily lists including MSK and neuro",
+      "source_type": "cv"
+    },
+    {
+      "row": "CT — Canon Aquilion",
+      "text": "CT rotation on a Canon Aquilion, including contrast studies.",
+      "source_quote": "CT: Canon Aquilion Prime, contrast and non-contrast",
+      "source_type": "cv"
+    },
+    {
+      "row": "MRI — GE Signa",
+      "text": "Scanned on GE MRI at a previous trust; the brief does not name GE.",
+      "source_quote": "previous rotation on GE Signa MRI",
+      "source_type": "cv"
+    }
+  ],
+  "role_shape": "locum"
+}

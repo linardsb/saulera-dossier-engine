@@ -85,6 +85,19 @@ export const domainBlock = (profile) => {
         " Lead with availability, compliance status (HCPC registration, DBS, occupational" +
         " health, mandatory training), IV cannulation where relevant, and independent" +
         " reporting or solo scanning. Verify experience; do not sell potential.",
+      "- Fill the compliance, booking and modality_matrix sections. This pack's job is to" +
+        " let the client confirm the booking today, and those three are what they read" +
+        " first. Compliance claims follow the same verbatim-quote rule as everything else;" +
+        " where the CV or the note does not evidence a check, carry it unverified and put" +
+        " the chase in open_questions — an honest \"DBS status unconfirmed\" is the pack" +
+        " working, not failing.",
+      "- The brief's own asks (the rate offered, the start date wanted) belong in the" +
+        " check/item/row labels. The claim text states the CANDIDATE's side and must be" +
+        " sourced from the CV or the note — the brief is not a source.",
+      "- Where our note records credentialing quirks or the VMS or portal bookings go" +
+        " through, surface them (in compliance or process_fit) — that is agency knowledge" +
+        " a job board cannot produce. If the note does not record them, say nothing about" +
+        " them.",
     );
   }
   return lines.join("\n");

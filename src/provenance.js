@@ -7,7 +7,7 @@
 //
 // It fails closed. There is no code path where a failed check renders as a sourced claim.
 
-import { CLAIM_SECTIONS } from "./pack.js";
+import { CLAIM_SECTIONS, LOCUM_SECTIONS } from "./pack.js";
 
 /**
  * The only latitude taken: whitespace runs collapse, curly quotes and dashes fold to
@@ -80,7 +80,10 @@ export function verifyPack(pack, { cv, clientNote }) {
   };
 
   const verified = { ...pack };
-  for (const section of CLAIM_SECTIONS) {
+  for (const section of [...CLAIM_SECTIONS, ...LOCUM_SECTIONS]) {
+    // Only set what was present: a legacy pack must round-trip without gaining empty
+    // locum arrays it never had.
+    if (pack[section] === undefined) continue;
     verified[section] = pack[section].map((c, i) => check(c, section, i));
   }
 
@@ -90,8 +93,8 @@ export function verifyPack(pack, { cv, clientNote }) {
 /** Counts for the UI and for §7's weekly evidence spot-check. */
 export function provenanceSummary(pack) {
   const counts = { cv: 0, client_note: 0, unverified: 0 };
-  for (const section of CLAIM_SECTIONS) {
-    for (const c of pack[section]) counts[c.source_type]++;
+  for (const section of [...CLAIM_SECTIONS, ...LOCUM_SECTIONS]) {
+    for (const c of pack[section] ?? []) counts[c.source_type]++;
   }
   return { ...counts, total: counts.cv + counts.client_note + counts.unverified };
 }

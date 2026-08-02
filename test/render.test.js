@@ -34,6 +34,7 @@ const load = (name) => assertPack(JSON.parse(readFileSync(join(FIXTURES, `${name
 
 const SOURCED = load("pack-sourced");
 const UNVERIFIED_PACK = load("pack-unverified");
+const LOCUM_PACK = load("pack-locum");
 
 function snapshot(name, actual) {
   const file = join(FIXTURES, `${name}.snap`);
@@ -52,7 +53,11 @@ function snapshot(name, actual) {
 /* ── the snapshots ─────────────────────────────────────────────────────────────────────── */
 
 for (const id of Object.keys(RENDERERS)) {
-  for (const [fixture, pack] of [["sourced", SOURCED], ["unverified", UNVERIFIED_PACK]]) {
+  for (const [fixture, pack] of [
+    ["sourced", SOURCED],
+    ["unverified", UNVERIFIED_PACK],
+    ["locum", LOCUM_PACK],
+  ]) {
     test(`${id} renders ${fixture} to a stable text body`, () => {
       snapshot(`${fixture}.${id}.text`, RENDERERS[id].render(pack).text);
     });
@@ -68,12 +73,14 @@ test("every claim reaches the output, verified or not", () => {
   // "Never dropped" is the half of AC4 that a marker check alone does not cover: a renderer
   // that silently skipped unsourced claims would still mark every claim it printed.
   for (const id of Object.keys(RENDERERS)) {
-    const { text, html } = RENDERERS[id].render(UNVERIFIED_PACK);
-    for (const claim of allClaims(UNVERIFIED_PACK)) {
-      assert.ok(text.includes(claim.text.slice(0, 40)), `${id} text dropped: ${claim.text}`);
-      // The HTML path escapes, so compare against a span with no metacharacters in it.
-      const plain = claim.text.split("&")[0].slice(0, 30);
-      assert.ok(html.includes(plain), `${id} html dropped: ${claim.text}`);
+    for (const pack of [UNVERIFIED_PACK, LOCUM_PACK]) {
+      const { text, html } = RENDERERS[id].render(pack);
+      for (const claim of allClaims(pack)) {
+        assert.ok(text.includes(claim.text.slice(0, 40)), `${id} text dropped: ${claim.text}`);
+        // The HTML path escapes, so compare against a span with no metacharacters in it.
+        const plain = claim.text.split("&")[0].slice(0, 30);
+        assert.ok(html.includes(plain), `${id} html dropped: ${claim.text}`);
+      }
     }
   }
 });
@@ -178,6 +185,88 @@ test("empty optional sections render no empty headings", () => {
     assert.doesNotMatch(text, /WHERE THEY DON'T MEET THE BRIEF/);
     assert.doesNotMatch(text, /FOR THE RECRUITER TO CONFIRM/);
     assert.ok(text.includes("AGAINST THE BRIEF"), `${id} keeps the section that always exists`);
+  }
+});
+
+/* ── the locum booking variant (#49) ───────────────────────────────────────────────────── */
+
+const LOCUM_HEADINGS = [
+  "COMPLIANCE AT A GLANCE",
+  "AVAILABILITY AND RATE",
+  "MODALITY AND SCANNER MATRIX",
+];
+
+test("the locum pack is titled LOCUM BOOKING and the perm packs are not", () => {
+  for (const id of Object.keys(RENDERERS)) {
+    assert.match(RENDERERS[id].render(LOCUM_PACK).text, /^LOCUM BOOKING — /, id);
+    for (const pack of [SOURCED, UNVERIFIED_PACK]) {
+      assert.match(RENDERERS[id].render(pack).text, /^SUBMISSION PACK — /, id);
+    }
+  }
+});
+
+test("the booking sections lead: compliance renders before the brief evidence", () => {
+  for (const id of Object.keys(RENDERERS)) {
+    const { text } = RENDERERS[id].render(LOCUM_PACK);
+    for (const heading of LOCUM_HEADINGS) {
+      assert.ok(text.includes(heading), `${id} is missing ${heading}`);
+      assert.ok(
+        text.indexOf(heading) < text.indexOf("AGAINST THE BRIEF"),
+        `${id}: ${heading} must render before AGAINST THE BRIEF`,
+      );
+    }
+  }
+});
+
+test("an unverified compliance item is marked and carries no citation or source line", () => {
+  const appendix = RENDERERS.appendix.render(LOCUM_PACK).text;
+  const dbs = appendix.split("\n").find((l) => l.includes("DBS status not evidenced"));
+  assert.ok(dbs.includes("[UNVERIFIED]"), "the marker is on the compliance line");
+  assert.doesNotMatch(dbs, /\[\d+\]/, "no citation number on an unverified check");
+
+  const inline = RENDERERS.inline.render(LOCUM_PACK).text;
+  const lines = inline.split("\n");
+  const at = lines.findIndex((l) => l.includes("DBS status not evidenced"));
+  assert.doesNotMatch(lines[at + 1] ?? "", /Source:/, "no source line under it");
+});
+
+test("the perm fixtures render none of the locum headings", () => {
+  for (const id of Object.keys(RENDERERS)) {
+    for (const pack of [SOURCED, UNVERIFIED_PACK]) {
+      const { text } = RENDERERS[id].render(pack);
+      for (const heading of LOCUM_HEADINGS) {
+        assert.ok(!text.includes(heading), `${id} rendered ${heading} for a perm pack`);
+      }
+    }
+  }
+});
+
+test("empty locum sections render no headings, but the title still reads the flag", () => {
+  // The model judged the content perm-shaped despite the locum flag: role_shape drives the
+  // title, content drives the sections.
+  const bare = assertPack({
+    ...LOCUM_PACK, compliance: [], booking: [], modality_matrix: [],
+  });
+  for (const id of Object.keys(RENDERERS)) {
+    const { text } = RENDERERS[id].render(bare);
+    assert.match(text, /^LOCUM BOOKING — /);
+    for (const heading of LOCUM_HEADINGS) assert.ok(!text.includes(heading), id);
+  }
+});
+
+test("a perm pack that carries locum sections still renders them — never drop content", () => {
+  const disobedient = assertPack({ ...LOCUM_PACK, role_shape: "permanent" });
+  for (const id of Object.keys(RENDERERS)) {
+    const { text } = RENDERERS[id].render(disobedient);
+    assert.match(text, /^SUBMISSION PACK — /);
+    for (const heading of LOCUM_HEADINGS) assert.ok(text.includes(heading), id);
+  }
+});
+
+test("the locum pack stays inside the page budget", () => {
+  for (const id of Object.keys(RENDERERS)) {
+    const lines = RENDERERS[id].render(LOCUM_PACK).text.split("\n").length;
+    assert.ok(lines <= 110, `${id} rendered ${lines} lines, which is past two pages`);
   }
 });
 

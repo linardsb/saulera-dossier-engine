@@ -53,7 +53,7 @@ Keep the free-text-blob architecture untouched. Add a canonical five-field locum
 
 **Forward-references** (plans that extend or supersede this — append as follow-ups get created):
 
-- (none yet — #49 locum booking pack and #50 portal primer will consume `LOCUM_FIELDS` / `locumFieldFor`)
+- `.claude/plans/locum-booking-pack.md` — #49 consumes the note vocabulary via prompt wording (static instruction; `locumFieldFor` not imported — see that plan's NOTES). #50 portal primer still to come.
 
 ---
 
@@ -362,4 +362,4 @@ npm run dev   # then the manual pass scripted in STEP-BY-STEP TASKS above, at /c
 
 ## AMENDMENTS
 
-- (none yet)
+- 2026-08-02 — #49 (locum booking pack) executed: it consumes `LOCUM_FIELDS`' vocabulary as static prompt wording rather than importing `locumFieldFor`, diverging from this plan's A4 expectation. Recorded in its NOTES and forward-referenced above.
