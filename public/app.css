@@ -108,8 +108,14 @@ a {
   color: var(--text-muted);
 }
 
+/* The nav wraps, which .topbar-inner above already does and this did not. Measured at a 360px
+   viewport: the four links are 359px wide against a 328px content box (body padding is
+   --space-4 a side), so the nav overflowed the page by 15px on all three screens — a horizontal
+   page scroll on every phone, and the two /clients probes that measure scrollWidth (H6, V18t)
+   failing since before #58. */
 .topbar-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -388,7 +394,21 @@ a {
 
 /* ── the editor ────────────────────────────────────────────────────────────────────────── */
 
+/* No max-width here, and that is a measured decision rather than an omission. The column already
+   sits inside CRAFT's 65-75ch measure: at --max-width (1024px) minus the 280px rail and the
+   --space-8 gutter it renders 712px, and 1ch on this column is 10.59px (Geist at --text-note,
+   16px, measured in Chrome and Safari), so 712px is 67.2ch. A `max-width: 75ch` reads as
+   diligence and does nothing — 75ch resolves to 795px, above a column that can never exceed
+   712. .pack below needs its 68ch because it is full-width under --max-width; this column is
+   held by the grid instead. The min-width: 0 above is the rule that matters here, and it is a
+   different job: it stops a grid item being sized by its widest child. */
+
 .editor-head { margin-bottom: var(--space-4); }
+
+/* Height from the viewport rather than from the row count. See --note-height for the arithmetic
+   and for why the floor is what rows="16" already renders. resize: vertical comes from .textarea
+   and stays, so a recruiter with a very long note can still drag it taller. */
+.editor .textarea { min-height: var(--note-height); }
 
 /* A client name is agency-authored, capped at 120 characters, and need contain no spaces at
    all. Overflowing text does not widen its own border box, so `.editor { min-width: 0 }` above
@@ -403,6 +423,28 @@ a {
   gap: var(--space-4);
   flex-wrap: wrap;
   margin-top: var(--space-4);
+}
+
+@media (min-width: 860px) {
+  /* Save and its live region stay in view for the whole length of a long note, which is the
+     answer to "save feedback" this ticket takes: placement, not a louder treatment. Sticky
+     rather than fixed so the row releases at the end of the editor and never covers the delete
+     action below it. --background because that is what paints behind the editor column (body's
+     own ground; the editor is not on a card), so the row hides the scrolling note under it
+     rather than reading as a mismatched band.
+     Not applied under 860px: there the row wraps to two lines and would eat a third of a phone
+     screen for a control that is one short scroll away anyway. */
+  .editor .save-row {
+    position: sticky;
+    bottom: 0;
+    background: var(--background);
+    padding: var(--space-3) 0;
+    border-top: var(--hairline) solid var(--border-hairline);
+  }
+
+  /* So a checkbox focused below the sticky row is not scrolled underneath it. The value is the
+     row's own height — see --sticky-save, and keep the two in step. */
+  html { scroll-padding-bottom: var(--sticky-save); }
 }
 
 /* The one authored moment: the saved-state line arriving. Opacity only; the transition itself
@@ -430,6 +472,25 @@ a {
 
 /* Removal sits well away from Save, past its own stretch of whitespace. */
 .editor-remove { margin-top: var(--space-12); }
+
+/* ── what the saved note produces ──────────────────────────────────────────────────────── */
+
+/* The two readouts, as one zone. The note is one thing a person writes and TWO things the
+   system reads out of it — what a candidate may see, and whether the five locum facts are
+   recorded. One rule above the pair says that; two more field labels said they were two more
+   fields. Same shape as .agency below, and for the same reason. */
+.note-facts {
+  margin-top: var(--space-12);
+  padding-top: var(--space-6);
+  border-top: var(--hairline) solid var(--border-hairline);
+}
+
+/* .visibility's bare rule opens each fieldset with a --space-12 zone break, which is right when
+   it IS the zone break and doubles it once the wrapper above draws one. The first readout sits
+   flush under the rule; the second keeps a gap, one step down. Scoped by ancestor rather than by
+   editing the bare rule, because .visibility is also act 4's on / (index.html). */
+.note-facts .visibility { margin-top: var(--space-8); }
+.note-facts .visibility:first-child { margin-top: 0; }
 
 /* ── the visibility list ───────────────────────────────────────────────────────────────── */
 /* #18. Native checkbox, native label, no custom switch — this file styles no form control it
@@ -498,6 +559,47 @@ a {
 .visibility-list input[type="checkbox"]:disabled { cursor: default; }
 .visibility-list label:has(input:disabled) { color: var(--text-muted); }
 
+/* A long list of sections scans as rows rather than as a block. Both readouts take it: they are
+   one component, both <ul>s carry .visibility-list, and a separator on one and not the other
+   would read as a difference that means something. Scoped under .note-facts because the bare
+   .visibility-list rules are act 4's on / too. */
+.note-facts .visibility-list li + li {
+  border-top: var(--hairline) solid var(--border-hairline);
+}
+
+/* ── the locum checklist ───────────────────────────────────────────────────────────────── */
+
+/* #48 shipped this list with no CSS at all, so its three spans ran together on one line and
+   .visibility-meta's `margin-left: auto` did nothing outside a flex row. Same component as the
+   visibility rows above, one row taller: the heading and the status on the first line, the hint
+   under them, the "Add ## …" button on its own line at the end. Grid rather than flex because
+   the hint spans both columns, which is a row a flex line cannot describe. */
+.note-facts .locum .visibility-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-height: var(--tap-target);
+  padding: var(--space-2) 0;
+  font-size: var(--text-body);
+}
+
+/* The hint is the second row and spans both columns. The bare .visibility-meta pushes itself
+   right, which is correct for a status at the end of a row and wrong for a sentence explaining
+   what to write — so both the push and the alignment are reset here. */
+.note-facts .locum .locum-detail {
+  grid-column: 1 / -1;
+  margin-left: 0;
+  text-align: left;
+}
+
+/* A grid item fills its cell, so without this the button stretches the full column width and
+   reads as a page-wide bar rather than as one row's action. */
+.note-facts .locum .visibility-list .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 /* Matches .rail-empty: an empty state is an invitation, in the same voice. */
 .visibility-empty {
   color: var(--text-muted);
@@ -515,7 +617,13 @@ a {
   padding-top: var(--space-6);
 }
 
-.agency-head {
+/* The eyebrow, shared. .zone-head is the editor column's two zone legends and takes the same
+   five declarations plus the same bottom margin, so it joins this selector rather than
+   restating them — .rail-head above is the third copy and differs only in its margin. What an
+   eyebrow says is "a new zone starts here"; .field says "a label for the control below". Those
+   are different jobs, and rendering both through .field is what flattened the editor column. */
+.agency-head,
+.zone-head {
   font-family: var(--font-ui);
   font-size: var(--text-caption);
   letter-spacing: 0.08em;
@@ -523,6 +631,10 @@ a {
   color: var(--text-muted);
   margin: 0 0 var(--space-2);
 }
+
+/* A <legend>'s UA padding is a couple of px each side, which is invisible on a field label and
+   not on an eyebrow that has to line up with the rule above its zone. */
+.zone-head { padding: 0; }
 
 .agency-sub {
   font-size: var(--text-body);
@@ -979,12 +1091,15 @@ a {
   padding: var(--space-2) var(--space-3) var(--space-2) 0;
 }
 
+/* --space-4 rather than --space-3 down the sides: these rows are read across, one client at a
+   time, and 12px of vertical padding packed four columns of digits into a block. Air is what
+   makes a table scan as rows. */
 .counts-table tbody th,
 .counts-table tbody td {
   text-align: left;
   font-weight: 400;
   border-bottom: 1px solid var(--border-hairline);
-  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+  padding: var(--space-4) var(--space-3) var(--space-4) 0;
   min-height: var(--tap-target);
 }
 
@@ -993,12 +1108,28 @@ a {
 .counts-table tbody th { overflow-wrap: anywhere; }
 
 /* Tabular figures so the columns line up digit-for-digit; right-aligned because these are
-   quantities being compared down a column, not labels being read across. */
+   quantities being compared down a column, not labels being read across. nowrap so a figure
+   never breaks across two lines mid-number, which is the one way a count can be misread.
+   tabular-nums stays even though the mono face below is fixed-width: it costs nothing and it is
+   what keeps the fallback stack aligned when DM Mono has not loaded. */
 .counts-number {
   text-align: right;
   font-variant-numeric: tabular-nums;
   padding-right: 0;
+  white-space: nowrap;
 }
+
+/* Mono for the numbers, which is the epic's rule for counts and data — and scoped to the body
+   cells on purpose. DM Mono ships 400 alone (fonts.css), and .counts-table thead th is 600: a
+   600 request against a single-weight family gets synthetic bold rather than a real face. The
+   header labels are words anyway, and words stay in the UI sans. */
+.counts-table tbody .counts-number { font-family: var(--font-mono); }
+
+/* A zero is printed in full and then quieted, so the eye lands on the numbers that are not
+   zero. The digit still carries the information; the colour only ranks it. --text-muted is held
+   to the 4.5:1 body-text floor by test/tokens.test.js, so this is a legible value rather than a
+   decorative grey. */
+.counts-number.is-zero { color: var(--text-muted); }
 
 .counts .save-state { margin-top: var(--space-4); }
 

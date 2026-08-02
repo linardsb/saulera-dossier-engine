@@ -144,6 +144,25 @@
      in for it, which put every button under the floor. */
   --tap-target: 44px;
 
+  /* The client note's height, taken from the viewport rather than from a row count. The floor is
+     what rows="16" already renders — 16 rows at --text-note (16px) and line-height 1.5 is 384px
+     of text plus padding — so a window shorter than about 770px is no worse than today, and a
+     tall one gets a real writing surface instead of the same 400px box. The ceiling stops the
+     box outgrowing the reader on a 27" monitor. Nothing measures this: it is a comfort judgment,
+     stated so it can be argued with.
+     vh rather than dvh on purpose: a dynamic viewport unit re-lays-out the note box as a phone's
+     URL bar hides, which is motion nobody asked for.
+     Neither this nor --sticky-save has an entry in test/tokens.test.js, and neither needs one:
+     that gate reads `--name: #hex;` declarations only, because what it measures is contrast. */
+  --note-height: clamp(400px, 52vh, 640px);
+
+  /* The sticky save row's own height, reserved as scroll padding so a control focused below it
+     is not scrolled underneath it. --tap-target (44) + --space-3 above and below (12 + 12) + the
+     hairline (1) = 69px, rounded up to the next 4px step. CHECKLIST.md names the top-side
+     version of this trap (scroll-padding-top under sticky chrome); this is the bottom-side twin.
+     Keep the two in step: change the save row's padding and this moves with it. */
+  --sticky-save: 72px;
+
   /* Motion. One curve, defined once. Ease-out on everything entering or interactive and never
      ease-in, because ease-in delays the first frame — the one the user is watching. */
   --ease-out:   cubic-bezier(0.23, 1, 0.32, 1);
