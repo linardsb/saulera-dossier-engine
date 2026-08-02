@@ -240,10 +240,10 @@ export const LOCUM_FIELDS = [
     match: /protocol/i },
   { id: "site-access",   heading: "Site access and parking",
     hint: "Getting in on day one: badges, parking, who to ask for.",
-    match: /site access|parking|getting in/i },
+    match: /site access|parking|getting in(to)?\b/i },
   { id: "extensions",    heading: "Extension habits",
     hint: "How this client extends or ends bookings.",
-    match: /extension|extends|rebook/i },
+    match: /extension|extend(s|ing)?\b|rebook/i },
 ];
 
 /** The canonical locum field a heading names, or null. Pure, never throws.

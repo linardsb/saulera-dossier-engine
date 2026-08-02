@@ -108,6 +108,12 @@ test("clients.js renders the locum readout, parses no HTML and reaches no browse
   for (const store of ["localStorage", "sessionStorage", "indexedDB", "document.cookie"]) {
     assert.ok(!clientsSource.includes(store), `clients.js reaches ${store}`);
   }
+  // Inserting into an empty note must not open with blank lines: the separator is conditional
+  // on there being content to separate from.
+  assert.ok(
+    clientsSource.includes('(el.note.value ? "\\n\\n" : "")'),
+    "the heading insert prepends its separator only when the note already has content",
+  );
 });
 
 test("all three screens carry the same three-link nav", () => {

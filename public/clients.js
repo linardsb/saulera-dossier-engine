@@ -771,7 +771,7 @@
   el.locumList.addEventListener("click", function (event) {
     var button = event.target;
     if (!button || !button.dataset || !button.dataset.heading) return;
-    el.note.value += "\n\n## " + button.dataset.heading + "\n";
+    el.note.value += (el.note.value ? "\n\n" : "") + "## " + button.dataset.heading + "\n";
     markDirty();
     el.note.focus();
     el.note.setSelectionRange(el.note.value.length, el.note.value.length);

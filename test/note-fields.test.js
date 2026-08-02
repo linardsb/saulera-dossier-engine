@@ -369,9 +369,13 @@ test("locumFieldFor recognises the canonical heading and the synonyms a recruite
     "VMS": "vms",
     "Portal used": "vms",
     "Parking": "site-access",
+    "Getting in on day one": "site-access",
+    "Getting into the building": "site-access",
     "Credentialing": "credentialing",
     "Protocols": "protocols",
     "Extension habits": "extensions",
+    "Extending bookings": "extensions",
+    "How they extend": "extensions",
   };
   for (const [heading, id] of Object.entries(synonyms)) {
     assert.equal(locumFieldFor(heading), id, `synonym "${heading}"`);
@@ -386,6 +390,8 @@ test("locumFieldFor leaves the perm vocabulary and arbitrary text alone, and nev
     "Why candidates were turned down",
     "East Grinstead General Hospital",
     "What they actually care about",
+    "Getting interview feedback",
+    "Extended team",
     "",
   ]) {
     assert.equal(locumFieldFor(heading), null, `"${heading}" is not a locum field`);
