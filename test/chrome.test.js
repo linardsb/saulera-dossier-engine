@@ -29,24 +29,14 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
 
-const APP_CSS = read("public/app.css");
-const FONTS_CSS = read("public/fonts.css");
-
-// Every page-scoped <style> block on the deployment. Swept rather than assumed: these four are
-// the only HTML files under public/ that carry one, and the sweep that established that is the
-// same one that proved none of them animates.
-const INLINE_STYLE_PAGES = [
-  "public/404.html",
-  "public/prep/index.html",
-  "public/prep/login.html",
-  "public/prep/privacy.html",
-];
-
-test("every transition in app.css sits behind the reduced-motion guard", () => {
-  // Strip each `prefers-reduced-motion: no-preference` block by counting braces, then assert
-  // nothing animating survives. The loop is prep-registry.test.js:780-795 verbatim — a regex
-  // cannot match nested braces, and app.css's guard block nests one level.
-  let outsideGuard = stripComments(APP_CSS);
+/* Remove every `prefers-reduced-motion: no-preference` block by counting braces, so what is left
+   is everything that animates for a user who asked for no motion. A regex cannot match nested
+   braces and these guards nest one level (a @keyframes inside the @media), which is why this
+   counts rather than matches. Extracted so the two callers below share one implementation:
+   prep-registry.test.js runs a third copy over prep.css, and that one is left alone deliberately
+   — it belongs to #63's file and the duplication predates this ticket. */
+const stripMotionGuards = (source) => {
+  let outsideGuard = source;
   for (
     let at = outsideGuard.search(/@media[^{]*prefers-reduced-motion:\s*no-preference/);
     at !== -1;
@@ -62,12 +52,51 @@ test("every transition in app.css sits behind the reduced-motion guard", () => {
     } while (depth > 0 && end < outsideGuard.length);
     outsideGuard = outsideGuard.slice(0, at) + outsideGuard.slice(end);
   }
+  return outsideGuard;
+};
+
+/* Every page-scoped <style> block on a page, comments already stripped. */
+const inlineBlocksOf = (html) =>
+  [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => stripComments(m[1]));
+
+const APP_CSS = read("public/app.css");
+const FONTS_CSS = read("public/fonts.css");
+
+// Every page-scoped <style> block on the deployment. Swept rather than assumed: these four are
+// the only HTML files under public/ that carry one, and the sweep that established that is the
+// same one that proved none of them animates.
+const INLINE_STYLE_PAGES = [
+  "public/404.html",
+  "public/prep/index.html",
+  "public/prep/login.html",
+  "public/prep/privacy.html",
+];
+
+test("every transition in app.css sits behind the reduced-motion guard", () => {
   assert.doesNotMatch(
-    outsideGuard,
+    stripMotionGuards(stripComments(APP_CSS)),
     /transition|animation|@keyframes/,
     "motion in app.css is opt-in: move this into the `prefers-reduced-motion: no-preference` " +
       "block at the foot of the file rather than declaring it on the rule",
   );
+});
+
+test("no page-scoped <style> block animates outside the guard either", () => {
+  // The hole the app.css test above left open, and the one an inline block is most likely to fall
+  // into: a page-scoped rule is the furthest a declaration can get from this repo's discipline
+  // while still rendering, and #58's inversion of the motion guard from opt-out to opt-in means a
+  // stray transition here now runs FOR the user who asked for no motion. Nothing renders
+  // differently for anyone testing it, which is why this needs a test rather than a review.
+  for (const page of INLINE_STYLE_PAGES) {
+    const blocks = inlineBlocksOf(read(page));
+    assert.ok(blocks.length > 0, `${page} was in this list because it has a <style> block`);
+    assert.doesNotMatch(
+      stripMotionGuards(blocks.join("\n")),
+      /transition|animation|@keyframes/,
+      `${page}'s <style> block animates outside a \`prefers-reduced-motion: no-preference\` ` +
+        `guard. Wrap it, or move the motion to app.css's block at the foot of that file.`,
+    );
+  }
 });
 
 test("app.css declares no colour of its own", () => {
@@ -87,11 +116,10 @@ test("no page-scoped <style> block declares a colour either", () => {
   // sneaks one in, and an inline block is exactly where one would: it is the furthest a value
   // can get from this repo's token discipline while still rendering.
   for (const page of INLINE_STYLE_PAGES) {
-    const html = read(page);
-    const blocks = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
+    const blocks = inlineBlocksOf(read(page));
     assert.ok(blocks.length > 0, `${page} was in this list because it has a <style> block`);
     assert.doesNotMatch(
-      stripComments(blocks.join("\n")),
+      blocks.join("\n"),
       /#[0-9a-fA-F]{3,8}\b/,
       `${page}'s <style> block declares a raw colour; it belongs in tokens.css`,
     );

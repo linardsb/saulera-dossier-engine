@@ -9,18 +9,29 @@
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
 <style>
   /* Page-scoped rules, tokens only, so an agency branding swap carries this page with it.
-     Everything structural is already in app.css: .card, .btn, .input, .field and the focus
-     ring. What is added here is the narrow column and the one element this page spends its
-     boldness on, the code field. */
+     Everything structural is already inherited: app.css gives .topbar, .btn, .input, .field,
+     `.act + .act` and the one focus ring; prep.css gives .prep-footer and .btn-block. What is
+     left here is only what is singular to this page — the narrow column, the notice panel, and
+     the one element this page spends its boldness on, the code field. */
   .signin { max-width: 52ch; }
   .signin p { font-size: var(--text-note); }
   .signin form { margin: 0; }
 
-  /* Each act carries a heading a screen reader can navigate by, while the page shows one
-     task at a time and needs no visible second-level heading. Defined here rather than in
-     app.css because this is the only page in the deployment that has wanted it. */
+  /* The iOS zoom fix. iOS Safari zooms the whole viewport whenever a focused form control
+     computes below the note step, and .input inherits the smaller UI step from app.css — so a
+     candidate's first interaction with this product would be the page jumping under their
+     thumb and them scrolling back to find the field. Raising the control is the whole fix. The
+     alternative, maximum-scale on the viewport meta, stops the zoom by disabling pinch zoom
+     for everyone on the page a nervous person is reading, and fails WCAG 1.4.4. */
+  .signin .input { font-size: var(--text-note); }
+
+  /* Each act carries a heading a screen reader can navigate by, while the page shows one task
+     at a time and needs no visible second-level heading. Defined here rather than in prep.css
+     because the inset values below are raw lengths, which that file's token gate rejects and
+     which no custom property should carry — they are a clipping trick, not a design value. */
   .sr-only {
     position: absolute;
     width: 1px;
@@ -32,20 +43,27 @@
     white-space: nowrap;
   }
 
-  /* The two acts are paced by whitespace rather than a rule. Asking for a code and typing it
-     are separate moments, and the gap is what says so. */
-  .act + .act { margin-top: var(--space-12); }
+  /* app.css already paces the two acts apart. This one line is not a duplicate of it: without an
+     author `display`, the user agent's own `[hidden]` is what hides act 2, and any rule added
+     above that gives .act a display would beat it silently and show both acts at once. The same
+     guard is written at prep.css:217 and app.css:461, both of which exist because that bug
+     shipped once already. */
   .act[hidden] { display: none; }
 
   .act-lede { margin: 0 0 var(--space-6); color: var(--text-muted); }
 
   /* The signature element. Six digits is the whole task in act 2, so the field is the largest
-     thing on the page: mono so the columns line up, tracked wide so a candidate reading from
-     their phone can check digit by digit against the email. Sized in ch so the box fits its
-     content at any root size rather than at a guessed pixel width. */
-  .code-input {
+     thing on the page — a step above the h1, which is the only way it reads as the thing to do
+     rather than as another field. Mono so the columns line up, tracked wide so a candidate
+     reading from their phone can check digit by digit against the email. Sized in em so the box
+     fits its content at any root size rather than at a guessed pixel width.
+
+     Scoped under .signin to match `.signin .input` above. At equal specificity the shared rule
+     would win on source order and quietly drag this field back down to reading size, taking its
+     em-based width with it. */
+  .signin .code-input {
     font-family: var(--font-mono);
-    font-size: var(--text-h2);
+    font-size: var(--text-h1);
     letter-spacing: 0.4em;
     /* 6 digits plus the trailing letter-space, and the padding the shared .input rule adds. */
     width: calc(7.4em + var(--space-6));
@@ -54,7 +72,7 @@
     text-align: center;
   }
 
-  .actions { margin-top: var(--space-4); }
+  .actions { margin-top: var(--space-6); }
 
   /* The state line under each act: what just happened, and what to do about it. Reserved by
      `min-height` so the layout does not jump when a message arrives. */
@@ -67,21 +85,25 @@
   }
   .state[data-tone="error"] { color: var(--danger); }
 
-  /* The notice a dead magic link lands on. --surface rather than a coloured panel: it is
-     information, not an alarm, and the candidate did nothing wrong. */
+  /* The notice a dead magic link lands on, on the palette's info tint — the first consumer of
+     that token. It carries --text-primary (8.21:1 on the tint) and never --text-muted, which is
+     3.75:1 there and under the body-text floor. No border: --border is 2.53:1 on this tint, so
+     an edge drawn in it would sit under the 3:1 non-text floor, and a panel carrying a full
+     sentence is found by its tone without one. */
   .notice {
-    background: var(--surface);
+    background: var(--tint-info);
+    color: var(--text-primary);
     border-radius: var(--radius);
     padding: var(--space-4);
     margin: 0 0 var(--space-8);
   }
   .notice p { margin: 0; }
 
-  .footnote {
-    margin-top: var(--space-12);
-    font-size: var(--text-body);
-    color: var(--text-muted);
-  }
+  /* The shared footer caps at the 72ch prose measure the content pages read at. This page is a
+     52ch form, and both are centred on the same axis, so the shared cap would hang the footer
+     line out past the left edge of everything above it. A modifier rather than a restatement of
+     .prep-footer, because 52ch is this page's measure and nothing else's. */
+  .signin-footer { max-width: 52ch; }
 </style>
 </head>
 <body>
@@ -117,7 +139,7 @@
       <input class="input" type="email" id="email" name="email" autocomplete="email"
              inputmode="email" spellcheck="false" required>
       <div class="actions">
-        <button class="btn btn-primary" type="submit" id="send">Send me a code</button>
+        <button class="btn btn-primary btn-block" type="submit" id="send">Send me a code</button>
       </div>
       <p class="state" id="email-state" role="status" aria-live="polite"></p>
     </form>
@@ -136,18 +158,21 @@
       <input class="input code-input" type="text" id="code" name="code" inputmode="numeric"
              autocomplete="one-time-code" maxlength="7" spellcheck="false" required>
       <div class="actions">
-        <button class="btn btn-primary" type="submit" id="verify">Sign in</button>
+        <button class="btn btn-primary btn-block" type="submit" id="verify">Sign in</button>
       </div>
       <p class="state" id="code-state" role="status" aria-live="polite"></p>
     </form>
   </section>
 
-  <p class="footnote">
-    Not sure why you are here? <a href="/prep/privacy">Read what we hold about you and how to
-    delete it</a>.
-  </p>
-
 </main>
+
+<!-- Outside <main>, and the same shape every other page in the portal ends with. Two of the
+     five used to end in nothing at all, which left the privacy page reachable from some of the
+     portal and not the rest. -->
+<footer class="prep-footer signin-footer">
+  <p>Not sure why you are here? <a href="/prep/privacy">Read what we hold about you and how to
+    delete it</a>.</p>
+</footer>
 
 <script src="/prep/login.js"></script>
 </body>

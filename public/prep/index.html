@@ -10,8 +10,24 @@
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
 <style>
+  /* Three stylesheets, not four, and that is deliberate: this page's whole vocabulary (.topbar,
+     .page-head, .page-sub) is app.css's, it uses nothing from prep.css, and a fourth blocking
+     stylesheet on the shortest-lived page in the product buys consistency on paper and pays for
+     it in the one thing this page is judged on, which is painting at all before it leaves. */
   .prep { max-width: 60ch; }
   .prep p { font-size: var(--text-note); }
+
+  /* A junction, not a destination. This heading is on screen for one round trip and is never
+     read to the end, so it steps down the ramp and takes the muted ink: the page should read as
+     a breath between two places rather than announce itself as a third one. */
+  .prep .page-head h1 {
+    font-size: var(--text-h3);
+    color: var(--text-muted);
+  }
+
+  /* The head is the only thing here, so the space app.css reserves under it for a page's
+     content is space this page never fills. */
+  .prep .page-head { margin-bottom: var(--space-6); }
 </style>
 </head>
 <body>
@@ -38,6 +54,14 @@
     <h1 id="head">Checking your sign-in…</h1>
     <p class="page-sub" id="sub">One moment.</p>
   </div>
+
+  <!-- Without this, a candidate with JavaScript switched off waits on "Checking your sign-in…"
+       for as long as they are willing to, because the only thing that ever moves them off this
+       page is the script below. Markup with no flow of its own: it names the one door out. -->
+  <noscript>
+    <p>This page needs JavaScript to check whether you are signed in.
+      <a href="/prep/login">Go to the sign-in page</a>.</p>
+  </noscript>
 </main>
 
 <script>

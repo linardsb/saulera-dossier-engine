@@ -74,9 +74,13 @@
                                     a border that is genuinely decorative because the chip also
                                     carries a word — this product's existing pattern)
        --tint-warn      ink 11.34, --unverified 5.59, --failed 7.08, --danger 8.01
-     --tint-info has NO consumer yet. It is defined here because #58 owns the token layer and the
-     set is decided as three; the first consumer is #60. That is a deliberate hand-off, not dead
-     weight. test/tokens.test.js's TINTS table measures all three. */
+     --tint-info took its first consumer in #62: the notice panel a dead magic link lands on
+     (login.html). It was defined here one ticket ahead of that because #58 owns the token layer
+     and the set is decided as three. The panel carries --text-primary (8.21:1) and never
+     --text-muted (3.75:1, under the body-text floor), and it draws NO border — --border is
+     2.53:1 on this tint and an edge in it would sit under the 3:1 non-text floor, so the panel
+     is found by its tone and by the full sentence it carries. #60's chips are the next consumer
+     and inherit both constraints. test/tokens.test.js's TINTS table measures all three. */
   --tint-verified: #c4ece1;
   --tint-info:     #b0d4e8;
   --tint-warn:     #fbeeec;

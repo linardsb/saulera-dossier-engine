@@ -93,7 +93,11 @@
 .block-head {
   font-family: var(--font-ui);
   font-size: var(--text-h3);
-  font-weight: 500;
+  /* 600, not 500. Geist ships 400 and 600 only (fonts.css), and CSS font-matching resolves a
+     desired weight between 400 and 500 DOWNWARD — so this read 500 and rendered at regular
+     weight while claiming to be medium. Every block head on the candidate pages gets heavier
+     here; that is the file's existing intent finally rendering, not a restyle of those pages. */
+  font-weight: 600;
   letter-spacing: -0.01em;
   margin: 0 0 var(--space-4);
   /* The hairline ties the heading to its own card's content, the one grouping the card edge
@@ -235,4 +239,11 @@
   .block { margin-bottom: var(--space-6); padding: var(--space-4); }
   .brief .page-head { margin-bottom: var(--space-8); }
   .prep-footer { margin-top: var(--space-8); }
+
+  /* The one action on a phone fills its column: a thumb reaching a button on a page held
+     one-handed should not have to find it horizontally. Narrow-screen only, because at desktop
+     width a button stretched across a 52ch column reads as a mistake rather than as emphasis.
+     Shared rather than page-scoped because the brief's "Practise for it" is the same kind of
+     control on the same kind of screen. */
+  .btn-block { width: 100%; }
 }

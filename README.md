@@ -95,6 +95,40 @@ without the doc to hand.
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
 
+**The candidate portal is one system, and it is designed for a phone.** (2 Aug 2026, #62, epic
+#57.) The portal used to be two half-systems: `brief.html` and `session.html` linked
+`public/prep/prep.css` and ended in a shared footer, while the three shell pages — sign-in, the
+`/prep/` junction and the privacy page — carried their own page-scoped styles and ended in
+nothing. `login.html` even re-declared a rule `app.css` already owned, so which one won was
+decided by link order rather than by anyone. Sign-in and privacy now link `prep.css` too, and
+every page in the portal ends the same way. Each page keeps a `<style>` block for what is
+genuinely singular to it, which is most of what was there: auditing the three found almost
+nothing with a second consumer, so the shared file gained one utility and the real win is the
+footer.
+
+*The junction is the deliberate exception.* `/prep/index.html` still links three stylesheets and
+not `prep.css`. Its whole vocabulary is `app.css`'s, it exists for one round trip, and a fourth
+blocking stylesheet would be paid for in the only thing that page is judged on.
+
+*The iOS zoom, and the fix that would have been wrong.* Safari on iOS zooms the viewport whenever
+a focused form control computes below 16px, and the sign-in fields inherited the 14px UI step — so
+a candidate's first interaction with the product was the page jumping under their thumb. The fix
+is raising the control to 16px. The other fix, `maximum-scale=1` on the viewport meta, stops the
+zoom by disabling pinch zoom for everyone and fails WCAG 1.4.4; `test/prep-shell.test.js` asserts
+no shell page ever acquires it.
+
+*The retention table scrolls, it does not restack.* The standard responsive-table pattern sets
+`display: block` on the cells under a breakpoint. It looks better at 360px and it strips the
+table's implicit ARIA roles, so a screen-reader user loses the row and column association that is
+the entire content of a "what · why · when deleted" grid on a page about data rights. It scrolls
+inside its own box instead, which is what `.counts-table` already does.
+
+`--tint-info` also took its first consumer here (the notice a dead magic link lands on) at
+`--text-primary` and with no border, both forced by the contrast measurements in `tokens.css`. Two
+`font-weight: 500` declarations were the last in the repo and are now 600 — including one in
+`prep.css`, which visibly weights the block headings on the two candidate pages #63 owns. That is
+the file's existing intent finally rendering, not a restyle of those pages.
+
 **The palette is owner-decided from zig.ai, not the stackai default. One sans, one mono. Motion
 is opt-in.** (2 Aug 2026, #58, the foundation ticket of epic #57.) Three changes to the design
 base, all in `public/tokens.css`, `public/fonts.css` and `public/app.css`; no markup, no

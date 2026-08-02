@@ -9,31 +9,63 @@
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
 <style>
-  /* Page-scoped rules: candidate-readable prose and the retention table. Tokens only —
-     no raw values — so an agency branding swap carries this page with it. */
+  /* Page-scoped rules: candidate-readable prose and the retention table. Tokens only — no raw
+     values — so an agency branding swap carries this page with it. */
   .privacy { max-width: 72ch; }
-  .privacy section { margin-bottom: var(--space-8); }
-  .privacy p, .privacy li, .privacy th, .privacy td { font-size: var(--text-note); }
-  .privacy h2 { margin-top: 0; }
+  .privacy p, .privacy li, .privacy td { font-size: var(--text-note); }
+
+  /* Seven sections of prose read as one long scroll unless the step between them is visibly
+     bigger than the step inside them. Paragraphs inside a section are a quarter of this apart
+     (app.css's `p` margin), so the gap alone says where one answer ends and the next begins,
+     and the page needs no rule drawn between them. */
+  .privacy section { margin-bottom: var(--space-12); }
+  .privacy section:last-of-type { margin-bottom: 0; }
+
+  /* The heading sits close to the answer it introduces — the pairing the large gap above it
+     depends on to read as a grouping rather than as even spacing. */
+  .privacy h2 { margin: 0 0 var(--space-3); }
+
+  /* Wide content scrolls inside its own box rather than widening the page — CRAFT's rule, and
+     the same treatment app.css gives the counts table. The table below keeps its table
+     semantics at every width for this reason: restacking the cells with a block display would
+     look better on a phone and would strip the row and column association from the
+     accessibility tree, on the one page where "what · why · when deleted" IS the content. */
   .table-scroll { overflow-x: auto; }
+
   .retention {
     border-collapse: collapse;
     width: 100%;
+    /* The floor the three columns stay readable at. Below it the wrapper above scrolls; without
+       it the columns crush to a word each on a narrow screen and the table is unreadable while
+       technically fitting. */
+    min-width: 34rem;
     margin: var(--space-4) 0;
   }
-  .retention th, .retention td {
+
+  /* One hairline under the head, which is the grouping whitespace cannot encode in a table:
+     without it the header row reads as the first data row. No rule between the body rows beyond
+     the lighter hairline, and none at all between the columns. Mirrors app.css's counts table
+     so the two tables in the deployment read as one system rather than two. */
+  .retention thead th {
     text-align: left;
     vertical-align: top;
-    padding: var(--space-3);
-    border-bottom: 1px solid var(--border-hairline);
-  }
-  .retention th {
     font-family: var(--font-ui);
     font-size: var(--text-body);
-    color: var(--text-muted);
-    font-weight: 500;
+    font-weight: 600;
+    border-bottom: var(--hairline) solid var(--border);
+    padding: var(--space-2) var(--space-4) var(--space-2) 0;
   }
+
+  .retention tbody td {
+    text-align: left;
+    vertical-align: top;
+    border-bottom: var(--hairline) solid var(--border-hairline);
+    padding: var(--space-3) var(--space-4) var(--space-3) 0;
+  }
+
+  .retention tbody tr:last-child td { border-bottom: 0; }
 </style>
 </head>
 <body>
@@ -134,6 +166,12 @@
   </section>
 
 </main>
+
+<!-- The page was a dead end: a candidate who followed the link from their prep to read this
+     had no way back except the browser's own Back. Every other page in the portal ends here. -->
+<footer class="prep-footer">
+  <p><a href="/prep/">Back to your prep</a></p>
+</footer>
 
 </body>
 </html>
