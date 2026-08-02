@@ -6,6 +6,7 @@
 // light HTML for clients whose send is a formatted email body.
 
 import { wrap, mark, quote, escapeHtml, UNVERIFIED } from "./text.js";
+import { LOCUM_RENDER } from "../pack.js";
 
 function collect(pack) {
   const sources = [];
@@ -39,15 +40,11 @@ function toText(pack) {
   L.push("");
   L.push(wrap(pack.headline));
 
-  const booking = [
-    ["COMPLIANCE AT A GLANCE", pack.compliance ?? [], (c) => c.check],
-    ["AVAILABILITY AND RATE", pack.booking ?? [], (c) => c.item],
-    ["MODALITY AND SCANNER MATRIX", pack.modality_matrix ?? [], (c) => c.row],
-  ];
-  for (const [heading, items, label] of booking) {
+  for (const { key, heading, labelField } of LOCUM_RENDER) {
+    const items = pack[key] ?? [];
     if (!items.length) continue;
-    L.push("", heading, "");
-    for (const c of items) L.push(wrap(`• ${label(c)}: ${c.text}${tag(c)}`));
+    L.push("", heading.toUpperCase(), "");
+    for (const c of items) L.push(wrap(`• ${c[labelField]}: ${c.text}${tag(c)}`));
   }
 
   L.push("", "AGAINST THE BRIEF", "");
@@ -112,18 +109,12 @@ function toHtml(pack) {
   H.push(`<p style="margin:2px 0 14px;color:#555">Candidate ${e(pack.candidate_ref)}</p>`);
   H.push(`<p style="margin:0 0 4px">${e(pack.headline)}</p>`);
 
-  section(
-    "Compliance at a glance",
-    (pack.compliance ?? []).map((c) => claimLi(c, `<strong>${e(c.check)}:</strong> `)),
-  );
-  section(
-    "Availability and rate",
-    (pack.booking ?? []).map((c) => claimLi(c, `<strong>${e(c.item)}:</strong> `)),
-  );
-  section(
-    "Modality and scanner matrix",
-    (pack.modality_matrix ?? []).map((c) => claimLi(c, `<strong>${e(c.row)}:</strong> `)),
-  );
+  for (const { key, heading, labelField } of LOCUM_RENDER) {
+    section(
+      heading,
+      (pack[key] ?? []).map((c) => claimLi(c, `<strong>${e(c[labelField])}:</strong> `)),
+    );
+  }
   section(
     "Against the brief",
     pack.evidence.map((c) => claimLi(c, `<strong>${e(c.requirement)}:</strong> `)),

@@ -5,6 +5,7 @@
 // wants sourcing visible without turning to a footer.
 
 import { wrap, mark, quote, escapeHtml } from "./text.js";
+import { LOCUM_RENDER } from "../pack.js";
 
 export function renderInline(pack) {
   return { text: toText(pack), html: toHtml(pack) };
@@ -24,17 +25,13 @@ function toText(pack) {
   L.push("");
   L.push(wrap(pack.headline));
 
-  const booking = [
-    ["COMPLIANCE AT A GLANCE", pack.compliance ?? [], (c) => c.check],
-    ["AVAILABILITY AND RATE", pack.booking ?? [], (c) => c.item],
-    ["MODALITY AND SCANNER MATRIX", pack.modality_matrix ?? [], (c) => c.row],
-  ];
-  for (const [heading, items, label] of booking) {
+  for (const { key, heading, labelField } of LOCUM_RENDER) {
+    const items = pack[key] ?? [];
     if (!items.length) continue;
-    L.push("", heading);
+    L.push("", heading.toUpperCase());
     for (const c of items) {
       L.push("");
-      L.push(wrap(`• ${label(c)}: ${c.text}${mark(c)}`));
+      L.push(wrap(`• ${c[labelField]}: ${c.text}${mark(c)}`));
       src(c);
     }
   }
@@ -102,18 +99,12 @@ function toHtml(pack) {
   H.push(`<p style="margin:2px 0 14px;color:#555">Candidate ${e(pack.candidate_ref)}</p>`);
   H.push(`<p style="margin:0 0 4px">${e(pack.headline)}</p>`);
 
-  section(
-    "Compliance at a glance",
-    (pack.compliance ?? []).map((c) => claim(c, `<strong>${e(c.check)}:</strong> `)),
-  );
-  section(
-    "Availability and rate",
-    (pack.booking ?? []).map((c) => claim(c, `<strong>${e(c.item)}:</strong> `)),
-  );
-  section(
-    "Modality and scanner matrix",
-    (pack.modality_matrix ?? []).map((c) => claim(c, `<strong>${e(c.row)}:</strong> `)),
-  );
+  for (const { key, heading, labelField } of LOCUM_RENDER) {
+    section(
+      heading,
+      (pack[key] ?? []).map((c) => claim(c, `<strong>${e(c[labelField])}:</strong> `)),
+    );
+  }
   section(
     "Against the brief",
     pack.evidence.map((c) => claim(c, `<strong>${e(c.requirement)}:</strong> `)),
