@@ -111,6 +111,21 @@ the row's real rendered height of 69px, so the token's arithmetic holds.
 `--text-muted` `rgb(92,103,100)` and real numbers at `--text-primary` `rgb(46,51,50)`, body cell
 padding 16px.
 
+`/counts` was also measured at **360px and 390px**, because this ticket put `white-space: nowrap`
+on the bare `.counts-number`, which is on the three `<th scope="col">` header cells too — so
+"Prep opened" can no longer wrap and the table's min-content width grew. Measured at 360:
+
+| | |
+|---|---|
+| `documentElement.scrollWidth` | **360** — equal to the viewport, so no horizontal page scroll |
+| `.counts` box width | 328 (= 360 − the two `--space-4` body paddings) |
+| table width | 328 — it still fits, so `overflow-x: auto` is not even called on |
+| `thead th` heights | 38px each, one line |
+
+Same result at 390 (`scrollWidth` 390, box 358). The nowrap is safe where it is; if a future
+change does push the table past its box, `.counts { overflow-x: auto }` catches it inside the
+element rather than on the page.
+
 **`/` is unchanged except the nav** — the strongest form of that AC: `/` was rendered from
 `origin/main`'s `public/` and from this branch's, and every element's bounding box compared.
 
@@ -202,10 +217,23 @@ want the dev-server walk-through before merging, it is the one Level 4 line not 
 and that gate fails the build if one exists outside the `prefers-reduced-motion: no-preference`
 block. The count is still 6, all inside the guard.
 
+## Blast radius beyond `/clients` and `/counts`
+
+#59 and #62 are working `public/app.css` in parallel, so the two rules here that are **not**
+scoped to a screen are called out rather than left to be found:
+
+1. **`.topbar-nav { flex-wrap: wrap }`** (`app.css:111`) — the one rule this ticket changes above
+   line 264, kept in its own commit so it can be dropped in a rebase if #59 lands the same fix
+   first. Its effect on `/` is measured above: nothing but the wrap.
+2. **`html { scroll-padding-bottom: var(--sticky-save) }`** (inside the `min-width: 860px` block
+   at `app.css:436`) — a globally-scoped selector, so it applies on `/`, `/counts` and `404.html`
+   at ≥860px as well. It was specified by the plan and it moves no geometry (the 1440px A/B on
+   `/` is 0 diffs); it only changes where the browser stops when it scrolls a focused element
+   into view. Harmless on the other screens, which have no sticky bottom chrome, but a reviewer
+   scanning for cross-ticket reach should see it named.
+
+Everything else is scoped by `.editor`, `.note-facts`, `.locum` or `.counts`.
+
 ## Ready for the next step
 
 Working tree is clean, all validations pass. Next: `piv-create-pr`, then `piv-review-pr`.
-
-The PR body should say out loud that this ticket touches **one** shared rule above `app.css:264` —
-`.topbar-nav { flex-wrap: wrap }`, in its own commit — because #59 and #62 are working the same
-file in parallel.
