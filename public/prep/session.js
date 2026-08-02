@@ -78,6 +78,13 @@ export const COPY = {
   dayBeforeNote:
     "Keep it brief and stop when the page suggests it. What you have is enough to work from.",
 
+  locumNote:
+    "There is no practice drill for this booking. This page is what we know that will help " +
+    "you walk in prepared, and it stays here whenever you need it.",
+  locumEmpty:
+    "We have nothing extra to pass on for this booking yet. If you have a question, reply to " +
+    "the email that invited you.",
+
   closeImproved: "What improved today",
   closeHonest:
     "Rates move over several attempts, and today's attempts are what move them. It will not " +
@@ -169,6 +176,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
     habits: [], // standing habits plus any announced this session
     inFlight: false, // one attempt at a time
     dayBefore: false, // the GET's day_before flag, fixed at load (#25)
+    engagement: "other", // "locum" | "other" — the brief payload's flag, fixed at load (#50)
   };
 
   // Seeds each renderBlocks call's ids. The transcript accumulates entries and the hidden prime
@@ -254,10 +262,17 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
       }
     }
 
+    // #50: a locum booking never drills. A brief that failed to load reads as "other" — the
+    // fail-toward-existing-behaviour direction (#46 D2), since without the payload there is no
+    // primer and no question list to compose anyway.
+    state.engagement = brief?.engagement === "locum" ? "locum" : "other";
+
     clearState();
     // Resume: attempts under the gap mean this session is still live — land where they left,
-    // with the close on offer if this session's turns had already earned it.
-    if (payload.turns_this_session > 0) {
+    // with the close on offer if this session's turns had already earned it. A locum invite
+    // never routes here even if an attempt row somehow exists: the UI never offers the drill,
+    // so the guard would land them in a surface this booking does not have.
+    if (payload.turns_this_session > 0 && state.engagement !== "locum") {
       enterDrill();
       if (payload.suggest_close) closeButton.hidden = false;
     } else {
@@ -268,6 +283,41 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
   function renderPrime(brief) {
     state.phase = "prime";
     const payload = state.session;
+
+    // The locum prime (#50) is the whole visit, and it wins over day-before: for a booking,
+    // "how do I get in tomorrow" IS the day-before content. Composed like the day-before
+    // branch below — cherry-picked brief blocks plus a session-only block — and it never
+    // enters the drill: no Start, no ProgressStrip, no habits, no last close.
+    if (state.engagement === "locum") {
+      const blocks = [];
+      const primer = (brief?.blocks ?? []).find((b) => b && b.name === "FirstDayPrimer");
+      if (primer) blocks.push({ name: "FirstDayPrimer", props: primer.props });
+      const logistics = (brief?.blocks ?? []).find((b) => b && b.name === "LogisticsRail");
+      if (logistics) blocks.push({ name: "LogisticsRail", props: logistics.props });
+
+      const groups = { client: [], competency: [], screening: [] };
+      for (const question of Array.isArray(brief?.questions) ? brief.questions : []) {
+        const type = question?.type === "client" || question?.type === "screening"
+          ? question.type
+          : "competency";
+        groups[type].push(String(question?.text ?? ""));
+      }
+      if (groups.client.length || groups.competency.length || groups.screening.length) {
+        blocks.push({ name: "LocumQuestions", props: groups });
+      }
+
+      renderBlocks({ blocks, competencies: [] }, primeMount, { doc, idPrefix: "prime" });
+      // An honest line either way: what this page is when it holds something, and that there
+      // is nothing yet when it does not — never a blank prime.
+      primeMount.appendChild(
+        el(doc, "p", "prep-caption", blocks.length ? COPY.locumNote : COPY.locumEmpty),
+      );
+
+      state.phase = "done";
+      startButton.hidden = true;
+      actPrime.hidden = false;
+      return;
+    }
 
     // The day-before prime (#25) is a run-through's, not a drill's: the practical details
     // first, then the day-before block, then the start button — no PrimerCard (no

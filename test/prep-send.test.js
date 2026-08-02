@@ -248,6 +248,61 @@ test("R4: the field keys come from D1, so a panel claim cannot source itself", {
   assert.equal(panel[1].source_field_key, "", `${NOTE_UNTICKED.key} was never ticked`);
 });
 
+// ── #50: engagement is server truth, recomputed from the same cleaned inputs ───────────
+
+test("#50: a forged engagement is overwritten with the brief's own read", { skip }, async () => {
+  // The brief is locum-worded (locum wins even though the fixture also says "permanent" —
+  // domain.js D3), and the browser posts a payload claiming the opposite. The stored flag is
+  // briefProfile's read of the SAME cleaned brief persisted as jd_text, so the row cannot
+  // disagree with itself.
+  const db = openMigrated();
+  const locumBrief = `${BRIEF}\n\nThis cover is offered as a locum booking at a day rate.`;
+  const payload = PAYLOAD();
+  payload.engagement = "permanent";
+  await send(d1Shape(db), sendBody({ brief: locumBrief, payload }));
+
+  const [role] = rowsOf(db, "candidate_role");
+  assert.equal(JSON.parse(role.brief_json).engagement, "locum", "the posted lie was overwritten");
+});
+
+test("#50: a payload with no engagement at all sends fine and is stamped fresh", { skip }, async () => {
+  // The default body: the fixture payload predates the flag entirely, and the fixture brief
+  // says "permanent" outright.
+  const db = openMigrated();
+  const { response } = await send(d1Shape(db));
+  assert.equal(response.status, 201);
+
+  const [role] = rowsOf(db, "candidate_role");
+  assert.equal(JSON.parse(role.brief_json).engagement, "permanent");
+});
+
+test("#50: question types ride brief_json; the question table stays type-free", { skip }, async () => {
+  // No migration: brief_json persists the full questions for free, and the D1 question table
+  // only feeds the drill, which a locum candidate never enters.
+  const db = openMigrated();
+  const payload = PAYLOAD();
+  payload.questions.forEach((q) => {
+    q.type = "client";
+  });
+  await send(d1Shape(db), sendBody({ payload }));
+
+  const [role] = rowsOf(db, "candidate_role");
+  assert.ok(JSON.parse(role.brief_json).questions.every((q) => q.type === "client"));
+  const columns = db.prepare("PRAGMA table_info(question)").all().map((c) => c.name);
+  assert.ok(!columns.includes("type"), "no 0008 rode in with this ticket");
+});
+
+test("#50: a forged question type is refused at the door as a 400", { skip }, async () => {
+  const db = openMigrated();
+  const payload = PAYLOAD();
+  payload.questions[0].type = "clinical";
+  const { response } = await send(d1Shape(db), sendBody({ payload }));
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "bad_brief");
+  assert.equal(countOf(db, "invite"), 0, "nothing was written");
+});
+
 // ── R2: the primary key collision, which is an ordinary second candidate ───────────────
 
 test("R2: two sends for the SAME client both persist, with distinct competency ids", { skip }, async () => {

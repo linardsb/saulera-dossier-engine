@@ -37,26 +37,29 @@
  * this file with no DOM at all.
  */
 
-/** The five #19 emits. Retyped rather than imported: `src/` is not served to the browser (Pages'
- *  build output is `public/`), so an import of ../../src/prep/schema.js would 404 at runtime.
- *  test/prep-registry.test.js imports BOTH and asserts they match, which is where the drift is
- *  actually caught — test/prep-schema.test.js:47-52 predicted this exact hole. */
+/** The six #19 emits (#50 added FirstDayPrimer). Retyped rather than imported: `src/` is not
+ *  served to the browser (Pages' build output is `public/`), so an import of
+ *  ../../src/prep/schema.js would 404 at runtime. test/prep-registry.test.js imports BOTH and
+ *  asserts they match, which is where the drift is actually caught —
+ *  test/prep-schema.test.js:47-52 predicted this exact hole. */
 export const BRIEF_BLOCK_NAMES = [
   "PrimerCard",
   "CompetencyMap",
   "PanelBrief",
   "StoryBankCard",
   "LogisticsRail",
+  "FirstDayPrimer",
 ];
 
-/** The five the session emits (#23/#24/#25). No schema stands behind them yet; this file and
- *  test/fixtures/prep-session-blocks.json are the contract until one does. */
+/** The six the session emits (#23/#24/#25, #50 added LocumQuestions). No schema stands behind
+ *  them; this file and test/fixtures/prep-session-blocks.json are the contract until one does. */
 export const SESSION_BLOCK_NAMES = [
   "QuestionCard",
   "HelpLadder",
   "FeedbackNote",
   "ProgressStrip",
   "DayBeforeMode",
+  "LocumQuestions",
 ];
 
 /* ── copy ──────────────────────────────────────────────────────────────────────────────── */
@@ -113,6 +116,13 @@ const COPY = {
 
   dayBeforeHead: "The day before",
   dayBeforeFocus: "Run through these",
+
+  firstDayHead: "Your first day",
+
+  locumQuestionsHead: "What you may be asked",
+  locumClientHead: "What this manager tends to ask",
+  locumCompetencyHead: "Expect to be asked about your experience",
+  locumScreeningHead: "Have ready",
 };
 
 /* ── shared helpers ────────────────────────────────────────────────────────────────────── */
@@ -234,7 +244,7 @@ function panelSourceNode(doc, entry) {
   return el(doc, "p", "prep-caption", copy);
 }
 
-/* ── the five blocks #19 emits ─────────────────────────────────────────────────────────── */
+/* ── the six blocks #19 emits ──────────────────────────────────────────────────────────── */
 
 /** Landmarks before detail, per SPEC's prime step: the shape of the role, the register a strong
  *  answer takes here, and what the first stage is actually testing. */
@@ -366,7 +376,36 @@ function LogisticsRail(doc, props, ctx, id) {
   return node;
 }
 
-/* ── the five the session emits ────────────────────────────────────────────────────────── */
+/**
+ * The locum candidate's day one (#50): what the agency knows that they can't — logistics,
+ * kit, who to report to. Each item carries the same {source_field_key, failed_field_key}
+ * provenance as a PanelBrief entry, and renders through the same predicate: the mark, the
+ * caption, and never the internal slug — sourced and demoted alike.
+ */
+function FirstDayPrimer(doc, props, ctx, id) {
+  const { node, body } = section(doc, id, COPY.firstDayHead);
+  body.appendChild(el(doc, "p", "prep-lede", props.intro));
+
+  for (const item of Array.isArray(props.items) ? props.items : []) {
+    const unsourced = panelUnsourced(item);
+
+    const entry = el(doc, "div", "claim prep-entry");
+    if (unsourced) entry.classList.add("claim-unverified");
+
+    const head = el(doc, "div", "claim-head");
+    head.appendChild(el(doc, "p", "claim-text", item.topic));
+    if (unsourced) head.appendChild(mark(doc, COPY.panelUnverifiedMark, "mark-unverified"));
+
+    entry.appendChild(head);
+    entry.appendChild(el(doc, "p", "prep-body", item.detail));
+    entry.appendChild(panelSourceNode(doc, item));
+    body.appendChild(entry);
+  }
+
+  return node;
+}
+
+/* ── the six the session emits ─────────────────────────────────────────────────────────── */
 
 /**
  * One question, as an interviewer would actually ask it.
@@ -509,10 +548,34 @@ function DayBeforeMode(doc, props, ctx, id) {
   return node;
 }
 
+/**
+ * The locum question mix (#50), grouped by what each question is FOR. Pure data already in the
+ * brief payload — session.js groups `questions[]` by `type` and hands the three lists in as
+ * props, the DayBeforeMode idiom. Headings come from COPY; a type slug never reaches the
+ * screen. Empty groups render nothing at all.
+ */
+function LocumQuestions(doc, props, ctx, id) {
+  const { node, body } = section(doc, id, COPY.locumQuestionsHead);
+
+  const groups = [
+    [COPY.locumClientHead, props.client],
+    [COPY.locumCompetencyHead, props.competency],
+    [COPY.locumScreeningHead, props.screening],
+  ];
+  for (const [label, items] of groups) {
+    if (!Array.isArray(items) || !items.length) continue;
+    body.appendChild(el(doc, "p", "prep-label", label));
+    body.appendChild(lines(doc, items, "prep-list"));
+  }
+
+  return node;
+}
+
 /* ── the registry and the walker ───────────────────────────────────────────────────────── */
 
 /**
- * The closed vocabulary, as constructors. Ten keys, decision 22's ten names.
+ * The closed vocabulary, as constructors. Twelve keys: decision 22's ten names, plus #50's
+ * FirstDayPrimer and LocumQuestions.
  *
  * `Object.freeze` is a statement rather than a security boundary. What actually enforces
  * architecture §3 is the ABSENCE of a constructor that renders a finished answer or a score —
@@ -530,6 +593,8 @@ export const REGISTRY = Object.freeze({
   FeedbackNote,
   ProgressStrip,
   DayBeforeMode,
+  FirstDayPrimer,
+  LocumQuestions,
 });
 
 /**
@@ -616,7 +681,7 @@ export function renderBlocks(payload, mount, ctx = {}) {
         continue;
       }
 
-      // Nine of the ten constructors take no children, and `assertBrief` rejects them there — but
+      // Eleven of the twelve constructors take no children, and `assertBrief` rejects them there — but
       // only on the brief path. The session names (#23/#24/#25) have no schema behind them yet,
       // and a child that vanishes with no count, no warning and nothing in `skipped` is the exact
       // silence the rule above exists to prevent, arriving through a different door.

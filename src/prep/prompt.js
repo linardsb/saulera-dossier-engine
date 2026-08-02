@@ -88,19 +88,42 @@ export const visibleNoteBlock = (clientName, fields = []) =>
     .join("\n\n") +
   `\n</client_knowledge>`;
 
+/**
+ * The engagement branch (#50), rendered per candidate and therefore strictly AFTER the cache
+ * breakpoint — src/domain.js's deterministic read decides it, never the model. PREP_SYSTEM must
+ * not carry any of this: it sits inside the cached prefix and may only gain unconditional text.
+ */
+const engagementBlock = (engagement) =>
+  engagement === "locum"
+    ? "This is a locum booking, not an interview process: there is usually no panel — an " +
+      "informal call with the manager at most. Compose a FirstDayPrimer block from the client " +
+      "knowledge above: how to get in on day one, the scanner fleet and its protocols, PACS " +
+      "and RIS, who to report to. If the client knowledge holds nothing practical, omit the " +
+      "block entirely — an empty block is worse than an absent one. Keep the question bank " +
+      'slim: mostly type "client" questions drawn from what this manager tends to probe, a few ' +
+      'type "competency" questions phrased to verify experience rather than teach it ("Which ' +
+      'scanners have you run solo?"), and one or two type "screening" questions on ' +
+      "availability, rate and compliance logistics. Never generic clinical coaching — the " +
+      "reader is an expert, and this page only tells them what the agency knows that they " +
+      "cannot.\n\n"
+    : 'This is not a locum booking: give every question type "competency", and do not emit a ' +
+      "FirstDayPrimer block.\n\n";
+
 /** The per-candidate half, and the instruction that closes the prompt. */
-export const prepInputsBlock = ({ brief, cv, interviewAt }) =>
+export const prepInputsBlock = ({ brief, cv, interviewAt, engagement }) =>
   `Here is the client's brief for the role:\n\n<brief>\n${brief}\n</brief>\n\n` +
   `Here is the candidate's CV:\n\n<cv>\n${cv}\n</cv>\n\n` +
   `The interview is on ${interviewAt}.\n\n` +
+  engagementBlock(engagement) +
   `Compose the candidate's prep brief.`;
 
 /**
  * The visible slice goes FIRST and is the cache breakpoint: it is the one input reused across
  * every candidate for the same client, and the prefix has to be byte-identical for a cache read.
- * The brief, the CV and the date vary per candidate and therefore come after it.
+ * The brief, the CV, the date and the engagement branch vary per candidate and therefore come
+ * after it.
  */
-export function buildPrepMessages({ clientName, visibleFields, brief, cv, interviewAt }) {
+export function buildPrepMessages({ clientName, visibleFields, brief, cv, interviewAt, engagement }) {
   return [
     {
       role: "user",
@@ -112,7 +135,7 @@ export function buildPrepMessages({ clientName, visibleFields, brief, cv, interv
         },
         {
           type: "text",
-          text: prepInputsBlock({ brief, cv, interviewAt }),
+          text: prepInputsBlock({ brief, cv, interviewAt, engagement }),
         },
       ],
     },

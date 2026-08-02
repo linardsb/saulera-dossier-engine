@@ -116,6 +116,7 @@ for (const q of payload.questions) {
 }
 
 console.log(`role: ${payload.role_title}`);
+console.log(`engagement: ${payload.engagement ?? "unknown"}`);
 console.log(
   "blocks: " +
     payload.blocks
@@ -138,7 +139,22 @@ console.log(
   `panel claims: ${provenance.panel_sourced} sourced, ` +
     `${provenance.panel_unsourced} unsourced — ${provenance.panel_total} total`,
 );
-console.log(`questions: ${payload.questions.length}`);
+if (provenance.primer_total) {
+  console.log(
+    `primer items: ${provenance.primer_sourced} sourced, ` +
+      `${provenance.primer_unsourced} unsourced — ${provenance.primer_total} total`,
+  );
+}
+const typeCounts = {};
+for (const q of payload.questions) {
+  const type = q.type ?? "competency";
+  typeCounts[type] = (typeCounts[type] ?? 0) + 1;
+}
+console.log(
+  `questions: ${payload.questions.length} (` +
+    Object.entries(typeCounts).map(([type, n]) => `${type} ${n}`).join(", ") +
+    ")",
+);
 
 // The only way to tell the breakpoint actually cached. 0 on a first run is expected — the schema
 // compiles once and the prefix is cold — and a visible slice under Claude Opus 5's 512-token

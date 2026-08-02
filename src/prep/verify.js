@@ -48,41 +48,50 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
     return { ...c, verified: false, failed_quote: c.source_quote };
   });
 
+  // One demotion for both note-derived blocks (the panel's claims and #50's primer items — the
+  // same {source_field_key} shape at both call sites; do not abstract past the two).
+  //
+  // Idempotent, the way verifyPack is (provenance.js:55, `source_type === "unverified"`).
+  // A demoted entry carries source_field_key: "", which `keys` never holds — so without this
+  // a second pass re-demotes it and overwrites failed_field_key with the blank, destroying
+  // the diagnostic on exactly the path that needs it most: a payload re-verified out of
+  // storage, where the original key is the only record of what the model claimed.
+  //
+  // The test is the SHAPE this function produces, not the mere presence of the key. Key
+  // presence alone is forgeable: `{"failed_field_key": null}` is legal JSON that survives
+  // readJson and assertBrief, so a payload arriving from the browser could carry a
+  // `source_field_key` naming a HIDDEN note section and return here before the D1 allow-list
+  // was ever consulted. A genuine demotion always blanks the key first, so requiring both is
+  // what keeps the guarantee functions/api/prep/send.js advertises — the keys come from the
+  // database — true of the round trip and not only of the first pass.
+  const demote = (entry, failure) => {
+    if (entry.source_field_key === "" && "failed_field_key" in entry) return entry;
+    if (keys.has(entry.source_field_key)) return entry;
+
+    failures.push({ ...failure, key: entry.source_field_key, reason: "field key not in the visible slice" });
+
+    return { ...entry, source_field_key: "", failed_field_key: entry.source_field_key };
+  };
+
   // Cloned the whole way down rather than mutated in place: the panel claim sits three levels
   // deep (blocks[i].props.panel[j]), and an in-place blank would alter the parsed object the
   // caller still holds, quietly making "nothing was dropped" unprovable.
   const blocks = (payload.blocks ?? []).map((block, blockIndex) => {
-    if (block.name !== "PanelBrief" || !Array.isArray(block.props?.panel)) return block;
+    if (block.name === "PanelBrief" && Array.isArray(block.props?.panel)) {
+      const panel = block.props.panel.map((entry, panelIndex) =>
+        demote(entry, { kind: "panel_source", block_index: blockIndex, panel_index: panelIndex }),
+      );
+      return { ...block, props: { ...block.props, panel } };
+    }
 
-    const panel = block.props.panel.map((entry, panelIndex) => {
-      // Idempotent, the way verifyPack is (provenance.js:55, `source_type === "unverified"`).
-      // A demoted entry carries source_field_key: "", which `keys` never holds — so without this
-      // a second pass re-demotes it and overwrites failed_field_key with the blank, destroying
-      // the diagnostic on exactly the path that needs it most: a payload re-verified out of
-      // storage, where the original key is the only record of what the model claimed.
-      //
-      // The test is the SHAPE this function produces, not the mere presence of the key. Key
-      // presence alone is forgeable: `{"failed_field_key": null}` is legal JSON that survives
-      // readJson and assertBrief, so a payload arriving from the browser could carry a
-      // `source_field_key` naming a HIDDEN note section and return here before the D1 allow-list
-      // was ever consulted. A genuine demotion always blanks the key first, so requiring both is
-      // what keeps the guarantee functions/api/prep/send.js advertises — the keys come from the
-      // database — true of the round trip and not only of the first pass.
-      if (entry.source_field_key === "" && "failed_field_key" in entry) return entry;
-      if (keys.has(entry.source_field_key)) return entry;
+    if (block.name === "FirstDayPrimer" && Array.isArray(block.props?.items)) {
+      const items = block.props.items.map((entry, itemIndex) =>
+        demote(entry, { kind: "primer_source", block_index: blockIndex, item_index: itemIndex }),
+      );
+      return { ...block, props: { ...block.props, items } };
+    }
 
-      failures.push({
-        kind: "panel_source",
-        block_index: blockIndex,
-        panel_index: panelIndex,
-        key: entry.source_field_key,
-        reason: "field key not in the visible slice",
-      });
-
-      return { ...entry, source_field_key: "", failed_field_key: entry.source_field_key };
-    });
-
-    return { ...block, props: { ...block.props, panel } };
+    return block;
   });
 
   return { payload: { ...payload, blocks, competencies }, failures };
@@ -117,6 +126,13 @@ export function briefSummary(payload) {
   // The demotion marker, not the blanked key: it is what survives a second pass.
   const panelUnsourced = panel.filter((e) => "failed_field_key" in e).length;
 
+  // #50's primer items, counted the same way and additive for the same reason the panel counts
+  // were: a caller reading only the earlier halves is unaffected, and pre-#50 payloads read 0.
+  const primer = (payload.blocks ?? []).flatMap((b) =>
+    b?.name === "FirstDayPrimer" && Array.isArray(b.props?.items) ? b.props.items : [],
+  );
+  const primerUnsourced = primer.filter((e) => "failed_field_key" in e).length;
+
   return {
     sourced,
     unverified: competencies.length - sourced,
@@ -124,5 +140,8 @@ export function briefSummary(payload) {
     panel_sourced: panel.length - panelUnsourced,
     panel_unsourced: panelUnsourced,
     panel_total: panel.length,
+    primer_sourced: primer.length - primerUnsourced,
+    primer_unsourced: primerUnsourced,
+    primer_total: primer.length,
   };
 }

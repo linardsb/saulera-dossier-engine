@@ -104,9 +104,12 @@ test("questions are gone entirely — this endpoint does not serve them", () => 
   }
 });
 
-test("the projection keeps exactly the four fields the page reads", () => {
+test("the projection keeps exactly the fields the page reads", () => {
+  // `engagement` joined in #50: the session page routes on it. The shipped fixture predates the
+  // flag, so it reads "unknown" — #46 D2's tolerant default, which behaves as perm.
   const projection = candidateProjection(shipped());
-  assert.deepEqual(Object.keys(projection).sort(), ["blocks", "competencies", "role_title"]);
+  assert.deepEqual(Object.keys(projection).sort(), ["blocks", "competencies", "engagement", "role_title"]);
+  assert.equal(projection.engagement, "unknown");
   for (const c of projection.competencies) {
     assert.deepEqual(Object.keys(c).sort(), ["id", "label", "source_quote", "verified"]);
   }
@@ -182,6 +185,65 @@ test("an unverified competency renders its Unverified note, not a quote", () => 
   const rendered = serialize(mount);
 
   assert.ok(!rendered.includes(bad.failed_quote), "the invented sentence is not on the screen either");
+});
+
+/* ── the locum widening (#50) ──────────────────────────────────────────────────────────── */
+
+test("a locum payload's questions are served as {text, type} and nothing else", () => {
+  const fixture = shipped();
+  fixture.engagement = "locum";
+  fixture.questions.forEach((q, i) => {
+    q.type = ["client", "competency", "screening"][i % 3];
+  });
+
+  const projection = candidateProjection(fixture);
+  assert.equal(projection.engagement, "locum");
+  assert.equal(projection.questions.length, fixture.questions.length);
+  for (const [i, q] of projection.questions.entries()) {
+    // Key SETS, the suite's habit: no id means the list can never be POSTed against — the
+    // design, not an omission — and no competency_id, difficulty or axis reaches the wire.
+    assert.deepEqual(Object.keys(q).sort(), ["text", "type"]);
+    assert.equal(q.text, fixture.questions[i].text);
+    assert.equal(q.type, fixture.questions[i].type);
+  }
+});
+
+test("a locum question without a type defaults to competency — belt and braces only", () => {
+  const fixture = shipped();
+  fixture.engagement = "locum";
+  const projection = candidateProjection(fixture);
+  assert.ok(projection.questions.every((q) => q.type === "competency"));
+});
+
+test("a perm or unknown payload still carries no questions at all", () => {
+  // A5: perm exposure would leak the bank ahead of the drill. The conditional is the rule.
+  for (const engagement of ["permanent", "unknown", undefined]) {
+    const fixture = shipped();
+    if (engagement) fixture.engagement = engagement;
+    const projection = candidateProjection(fixture);
+    assert.equal("questions" in projection, false, `${engagement}: the key must be absent`);
+  }
+});
+
+test("a demoted primer item is projected like a panel entry: marker kept, slug blanked", () => {
+  const fixture = shipped();
+  fixture.engagement = "locum";
+  fixture.blocks.push({
+    name: "FirstDayPrimer",
+    props: {
+      intro: "Day one.",
+      items: [
+        { topic: "Getting in", detail: "Report to imaging reception.", source_field_key: "their-process" },
+        { topic: "Scanners", detail: "A guessed fleet.", source_field_key: "", failed_field_key: "a-hidden-key" },
+      ],
+    },
+  });
+
+  const projected = candidateProjection(fixture).blocks.at(-1).props.items;
+  assert.equal(projected[0].failed_field_key, undefined, "a sourced item carries no marker");
+  assert.ok("failed_field_key" in projected[1], "the demotion marker survives");
+  assert.equal(projected[1].failed_field_key, "", "but the slug the model invented does not");
+  assert.ok(!JSON.stringify(candidateProjection(fixture)).includes("a-hidden-key"));
 });
 
 test("the projection does not mutate the stored payload", () => {

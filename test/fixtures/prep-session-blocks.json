@@ -39,6 +39,19 @@
     }
   },
   {
+    "name": "LocumQuestions",
+    "props": {
+      "client": [
+        "The manager usually asks how soon you can start and whether you have covered a list on their Siemens fleet before."
+      ],
+      "competency": ["Which scanners have you run solo, and on what lists?"],
+      "screening": [
+        "Your day rate position, confirmed in writing",
+        "Compliance documents where you can reach them"
+      ]
+    }
+  },
+  {
     "name": "DayBeforeMode",
     "props": {
       "intro": "Your interview is tomorrow. This is a short run through what you already have, not new practice.",

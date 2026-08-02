@@ -637,6 +637,114 @@ test("day-of gets the day-before shape; two days out does not", { skip }, async 
   }
 });
 
+/* ── group 5c: the locum branch (#50) ──────────────────────────────────────────────────── */
+
+/** The fixture as a stored LOCUM handover: the server-stamped flag, question types, and a
+ *  FirstDayPrimer block — the payload send.js would persist for a locum booking. */
+function LOCUM_PAYLOAD() {
+  const payload = PAYLOAD();
+  payload.engagement = "locum";
+  payload.questions.forEach((q, i) => {
+    q.type = ["client", "competency", "screening"][i % 3];
+  });
+  payload.blocks.push({
+    name: "FirstDayPrimer",
+    props: {
+      intro: "What we know that will help on day one.",
+      items: [
+        { topic: "Who to report to", detail: "The Clinical Services Manager.", source_field_key: "their-process" },
+      ],
+    },
+  });
+  return payload;
+}
+
+test("a locum handover renders the primer and the grouped list, and never enters the drill", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1, { payload: LOCUM_PAYLOAD() });
+  const client = fakeClient();
+  const s = await boot({ d1, client, token });
+  const { controller } = s;
+
+  assert.equal(controller.state.engagement, "locum", "the brief's flag reached the controller");
+  assert.equal(controller.state.phase, "done", "nothing further is on offer");
+  assert.equal(s.actPrime.hidden, false);
+  assert.equal(s.actDrill.hidden, true, "the drill is never entered");
+  assert.equal(s.startButton.hidden, true, "no Start button");
+  assert.deepEqual(client.kinds(), [], "the locum surface spends no model call");
+
+  const primeText = textOf(s.primeBlocks);
+  assert.ok(primeText.includes("Your first day"), "the FirstDayPrimer rendered");
+  assert.ok(primeText.includes("The Clinical Services Manager."), "with its detail");
+  assert.ok(primeText.includes("The practical details"), "the LogisticsRail rendered");
+  assert.ok(primeText.includes("What you may be asked"), "the LocumQuestions block rendered");
+  assert.ok(primeText.includes("What this manager tends to ask"), "grouped: client");
+  assert.ok(primeText.includes("Expect to be asked about your experience"), "grouped: competency");
+  assert.ok(primeText.includes("Have ready"), "grouped: screening");
+  assert.ok(primeText.includes(COPY.locumNote), "the honest one-liner renders");
+
+  // The perm prime's furniture stays out: no re-priming card, no progress, no resumable note.
+  assert.ok(!primeText.includes("What this role is really about"), "no PrimerCard");
+  assert.ok(!primeText.includes(COPY.primeNote), "no ProgressStrip");
+
+  // Every question in the stored payload reaches the page — {text, type} through the
+  // projection, grouped by type on the page.
+  for (const question of LOCUM_PAYLOAD().questions) {
+    assert.ok(primeText.includes(question.text), `question missing: ${question.text.slice(0, 40)}…`);
+  }
+});
+
+test("day-before plus locum takes the locum branch — site access IS the day-before content", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1, { payload: LOCUM_PAYLOAD(), interviewAt: at(1) });
+  const s = await boot({ d1, client: fakeClient(), token });
+
+  assert.equal(s.controller.state.dayBefore, true, "the GET still says day-before");
+  const primeText = textOf(s.primeBlocks);
+  assert.ok(primeText.includes("Your first day"), "the locum branch won");
+  assert.ok(!primeText.includes(COPY.dayBeforeIntro), "the day-before branch did not render");
+});
+
+test("a locum invite with a stray attempt row still lands on the primer, never the drill", { skip }, async () => {
+  // The resume guard predates #50 and routes turns_this_session > 0 into enterDrill(). The UI
+  // never offers a locum candidate the drill, so an attempt row here is an anomaly — but if one
+  // exists (the turn endpoint is technically reachable, plan A3), the locum surface must win.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { roleId, token } = await seed(d1, { payload: LOCUM_PAYLOAD() });
+  const competencyRowId = `${roleId}:comp-lone-working`;
+  db.prepare("INSERT INTO attempt (competency_id, question_id, mode) VALUES (?, ?, 'recall')").run(
+    competencyRowId,
+    `${competencyRowId}#0`,
+  );
+
+  const s = await boot({ d1, client: fakeClient(), token });
+  assert.equal(s.actDrill.hidden, true, "the stray attempt did not open the drill");
+  assert.ok(textOf(s.primeBlocks).includes("Your first day"), "the locum prime rendered");
+});
+
+test("a perm handover is untouched by #50: the same prime, the same drill entry", { skip }, async () => {
+  // The pin the plan asks for: the perm path renders exactly the furniture it always did, and
+  // Start still enters the drill.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token } = await seed(d1);
+  const s = await boot({ d1, client: fakeClient(), token });
+
+  assert.equal(s.controller.state.engagement, "other", "a pre-#50 payload reads as other");
+  const primeText = textOf(s.primeBlocks);
+  assert.ok(primeText.includes("What this role is really about"), "the PrimerCard stands");
+  assert.ok(primeText.includes(COPY.primeNote), "the ProgressStrip stands");
+  assert.ok(!primeText.includes("Your first day"), "no locum furniture");
+  assert.ok(!primeText.includes(COPY.locumNote));
+  assert.equal(s.startButton.hidden, false, "Start is on offer");
+
+  s.controller.start();
+  assert.equal(s.actDrill.hidden, false, "and it still enters the drill");
+});
+
 /* ── group 6: the source scans and CSS gates ───────────────────────────────────────────── */
 
 /** Comments stripped before matching — the files describe the forbidden APIs in prose on

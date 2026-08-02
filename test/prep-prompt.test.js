@@ -157,4 +157,46 @@ test("an empty visible slice still produces a well-formed block", () => {
 
 test("the inputs block closes on the instruction to compose", () => {
   assert.match(prepInputsBlock(INPUTS), /Compose the candidate's prep brief\.$/);
+  assert.match(
+    prepInputsBlock({ ...INPUTS, engagement: "locum" }),
+    /Compose the candidate's prep brief\.$/,
+  );
+});
+
+/* ── the engagement branch (#50) ────────────────────────────────────────────────────────── */
+
+test("the cached prefix is byte-identical between a locum and a perm call for the same client", () => {
+  // The whole economics of the breakpoint: the engagement branch is per-candidate text, and a
+  // single conditional byte inside the first block would silently stop the cache reading.
+  const locum = buildPrepMessages({ ...INPUTS, engagement: "locum" })[0].content;
+  const perm = buildPrepMessages({ ...INPUTS, engagement: "permanent" })[0].content;
+
+  assert.equal(locum[0].text, perm[0].text, "the first block must not vary with engagement");
+  assert.ok(locum[0].cache_control && perm[0].cache_control);
+  assert.notEqual(locum[1].text, perm[1].text, "the branch lives in the second block");
+});
+
+test("the locum branch asks for the primer and the slim mix; every other value does not", () => {
+  const locum = prepInputsBlock({ ...INPUTS, engagement: "locum" });
+  assert.match(locum, /locum booking/);
+  assert.match(locum, /FirstDayPrimer/);
+  assert.match(locum, /"client"/);
+  assert.match(locum, /"screening"/);
+  assert.match(locum, /Never generic clinical coaching/);
+  assert.match(locum, /omit the\s+block entirely/, "an empty primer is worse than an absent one");
+
+  // #46 D2: "unknown" behaves as perm. All three non-locum values get the one-line rule.
+  for (const engagement of ["permanent", "unknown", undefined]) {
+    const text = prepInputsBlock({ ...INPUTS, engagement });
+    assert.doesNotMatch(text, /This is a locum booking/, `${engagement} must not take the locum branch`);
+    assert.doesNotMatch(text, /FirstDayPrimer block from/, `${engagement} must not ask for the primer`);
+    assert.match(text, /every question type "competency"/);
+    assert.match(text, /do not emit a\s+FirstDayPrimer/);
+  }
+});
+
+test("PREP_SYSTEM stays engagement-free — it lives inside the cached prefix", () => {
+  // The rule from prompt.js: the system prompt may gain only unconditional text. Any of these
+  // words appearing there means someone branched the cached prefix.
+  assert.doesNotMatch(PREP_SYSTEM, /locum|FirstDayPrimer|engagement/i);
 });

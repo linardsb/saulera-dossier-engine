@@ -28,6 +28,7 @@
 // remove the whole guarantee. And the field keys come from the DATABASE, not the body (step 6).
 
 import { strikeCompetencies } from "../../../src/prep/strike.js";
+import { briefProfile } from "../../../src/domain.js";
 import { assertBrief } from "../../../src/prep/schema.js";
 import { verifyBrief } from "../../../src/prep/verify.js";
 import {
@@ -288,6 +289,12 @@ export async function onRequestPost(context) {
       return json({ error: "not_sendable", failures }, 400);
     }
 
+    // #50, R4's rule applied to the flag: `engagement` is recomputed from the cleaned brief and
+    // CV — the same strings persisted below — and re-stamped, so whatever the browser posted
+    // inside `payload` is overwritten and the stored row can never disagree with its own
+    // jd_text. `briefProfile` is pure; this route still imports no model SDK.
+    const engagement = briefProfile(brief, cv).role_shape;
+
     // THE LAST GATE BEFORE ANYTHING IS MINTED OR WRITTEN, and last on purpose. The link is the
     // whole product of this route, so a deployment that cannot say where it points has nothing
     // to send — but a body that was going to be refused anyway should be refused by NAME, so
@@ -365,7 +372,7 @@ export async function onRequestPost(context) {
         jdText: brief,
         ethosText,
         cvText: cv,
-        payload,
+        payload: { ...payload, engagement },
       });
     } catch (err) {
       // The same rollback as the mail failure below, and it matters more than it looks: this is

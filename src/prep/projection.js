@@ -18,8 +18,13 @@
 //   competency     Dropping only `failed_quote` would ship it anyway under the other name.
 //                  A candidate's next move after reading a quote is to prepare against it, so
 //                  a sentence the model invented is the one thing worth carrying out of here.
-//   questions      the brief page never renders them, and #23 will serve them from its own
-//                  session endpoint where an attempt can be recorded against one.
+//   questions      for a PERM payload: the brief page never renders them, and #23 serves them
+//                  from its own session endpoint where an attempt can be recorded against one.
+//                  #50 amends this deliberately for LOCUM payloads only: a locum candidate
+//                  records no attempts, so the readable list is served here — {text, type} and
+//                  nothing else. No `id` (nothing to POST against, by design), no
+//                  `competency_id`, no `difficulty`, no `axis`: each of those is a score or a
+//                  handle the candidate has no use for.
 //
 //   verified       KEPT, and it must survive. registry.js:195-196: "`verified` absent means
 //                  the payload never went through verifyBrief, so it is treated as
@@ -43,6 +48,12 @@ function projectBlock(block) {
 
   if (block.name === "PanelBrief" && Array.isArray(block.props?.panel)) {
     return { ...block, props: { ...block.props, panel: block.props.panel.map(projectPanelEntry) } };
+  }
+
+  // #50's primer items carry the same {source_field_key, failed_field_key} shape and get the
+  // same treatment: the invented slug goes, the demotion marker stays.
+  if (block.name === "FirstDayPrimer" && Array.isArray(block.props?.items)) {
+    return { ...block, props: { ...block.props, items: block.props.items.map(projectPanelEntry) } };
   }
 
   // A PanelBrief cannot legally nest here — assertBrief:263 rejects anything but a
@@ -78,11 +89,28 @@ export function candidateProjection(payload) {
     };
   });
 
-  // `questions` is absent rather than empty: an empty array reads as "there are none", and
-  // there are plenty — they are simply not this endpoint's to serve.
-  return {
+  // #46 D2: an absent flag reads "unknown", which behaves as perm everywhere. Always carried,
+  // so the session page can route without a second request.
+  const engagement = payload?.engagement ?? "unknown";
+
+  const projection = {
     role_title: payload?.role_title,
+    engagement,
     blocks: (payload?.blocks ?? []).map(projectBlock),
     competencies,
   };
+
+  // For a perm payload, `questions` is absent rather than empty: an empty array reads as
+  // "there are none", and there are plenty — they are simply not this endpoint's to serve
+  // ahead of the drill (A5: the conditional is the rule, not an optimisation). The locum list
+  // IS this endpoint's to serve — see the header. The `"competency"` default is belt and
+  // braces only: a pre-#50 payload cannot be locum, because it has no engagement.
+  if (engagement === "locum") {
+    projection.questions = (payload?.questions ?? []).map((q) => ({
+      text: q?.text,
+      type: q?.type ?? "competency",
+    }));
+  }
+
+  return projection;
 }
