@@ -355,6 +355,58 @@ test("clientWithFields returns the note's sections with their flag, and no secti
   );
 });
 
+test("clientWithFields reports the locum readout: five entries, present from the note's headings", async () => {
+  const locumNote = {
+    ...CLIENT,
+    note: "## VMS or portal\n\nAllocate.\n\n## Parking\n\nBadge from main reception.",
+  };
+  const db = fakeD1([locumNote, []]);
+  const { locum_fields } = await clientWithFields(db, CLIENT.id);
+
+  assert.deepEqual(
+    locum_fields.map((f) => f.id),
+    ["credentialing", "vms", "protocols", "site-access", "extensions"],
+    "exactly the five fields, in LOCUM_FIELDS order",
+  );
+  assert.deepEqual(
+    locum_fields.filter((f) => f.present).map((f) => f.id),
+    ["vms", "site-access"],
+  );
+  for (const field of locum_fields) {
+    assert.deepEqual(Object.keys(field).sort(), ["heading", "hint", "id", "present"]);
+  }
+  assert.ok(
+    !JSON.stringify(locum_fields).includes("Allocate"),
+    "section bodies must not ride on the wire through the readout either",
+  );
+});
+
+test("an existing perm-shaped note has all five locum fields missing, and its fields untouched", async () => {
+  const db = fakeD1([TWO_SECTION_CLIENT, [{ field_key: "practical" }]]);
+  const { fields, locum_fields } = await clientWithFields(db, CLIENT.id);
+
+  assert.ok(locum_fields.every((f) => f.present === false), "a perm note records none of the five");
+
+  // Byte-identical to the pre-#48 shape: the readout is additive, the fields array is not
+  // allowed to move.
+  assert.deepEqual(fields, [
+    { key: "their-process", heading: "Their process", chars: 11, candidate_visible: false },
+    { key: "practical", heading: "Practical", chars: 15, candidate_visible: true },
+  ]);
+});
+
+test("setFieldVisibility's return carries locum_fields too — the same shape as clientWithFields", async () => {
+  const db = fakeD1([
+    TWO_SECTION_CLIENT, // getClient (validate)
+    null,               // INSERT
+    TWO_SECTION_CLIENT, // getClient (clientWithFields)
+    [{ field_key: "practical" }],
+  ]);
+  const body = await setFieldVisibility(db, CLIENT.id, { practical: true });
+  assert.deepEqual(Object.keys(body).sort(), ["client", "fields", "locum_fields"]);
+  assert.equal(body.locum_fields.length, 5);
+});
+
 test("clientWithFields marks a duplicated heading unflaggable rather than dropping it", async () => {
   const duplicated = { ...CLIENT, note: "## Notes\n\nfirst\n\n## Notes\n\nsecond" };
   const db = fakeD1([duplicated, [{ field_key: "notes" }]]);

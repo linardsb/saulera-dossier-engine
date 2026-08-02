@@ -13,7 +13,7 @@
 // Every user value is a bound parameter; nothing is ever interpolated into a SQL string.
 
 import { RENDERERS } from "./render/index.js";
-import { parseNoteFields } from "./note-fields.js";
+import { LOCUM_FIELDS, locumFieldFor, parseNoteFields } from "./note-fields.js";
 
 export const NAME_MAX = 120;
 
@@ -320,7 +320,15 @@ export async function clientWithFields(db, id) {
     chars: field.chars,
     candidate_visible: field.key !== null && visible.has(field.key),
   }));
-  return { client, fields };
+  // The locum checklist (#48): which of the five named fields the SAVED note records. The
+  // `match` regex never crosses the wire — only {id, heading, hint, present} does. Computed
+  // here rather than in the browser because clients.js cannot import this vocabulary (no
+  // build step), and this function is the one serialisation point all three API paths share.
+  const present = new Set(fields.map((f) => locumFieldFor(f.heading)).filter(Boolean));
+  const locum_fields = LOCUM_FIELDS.map(({ id, heading, hint }) => ({
+    id, heading, hint, present: present.has(id),
+  }));
+  return { client, fields, locum_fields };
 }
 
 /**

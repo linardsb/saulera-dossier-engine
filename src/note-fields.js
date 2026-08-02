@@ -212,3 +212,44 @@ export function visibleFields(note, visibleKeys = []) {
   const allowed = visibleKeys instanceof Set ? visibleKeys : new Set(visibleKeys ?? []);
   return parseNoteFields(note).filter((field) => field.key !== null && allowed.has(field.key));
 }
+
+/**
+ * The locum-supply vocabulary (#48, epic #45 slice 4). These are NAMES, not a schema: the
+ * note stays one free-text blob and the recruiter still authors every heading. This list
+ * exists so the editor can prompt for what locum supply needs recorded, and so #49/#50 can
+ * find those sections again whatever exact words the recruiter chose.
+ *
+ * `heading` is the canonical form the editor inserts; each must survive `fieldKey` (a test
+ * pins this). `match` runs against the HEADING TEXT, not the body — recognising a field from
+ * its prose would be harvesting, which architecture §6.5 defers.
+ *
+ * Known and accepted: `portal` alone would also match "candidate portal", but this matcher
+ * only ever sees note headings, which the recruiter writes about the client — so the broad
+ * word buys synonym coverage ("Portal used") at no real cost. `\bVMS\b` stays word-bounded
+ * so a heading merely containing those letters inside a word does not hit.
+ */
+export const LOCUM_FIELDS = [
+  { id: "credentialing", heading: "Credentialing quirks",
+    hint: "What this client's compliance sign-off trips over.",
+    match: /credential|compliance quirk/i },
+  { id: "vms",           heading: "VMS or portal",
+    hint: "Which VMS or portal bookings go through, and its quirks.",
+    match: /\bVMS\b|portal/i },
+  { id: "protocols",     heading: "Protocol expectations",
+    hint: "Scanning protocols the department expects a locum to know.",
+    match: /protocol/i },
+  { id: "site-access",   heading: "Site access and parking",
+    hint: "Getting in on day one: badges, parking, who to ask for.",
+    match: /site access|parking|getting in/i },
+  { id: "extensions",    heading: "Extension habits",
+    hint: "How this client extends or ends bookings.",
+    match: /extension|extends|rebook/i },
+];
+
+/** The canonical locum field a heading names, or null. Pure, never throws.
+ *  A heading matching two regexes takes the first — list order is precedence. */
+export function locumFieldFor(heading) {
+  const text = String(heading ?? "");
+  const hit = LOCUM_FIELDS.find((f) => f.match.test(text));
+  return hit ? hit.id : null;
+}

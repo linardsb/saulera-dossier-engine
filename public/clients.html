@@ -79,6 +79,8 @@
              one job — staying visible while writing. One line, above the box, does. -->
         <p class="scaffold-line">Their process and stages · who sits on the panel · what each
           stage tests · why candidates were turned down</p>
+        <p class="scaffold-line">For locum supply: credentialing quirks · VMS or portal ·
+          protocol expectations · site access and parking · extension habits</p>
         <textarea class="textarea" id="note" name="note" rows="16" spellcheck="true"
                   placeholder="Write it as you would tell a colleague. Plain notes beat blank perfection."></textarea>
 
@@ -103,6 +105,18 @@
           <p class="visibility-empty" id="visibility-empty" hidden></p>
           <ul class="visibility-list" id="visibility-list"></ul>
           <p class="save-state" id="visibility-state" role="status"></p>
+        </fieldset>
+
+        <!-- The locum checklist (#48). Same discipline as the visibility block: it describes
+             the SAVED note, so it sits below Save; the list is built in clients.js from the
+             API's locum_fields readout. Shown for every client — role shape is a property of
+             a brief, not a client, so the title is what lets a perm-desk reader skip it. -->
+        <fieldset class="visibility locum" id="locum" aria-describedby="locum-hint">
+          <legend class="field">For locum supply</legend>
+          <p class="field-hint" id="locum-hint">Bookings move faster when the note records these.
+            Add a missing one and write what you know, then save.</p>
+          <ul class="visibility-list" id="locum-list"></ul>
+          <p class="save-state" id="locum-state" role="status"></p>
         </fieldset>
 
         <!-- Removal, away from Save on purpose: the two most opposite actions on the screen

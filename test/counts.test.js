@@ -78,6 +78,38 @@ test("the counts page states the claim and its bound in the same breath", () => 
   assert.ok(text.includes("Nothing about what any candidate did."), "and its bound");
 });
 
+// ── the locum checklist on /clients (#48) — same source-scan idiom ──────────────────────
+
+const clientsSource = readFileSync(join(here, "..", "public", "clients.js"), "utf8");
+const clientsMarkup = readFileSync(join(here, "..", "public", "clients.html"), "utf8");
+
+test("clients.html carries the locum checklist and names all five fields in the scaffold", () => {
+  assert.ok(clientsMarkup.includes('id="locum-list"'), "the checklist's list element");
+  const text = clientsMarkup.replace(/\s+/g, " ");
+  for (const phrase of [
+    "credentialing quirks",
+    "VMS or portal",
+    "protocol expectations",
+    "site access and parking",
+    "extension habits",
+  ]) {
+    assert.ok(text.includes(phrase), `the locum scaffold line is missing "${phrase}"`);
+  }
+});
+
+test("clients.js renders the locum readout, parses no HTML and reaches no browser storage", () => {
+  assert.ok(clientsSource.includes("locum_fields"), "the checklist paints from the API readout");
+  // Matched with the leading dot, unlike the counts.js gate above: clients.js's comments
+  // legitimately say "never innerHTML", and a gate that cries wolf at a comment gets deleted.
+  // Every real sink use is a property access, and comments never spell the dotted form.
+  for (const sink of [".innerHTML", ".outerHTML", ".insertAdjacentHTML", "document.write"]) {
+    assert.ok(!clientsSource.includes(sink), `clients.js uses ${sink}`);
+  }
+  for (const store of ["localStorage", "sessionStorage", "indexedDB", "document.cookie"]) {
+    assert.ok(!clientsSource.includes(store), `clients.js reaches ${store}`);
+  }
+});
+
 test("all three screens carry the same three-link nav", () => {
   // The bar is what says the screens are one tool (index.html's own comment). A screen that
   // gained a link and left the others behind is how that stops being true.
