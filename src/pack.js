@@ -147,14 +147,19 @@ export const PACK_SCHEMA = {
 
 export const CLAIM_SECTIONS = ["evidence", "process_fit", "gaps"];
 
+// One row per locum booking section (#49): the pack key, the heading both renderers print
+// (text renders it uppercased), and the field each claim's label comes from. assertPack
+// checks labelField under the same strict-on-presence rule as the claim fields — a missing
+// label would otherwise render the literal "undefined:" to the client.
+export const LOCUM_RENDER = [
+  { key: "compliance", heading: "Compliance at a glance", labelField: "check" },
+  { key: "booking", heading: "Availability and rate", labelField: "item" },
+  { key: "modality_matrix", heading: "Modality and scanner matrix", labelField: "row" },
+];
+
 // The locum booking sections (#49). Not in CLAIM_SECTIONS: these are tolerant on absence
 // (legacy packs lack them), where CLAIM_SECTIONS are hard-required by assertPack.
-export const LOCUM_SECTIONS = ["compliance", "booking", "modality_matrix"];
-
-// The label field each locum section's renderers print first. assertPack checks it under
-// the same strict-on-presence rule as the claim fields — a missing label would otherwise
-// render the literal "undefined:" to the client.
-const LOCUM_LABEL_FIELDS = { compliance: "check", booking: "item", modality_matrix: "row" };
+export const LOCUM_SECTIONS = LOCUM_RENDER.map((r) => r.key);
 
 /** Every claim in the pack, flattened, tagged with the section it came from. */
 export function allClaims(pack) {
@@ -188,8 +193,8 @@ export function assertPack(pack) {
   for (const section of CLAIM_SECTIONS) assertClaims(section);
   // Tolerant on absence, strict on presence — same rule as role_shape below: legacy packs
   // lack these sections and must still pass; a present section is held to the claim shape.
-  for (const section of LOCUM_SECTIONS) {
-    if (pack[section] !== undefined) assertClaims(section, LOCUM_LABEL_FIELDS[section]);
+  for (const { key, labelField } of LOCUM_RENDER) {
+    if (pack[key] !== undefined) assertClaims(key, labelField);
   }
   if (!Array.isArray(pack.open_questions)) throw new Error("pack: open_questions");
   // Tolerant on absence, strict on presence: packs generated before role_shape shipped (the
