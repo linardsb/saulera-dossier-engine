@@ -118,7 +118,10 @@
      is not a ramp. The epic's decided direction is big type; this is the step #58's Out of
      Scope reserved for #59 by name, spent on the one element it named. Disciplined rather than
      round: 35, not 40. */
-  --text-display: 35px;
+  /* The display step. zig.ai's hero is the reference the owner picked and it carries its
+     headline near 64px on a laptop; 35px was a heading, not a display. Fluid so the phone gets a
+     readable 34px and the laptop gets the reference's presence, with no breakpoint to maintain. */
+  --text-display: clamp(34px, 5.6vw, 60px);
 
   /* provenance status. Whether a claim is sourced is this product's core distinction, so these
      are text colours and are held to the 4.5:1 body-text floor rather than to the 3:1 a
@@ -147,7 +150,7 @@
      spacing within them, and --space-12 could not deliver that while it was also the common
      large gap — it separated the acts AND the page head AND the .visibility fieldset AND
      .editor-remove. 64px is the zone break; 48px goes back to being an ordinary large step. */
-  --space-16: 64px;
+  --space-16: 64px; --space-20: 80px;
 
   /* Decided and settled in #59, closing #58's open question 5, which asked #59 or #60 to pick
      once because the two references disagree — zig.ai is soft, forcanopy tighter. 9px stays:
@@ -157,6 +160,10 @@
      a --radius-sm rather than moving this one — this one is on the card, the rail, the pack,
      every input and every button. */
   --radius: 9px;
+  /* Fully rounded. Both references round their controls to a pill — zig.ai's buttons and nav, and
+     Canopy's chips and filters. It is the single loudest signal of the two, and 9px reads as a
+     2015 admin panel beside it. */
+  --radius-pill: 999px;
 
   /* The tighter corner #60 was told to add rather than move --radius. Its consumers are the
      claim chips and the two counts in the pack's summary, and nothing else: a chip is roughly

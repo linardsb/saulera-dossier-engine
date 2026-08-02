@@ -136,7 +136,8 @@ a {
   display: inline-flex;
   align-items: center;
   min-height: var(--tap-target);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
   font-family: var(--font-ui);
   font-size: var(--text-body);
   color: var(--text-muted);
@@ -147,10 +148,8 @@ a {
 
 .topbar-nav a[aria-current="page"] {
   color: var(--text-primary);
-  text-decoration: underline;
-  text-decoration-color: var(--accent);
-  text-decoration-thickness: 2px;
-  text-underline-offset: var(--space-1);
+  background: var(--background);
+  box-shadow: var(--shadow-card);
 }
 
 /* ── card ──────────────────────────────────────────────────────────────────────────────── */
@@ -175,7 +174,9 @@ a {
   background: var(--background);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
   cursor: pointer;
   /* CRAFT.md's hit-area floor, actually met. This read --space-8 with a comment claiming 44px;
      --space-8 is 32px and the rendered button was 39px. */
@@ -282,8 +283,16 @@ a {
 /* --space-16 rather than --space-12 from #59: the head and the work are two zones, and the gap
    between them has to be visibly larger than the gaps inside either. 48px was doing both jobs at
    once. The phone counterpart is in the mobile-density block, unchanged at --space-8. */
-.page-head { margin-bottom: var(--space-16); }
-.page-sub  { color: var(--text-muted); margin: 0; }
+.page-head { margin-top: var(--space-16); margin-bottom: var(--space-16); }
+/* The one line under the display heading. Both references give this real size — it is the
+   sentence that explains the page, not a caption. */
+.page-sub {
+  color: var(--text-muted);
+  margin: 0;
+  font-size: var(--text-h4);
+  max-width: 54ch;
+  line-height: 1.5;
+}
 
 /* The journey map: the four act chips, shown before the acts exist. Its one job is the whole
    journey visible before any of it happens (index.html:39-43), and as a wrapping inline row it
@@ -914,7 +923,9 @@ a {
   background: var(--background);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
   cursor: pointer;
 }
 
