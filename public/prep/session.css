@@ -4,9 +4,11 @@
    a SEPARATE file for one reason: prep.css sits behind a test gate that forbids animation, and
    the typing indicator below is the one animated thing on the candidate surface. Everything
    else about the contract is inherited rather than restated: every colour and size resolves
-   through a custom property in tokens.css, app.css owns the single focus rule, and app.css's
-   reduced-motion guard neutralises the one animation here for free. The indicator always
-   carries its own text, so motion is never the only signal.
+   through a custom property in tokens.css and app.css owns the single focus rule. The
+   reduced-motion guard is NOT inherited — since #58 app.css's motion is opt-in behind
+   `prefers-reduced-motion: no-preference` rather than a blanket override, so the typing
+   indicator below carries its own guard, in prep.css's idiom. The indicator always carries its
+   own text, so motion is never the only signal.
 
    Nothing below sets `display` on anything that is ever given the hidden attribute — the acts,
    the answer form and the indicator all keep the user agent's display, so `[hidden]` keeps
@@ -51,20 +53,31 @@
 
 /* Three dots pulsing opacity — a compositor property, on a node that exists only while a turn
    is in flight, and always beside its own words. Durations compose from the tokened step so
-   the whole rhythm retunes from tokens.css. */
-.typing-dot {
-  display: inline-block;
-  animation-name: typing-pulse;
-  animation-duration: calc(var(--duration-2) * 6);
-  animation-iteration-count: infinite;
-}
+   the whole rhythm retunes from tokens.css.
 
-.typing-dot:nth-child(2) { animation-delay: calc(var(--duration-2) * 2); }
-.typing-dot:nth-child(3) { animation-delay: calc(var(--duration-2) * 4); }
+   The guard is this file's own since #58. It used to be inherited: app.css carried a blanket
+   `prefers-reduced-motion: reduce` rule that neutralised everything on the deployment, and this
+   was the only file relying on it. #58 inverted that guard to opt-in, so an unguarded infinite
+   animation here would have kept pulsing under reduced motion — silently, because the test in
+   prep-session-ui.test.js counted the keyframes without checking where they sat. It checks now.
+   `.typing-dot` keeps `display: inline-block` outside the guard: the dots must occupy their
+   layout whether or not they animate, and only the motion is conditional. */
+.typing-dot { display: inline-block; }
 
-@keyframes typing-pulse {
-  0%, 100% { opacity: 0.2; }
-  50% { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .typing-dot {
+    animation-name: typing-pulse;
+    animation-duration: calc(var(--duration-2) * 6);
+    animation-iteration-count: infinite;
+  }
+
+  .typing-dot:nth-child(2) { animation-delay: calc(var(--duration-2) * 2); }
+  .typing-dot:nth-child(3) { animation-delay: calc(var(--duration-2) * 4); }
+
+  @keyframes typing-pulse {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 1; }
+  }
 }
 
 /* ── narrow screens ────────────────────────────────────────────────────────────────────── */

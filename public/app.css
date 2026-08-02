@@ -28,13 +28,15 @@ main {
 
 /* ── type ──────────────────────────────────────────────────────────────────────────────── */
 
-/* Weight 500, not the browser's 700: Aspekta ships as its single 500 face (fonts.css), and
-   asking for bold would synthesise one. Medium headings are also the stackai register — the
-   family carries the weight. */
+/* Weight 600, not 500 and not the browser's 700. Geist ships 400 and 600 only (fonts.css), and
+   the CSS font-matching algorithm resolves a desired weight between 400 and 500 DOWNWARD — so a
+   500 heading would render at regular weight rather than snapping up to the 600 sitting right
+   there. This read 500 while a single-500-face family carried the UI; that family is gone, and
+   600 is now the file's one bold, shared with .claim-requirement and .client-name. */
 h1 {
   font-family: var(--font-ui);
   font-size: var(--text-h2);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.2;
   margin: 0 0 var(--space-4);
   text-wrap: balance;
@@ -43,7 +45,7 @@ h1 {
 h2 {
   font-family: var(--font-ui);
   font-size: var(--text-h3);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.2;
   margin: 0;
   text-wrap: balance;
@@ -59,7 +61,7 @@ code {
   font-size: var(--text-body);
 }
 
-/* --accent measures 3.00:1 on --background, which fails the 4.5:1 body-text floor, so link
+/* --accent measures 3.88:1 on --background, which still fails the 4.5:1 body-text floor, so link
    text is --text-primary and the accent carries the underline instead. */
 a {
   color: var(--text-primary);
@@ -72,8 +74,11 @@ a {
 :focus-visible {
   outline: var(--focus-width) solid var(--accent);
   outline-offset: var(--focus-inner);
-  /* The hairline that fills the offset gap. Without it the ring's only edge against --surface
-     is 2.75:1 and the indicator is not reliably visible. */
+  /* The hairline that fills the offset gap. The CONCLUSION here changed with the repalette and
+     the rule survives it: --accent is now 3.53:1 against --surface and clears the 3:1 non-text
+     floor on its own, which the blue it replaced did not. The hairline stays anyway,
+     because the ring must also read on the tints — --accent is 2.57:1 on --tint-info, and #60
+     puts focusable controls there. */
   box-shadow: 0 0 0 var(--focus-inner) var(--text-primary);
 }
 
@@ -120,7 +125,6 @@ a {
   font-size: var(--text-body);
   color: var(--text-muted);
   text-decoration: none;
-  transition: color var(--duration-1) var(--ease-out);
 }
 
 .topbar-nav a:hover { color: var(--text-primary); }
@@ -160,9 +164,6 @@ a {
   /* CRAFT.md's hit-area floor, actually met. This read --space-8 with a comment claiming 44px;
      --space-8 is 32px and the rendered button was 39px. */
   min-height: var(--tap-target);
-  transition: border-color var(--duration-1) var(--ease-out),
-              transform var(--duration-1) var(--ease-out),
-              box-shadow var(--duration-1) var(--ease-out);
 }
 
 /* Hover lifts; press lands. The lift is motion and shadow ADDED on hover (never contrast
@@ -174,10 +175,13 @@ a {
 }
 
 .btn-primary {
-  /* Near-black on the accent, not white. White on --accent measures 3.00:1 and fails the
-     4.5:1 floor; --text-primary on it is 5.62:1. stackai's own button spec says the same. */
-  background: var(--accent);
-  color: var(--text-primary);
+  /* The fill is the accent DARKENED, not the accent. The owner's decided --accent measures
+     4.03:1 with white and 3.19:1 with the ink — both under the 4.5:1 body-text floor, and this
+     is the one place in the codebase a label sits on the accent. --accent-strong is the minimum
+     darkening that clears it: white on it is 5.04:1. #58 AC2 says the gates win over a raw
+     reference value, and --accent keeps the decided hex at its six decorative sites. */
+  background: var(--accent-strong);
+  color: var(--on-accent);
   border-color: transparent;
 }
 
@@ -187,9 +191,10 @@ a {
 .btn-danger { color: var(--danger); }
 .btn-danger:hover { border-color: var(--danger); }
 
-/* Hover draws the border in rather than darkening the fill. Darkening it would take the label
-   from 5.62:1 to about 4.4:1, which is hover REMOVING contrast — the thing CRAFT.md forbids.
-   The border is already there at 1px transparent, so nothing moves. */
+/* Hover draws the border in rather than darkening the fill. The fill is already the darkest
+   value that keeps its white label clear of the floor (5.04:1), so darkening it on hover would
+   be hover REMOVING contrast — the thing CRAFT.md forbids. The border is already there at 1px
+   transparent, so nothing moves. */
 .btn-primary:hover { border-color: var(--text-primary); }
 .btn:active { transform: translateY(1px); box-shadow: none; }
 
@@ -333,7 +338,6 @@ a {
   padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-1);
   cursor: pointer;
-  transition: background-color var(--duration-1) var(--ease-out);
 }
 
 .client-row:hover { background: var(--background); }
@@ -401,12 +405,12 @@ a {
   margin-top: var(--space-4);
 }
 
-/* The one authored moment: the saved-state line arriving. Opacity only, ease-out, 200ms. */
+/* The one authored moment: the saved-state line arriving. Opacity only; the transition itself
+   lives in the motion block at the foot of this file. */
 .save-state {
   font-size: var(--text-body);
   color: var(--text-muted);
   opacity: 0;
-  transition: opacity var(--duration-2) var(--ease-out);
 }
 
 .save-state.is-shown { opacity: 1; }
@@ -585,7 +589,6 @@ a {
    anything rebuilt per render and this file cannot tell the two cases apart on its own. */
 .act {
   opacity: 1;
-  transition: opacity var(--duration-2) var(--ease-out);
 }
 
 .act.is-entering { opacity: 0; }
@@ -598,7 +601,7 @@ a {
   gap: var(--space-2);
   font-family: var(--font-ui);
   font-size: var(--text-caption);
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -696,14 +699,14 @@ a {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: border-color var(--duration-1) var(--ease-out);
 }
 
 .file-input::file-selector-button:hover { border-color: var(--text-primary); }
 
 /* The column answering a file dragged over it. Colour is not the only signal: the state is
    entered by the recruiter's own drag, and the file label says "drop one on the box" in
-   words. --accent as a border is a fill use, never text. */
+   words. --accent as a border is a fill use, never text: 3.53:1 on --surface, over the 3:1
+   non-text floor this state's boundary is held to. */
 .input-col.is-dragover .textarea {
   border-color: var(--accent);
   background: var(--surface);
@@ -1011,8 +1014,38 @@ a {
   .page-head { margin-bottom: var(--space-8); }
 }
 
-/* ── reduced motion ────────────────────────────────────────────────────────────────────── */
+/* ── motion, defined once ──────────────────────────────────────────────────────────────── */
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+/* Every transition in this file lives here and nowhere else (#58).
+
+   This used to be the other way round: six transition declarations scattered through the
+   rules above, neutralised by a blanket `reduce` block with `!important`. That is opt-OUT — a
+   transition added anywhere was live by default and the guard was a sledgehammer. Opt-in means
+   a transition added to a rule above is a test failure (test/chrome.test.js) rather than a live
+   animation nobody chose. prep.css already worked this way; this is that idiom, ported.
+
+   The `no-preference` edge, stated precisely rather than as folklore: `no-preference` is NOT the
+   negation of `reduce`. A user agent that reports no support for the preference at all matches
+   neither, so it matches nothing here and gets no transition — every element renders at its
+   final state immediately. That is the correct outcome IN THIS FILE specifically, because
+   nothing in this repo waits on `transitionend` or `animationend` (app.js:410-426 reveals an act
+   with a double requestAnimationFrame and removes .is-entering unconditionally). It is not a
+   general licence: a file that ever gates visibility on a transition completing would strand an
+   element at opacity 0 under exactly this condition. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .topbar-nav a { transition: color var(--duration-1) var(--ease-out); }
+
+  .btn {
+    transition: border-color var(--duration-1) var(--ease-out),
+                transform var(--duration-1) var(--ease-out),
+                box-shadow var(--duration-1) var(--ease-out);
+  }
+
+  .client-row { transition: background-color var(--duration-1) var(--ease-out); }
+  .file-input::file-selector-button { transition: border-color var(--duration-1) var(--ease-out); }
+
+  /* The two authored moments, both opacity only, both at the slower step. */
+  .save-state { transition: opacity var(--duration-2) var(--ease-out); }
+  .act { transition: opacity var(--duration-2) var(--ease-out); }
 }
