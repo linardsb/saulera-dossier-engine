@@ -108,8 +108,14 @@ a {
   color: var(--text-muted);
 }
 
+/* The nav wraps, which .topbar-inner above already does and this did not. Measured at a 360px
+   viewport: the four links are 359px wide against a 328px content box (body padding is
+   --space-4 a side), so the nav overflowed the page by 15px on all three screens — a horizontal
+   page scroll on every phone, and the two /clients probes that measure scrollWidth (H6, V18t)
+   failing since before #58. */
 .topbar-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
