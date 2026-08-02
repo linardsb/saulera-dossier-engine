@@ -191,13 +191,42 @@ test("the locum bullet appears for a locum brief and not for a permanent one", (
 
 test("the domain block is empty for the nursing inputs, so the perm prompt is unchanged", () => {
   assert.equal(domainBlock(briefProfile(INPUTS.brief, INPUTS.cv)), "");
-  assert.doesNotMatch(buildPastePrompt(INPUTS), /HCPC/);
+  // The schema in OUTPUT_INSTRUCTION names HCPC in the compliance section's description
+  // (#49), and it travels in every prompt by design — so the no-imaging-vocabulary pin
+  // covers everything before it.
+  const prompt = buildPastePrompt(INPUTS);
+  assert.doesNotMatch(prompt.slice(0, prompt.indexOf(OUTPUT_INSTRUCTION)), /HCPC/);
 });
 
 test("both shapes carry the same domain text, so they cannot drift", () => {
   const [message] = buildMessages(IMAGING_INPUTS);
   const prompt = buildPastePrompt(IMAGING_INPUTS);
   assert.ok(prompt.includes(message.content[1].text), "the domain+inputs block differs");
+});
+
+// ── the booking-pack instructions (#49) ────────────────────────────────────────────────
+
+test("a locum brief's prompt instructs the three booking sections, on both shapes", () => {
+  const [message] = buildMessages(IMAGING_INPUTS);
+  const prompt = buildPastePrompt(IMAGING_INPUTS);
+  for (const text of [message.content[1].text, prompt]) {
+    assert.match(text, /compliance, booking and modality_matrix/);
+    assert.match(text, /confirm the booking today/);
+    assert.match(text, /the brief is not a source/);
+    // The note-fields instruction: surface credentialing quirks and the VMS when the note
+    // records them, say nothing when it does not (#48's vocabulary, consumed as wording).
+    assert.match(text, /credentialing quirks or the VMS/);
+    assert.match(text, /If the note does not record them, say nothing/);
+  }
+});
+
+test("the booking instructions do not appear for a permanent imaging brief", () => {
+  const permanent = domainBlock(
+    briefProfile("Permanent Band 7 MRI Radiographer, salary per annum. HCPC essential."),
+  );
+  assert.match(permanent, /HCPC/);
+  assert.doesNotMatch(permanent, /modality_matrix/);
+  assert.doesNotMatch(permanent, /confirm the booking today/);
 });
 
 // ── the input guard ────────────────────────────────────────────────────────────────────

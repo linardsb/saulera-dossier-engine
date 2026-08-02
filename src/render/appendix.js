@@ -25,14 +25,30 @@ export function renderAppendix(pack) {
   return { text: toText(pack), html: toHtml(pack) };
 }
 
+// The pack's own role_shape drives the title (src/pack.js:12-14) — content drives the
+// sections, so a locum-titled pack with empty locum arrays still renders clean.
+const title = (pack) =>
+  (pack.role_shape ?? "unknown") === "locum" ? "LOCUM BOOKING" : "SUBMISSION PACK";
+
 function toText(pack) {
   const { sources, tag } = collect(pack);
   const L = [];
 
-  L.push(`SUBMISSION PACK — ${pack.role_title}`);
+  L.push(`${title(pack)} — ${pack.role_title}`);
   L.push(`Candidate ${pack.candidate_ref}`);
   L.push("");
   L.push(wrap(pack.headline));
+
+  const booking = [
+    ["COMPLIANCE AT A GLANCE", pack.compliance ?? [], (c) => c.check],
+    ["AVAILABILITY AND RATE", pack.booking ?? [], (c) => c.item],
+    ["MODALITY AND SCANNER MATRIX", pack.modality_matrix ?? [], (c) => c.row],
+  ];
+  for (const [heading, items, label] of booking) {
+    if (!items.length) continue;
+    L.push("", heading, "");
+    for (const c of items) L.push(wrap(`• ${label(c)}: ${c.text}${tag(c)}`));
+  }
 
   L.push("", "AGAINST THE BRIEF", "");
   for (const c of pack.evidence) L.push(wrap(`• ${c.requirement}: ${c.text}${tag(c)}`));
@@ -96,6 +112,18 @@ function toHtml(pack) {
   H.push(`<p style="margin:2px 0 14px;color:#555">Candidate ${e(pack.candidate_ref)}</p>`);
   H.push(`<p style="margin:0 0 4px">${e(pack.headline)}</p>`);
 
+  section(
+    "Compliance at a glance",
+    (pack.compliance ?? []).map((c) => claimLi(c, `<strong>${e(c.check)}:</strong> `)),
+  );
+  section(
+    "Availability and rate",
+    (pack.booking ?? []).map((c) => claimLi(c, `<strong>${e(c.item)}:</strong> `)),
+  );
+  section(
+    "Modality and scanner matrix",
+    (pack.modality_matrix ?? []).map((c) => claimLi(c, `<strong>${e(c.row)}:</strong> `)),
+  );
   section(
     "Against the brief",
     pack.evidence.map((c) => claimLi(c, `<strong>${e(c.requirement)}:</strong> `)),

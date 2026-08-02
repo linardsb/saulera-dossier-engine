@@ -10,15 +10,34 @@ export function renderInline(pack) {
   return { text: toText(pack), html: toHtml(pack) };
 }
 
+// Same title rule as appendix: role_shape drives the title, content drives the sections.
+const title = (pack) =>
+  (pack.role_shape ?? "unknown") === "locum" ? "LOCUM BOOKING" : "SUBMISSION PACK";
+
 function toText(pack) {
   const L = [];
   const src = (c) =>
     c.source_type !== "unverified" && L.push(wrap(`  Source: "${quote(c.source_quote)}"`, 74));
 
-  L.push(`SUBMISSION PACK — ${pack.role_title}`);
+  L.push(`${title(pack)} — ${pack.role_title}`);
   L.push(`Candidate ${pack.candidate_ref}`);
   L.push("");
   L.push(wrap(pack.headline));
+
+  const booking = [
+    ["COMPLIANCE AT A GLANCE", pack.compliance ?? [], (c) => c.check],
+    ["AVAILABILITY AND RATE", pack.booking ?? [], (c) => c.item],
+    ["MODALITY AND SCANNER MATRIX", pack.modality_matrix ?? [], (c) => c.row],
+  ];
+  for (const [heading, items, label] of booking) {
+    if (!items.length) continue;
+    L.push("", heading);
+    for (const c of items) {
+      L.push("");
+      L.push(wrap(`• ${label(c)}: ${c.text}${mark(c)}`));
+      src(c);
+    }
+  }
 
   L.push("", "AGAINST THE BRIEF");
   for (const c of pack.evidence) {
@@ -83,6 +102,18 @@ function toHtml(pack) {
   H.push(`<p style="margin:2px 0 14px;color:#555">Candidate ${e(pack.candidate_ref)}</p>`);
   H.push(`<p style="margin:0 0 4px">${e(pack.headline)}</p>`);
 
+  section(
+    "Compliance at a glance",
+    (pack.compliance ?? []).map((c) => claim(c, `<strong>${e(c.check)}:</strong> `)),
+  );
+  section(
+    "Availability and rate",
+    (pack.booking ?? []).map((c) => claim(c, `<strong>${e(c.item)}:</strong> `)),
+  );
+  section(
+    "Modality and scanner matrix",
+    (pack.modality_matrix ?? []).map((c) => claim(c, `<strong>${e(c.row)}:</strong> `)),
+  );
   section(
     "Against the brief",
     pack.evidence.map((c) => claim(c, `<strong>${e(c.requirement)}:</strong> `)),

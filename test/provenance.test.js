@@ -262,6 +262,53 @@ test("provenanceSummary counts the verified pack, not the claimed one", () => {
   assert.equal(provenanceSummary(pack).unverified, 1, "pre-verification count differs");
 });
 
+// ── the locum sections (#49) ───────────────────────────────────────────────────────
+
+test("a fabricated compliance quote is demoted with the section named", () => {
+  const pack = assertPack({
+    ...packWith([]),
+    compliance: [
+      {
+        check: "DBS",
+        text: "DBS clear, dated this year.",
+        source_quote: "enhanced DBS dated January 2026",
+        source_type: "cv",
+      },
+    ],
+  });
+  const { pack: verified, failures } = verifyPack(pack, INPUTS);
+
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].section, "compliance");
+  assert.equal(verified.compliance[0].source_type, "unverified");
+  assert.equal(verified.compliance[0].failed_quote, "enhanced DBS dated January 2026");
+  assert.equal(verified.compliance[0].text, "DBS clear, dated this year.", "demoted, not dropped");
+});
+
+test("provenanceSummary counts claims across all three locum sections", () => {
+  const locumClaim = (extra) => ({ ...claim({ source_type: "unverified", source_quote: "" }), ...extra });
+  const pack = assertPack({
+    ...packWith([claim()]),
+    compliance: [locumClaim({ check: "DBS" })],
+    booking: [locumClaim({ item: "Rate" })],
+    modality_matrix: [locumClaim({ row: "CT" })],
+  });
+  assert.deepEqual(provenanceSummary(pack), {
+    cv: 1,
+    client_note: 0,
+    unverified: 3,
+    total: 4,
+  });
+});
+
+test("a pack without the locum sections verifies and counts as before, gaining nothing", () => {
+  const pack = packWith([claim()]);
+  const { pack: verified, failures } = verifyPack(pack, INPUTS);
+  assert.deepEqual(failures, []);
+  assert.ok(!("compliance" in verified), "a legacy pack must not gain empty locum arrays");
+  assert.equal(provenanceSummary(verified).total, 1);
+});
+
 // ── normalise() itself ─────────────────────────────────────────────────────────────
 
 test("normalise folds only what it claims to fold", () => {

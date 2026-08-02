@@ -77,6 +77,49 @@ export const PACK_SCHEMA = {
       description: "What the recruiter should confirm before sending. Plain strings.",
       items: { type: "string" },
     },
+    compliance: {
+      type: "array",
+      description:
+        "Locum bookings only — return an empty array for a permanent role. One item per " +
+        "check the evidence speaks to: HCPC registration, DBS, occupational health, " +
+        "mandatory training, right to work. Where the CV and the note are silent on a " +
+        "check, either omit it or carry it unverified and raise the chase in open_questions.",
+      items: claim({
+        check: {
+          type: "string",
+          description:
+            "Which check this is: HCPC registration, DBS, occupational health, mandatory " +
+            "training, or right to work.",
+        },
+      }),
+    },
+    booking: {
+      type: "array",
+      description:
+        "Locum bookings only — return an empty array for a permanent role. The " +
+        "availability window and rate as the client needs them to say yes to the booking.",
+      items: claim({
+        item: {
+          type: "string",
+          description:
+            "What this line is: Availability, Rate, or an engagement term such as IR35 status.",
+        },
+      }),
+    },
+    modality_matrix: {
+      type: "array",
+      description:
+        "Locum bookings only — return an empty array for a permanent role. Map the " +
+        "brief's modalities, lists and scanner fleet to the candidate's hands-on evidence, " +
+        "one row each. Scanners on the CV the brief does not name still earn a row.",
+      items: claim({
+        row: {
+          type: "string",
+          description:
+            "The modality, list or scanner this row covers, e.g. 'MRI — Siemens Aera'.",
+        },
+      }),
+    },
     role_shape: {
       type: "string",
       enum: ROLE_SHAPES,
@@ -93,15 +136,22 @@ export const PACK_SCHEMA = {
     "process_fit",
     "gaps",
     "open_questions",
+    "compliance",
+    "booking",
+    "modality_matrix",
     "role_shape",
   ],
 };
 
 export const CLAIM_SECTIONS = ["evidence", "process_fit", "gaps"];
 
+// The locum booking sections (#49). Not in CLAIM_SECTIONS: these are tolerant on absence
+// (legacy packs lack them), where CLAIM_SECTIONS are hard-required by assertPack.
+export const LOCUM_SECTIONS = ["compliance", "booking", "modality_matrix"];
+
 /** Every claim in the pack, flattened, tagged with the section it came from. */
 export function allClaims(pack) {
-  return CLAIM_SECTIONS.flatMap((section) =>
+  return [...CLAIM_SECTIONS, ...LOCUM_SECTIONS].flatMap((section) =>
     (pack[section] ?? []).map((c, index) => ({ ...c, section, index })),
   );
 }
@@ -116,7 +166,7 @@ export function assertPack(pack) {
   for (const field of ["candidate_ref", "role_title", "headline"]) {
     if (typeof pack[field] !== "string") throw new Error(`pack: ${field} must be a string`);
   }
-  for (const section of CLAIM_SECTIONS) {
+  const assertClaims = (section) => {
     if (!Array.isArray(pack[section])) throw new Error(`pack: ${section} must be an array`);
     for (const [i, c] of pack[section].entries()) {
       if (typeof c?.text !== "string") throw new Error(`pack: ${section}[${i}].text`);
@@ -125,6 +175,12 @@ export function assertPack(pack) {
       if (!SOURCE_TYPES.includes(c?.source_type))
         throw new Error(`pack: ${section}[${i}].source_type is ${c?.source_type}`);
     }
+  };
+  for (const section of CLAIM_SECTIONS) assertClaims(section);
+  // Tolerant on absence, strict on presence — same rule as role_shape below: legacy packs
+  // lack these sections and must still pass; a present section is held to the claim shape.
+  for (const section of LOCUM_SECTIONS) {
+    if (pack[section] !== undefined) assertClaims(section);
   }
   if (!Array.isArray(pack.open_questions)) throw new Error("pack: open_questions");
   // Tolerant on absence, strict on presence: packs generated before role_shape shipped (the

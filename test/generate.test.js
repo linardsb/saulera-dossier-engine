@@ -189,6 +189,8 @@ test("an imaging brief puts the domain block in the request, after the cached no
   const blocks = db.calls[0].messages[0].content;
 
   assert.ok(blocks[1].text.includes("HCPC"), "the domain guidance rides the second block");
+  // The locum brief carries the booking-pack instructions (#49) on the API path too.
+  assert.ok(blocks[1].text.includes("compliance, booking and modality_matrix"));
   // The cached prefix stays brief-independent: bare note block, breakpoint intact.
   assert.ok(!blocks[0].text.includes("HCPC"));
   assert.deepEqual(blocks[0].cache_control, { type: "ephemeral" });

@@ -207,3 +207,42 @@ test("a wrong-case role_shape is rejected, naming the field", () => {
     /role_shape/,
   );
 });
+
+// ── the locum sections on the round trip (#49) ─────────────────────────────────────────
+//
+// Same tolerance rule as role_shape: absent sections pass (FULL_PACK above, spike/pack.json,
+// any pre-deploy paste); present sections are held to the claim shape, by name.
+
+test("a pack carrying populated locum sections survives the round trip intact", () => {
+  const locum = {
+    ...FULL_PACK,
+    role_shape: "locum",
+    compliance: [
+      { check: "HCPC registration", text: "Registered.", source_quote: "HCPC RA1", source_type: "cv" },
+    ],
+    booking: [
+      { item: "Availability", text: "From the 1st.", source_quote: "", source_type: "unverified" },
+    ],
+    modality_matrix: [
+      { row: "MRI — Siemens Aera", text: "Daily lists.", source_quote: "Siemens Aera", source_type: "cv" },
+    ],
+  };
+  const raw = "```json\n" + JSON.stringify(locum, null, 2) + "\n```";
+  assert.deepEqual(assertPack(extractPack(raw)), locum);
+});
+
+test("a malformed locum item is rejected naming the section", () => {
+  assert.throws(
+    () => assertPack({ ...FULL_PACK, compliance: [{ text: 1 }] }),
+    /compliance/,
+  );
+  assert.throws(
+    () => assertPack({ ...FULL_PACK, booking: "not an array" }),
+    /booking/,
+  );
+});
+
+test("the legacy pack without the locum sections still passes", () => {
+  const pack = assertPack(extractPack("```json\n" + JSON.stringify(FULL_PACK) + "\n```"));
+  assert.equal(pack.compliance, undefined, "absence is preserved, not filled in");
+});
