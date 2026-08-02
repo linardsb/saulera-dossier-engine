@@ -160,6 +160,64 @@ test("an empty visible slice demotes every panel claim rather than throwing", ()
   assert.equal(failures.filter((f) => f.kind === "panel_source").length, 2);
 });
 
+/* ── the primer half (#50): the same rule, on FirstDayPrimer.items ──────────────────────── */
+
+/** The fixture with a FirstDayPrimer appended — one sourced item, one citing `keyForSecond`. */
+function withPrimer(keyForSecond) {
+  const p = payload();
+  p.blocks.push({
+    name: "FirstDayPrimer",
+    props: {
+      intro: "What we know about day one.",
+      items: [
+        { topic: "Who to report to", detail: "The Clinical Services Manager.", source_field_key: "their-process" },
+        { topic: "Getting in", detail: "Park behind the imaging block.", source_field_key: keyForSecond },
+      ],
+    },
+  });
+  return p;
+}
+
+test("a primer item naming a field that was not handed in is blanked and reported", () => {
+  const p = withPrimer("why-candidates-have-been-turned-down");
+  const { payload: out, failures } = run(p);
+  const items = out.blocks.at(-1).props.items;
+
+  assert.deepEqual(items[0], p.blocks.at(-1).props.items[0], "the sourced item is untouched");
+  assert.equal(items[1].source_field_key, "");
+  assert.equal(items[1].failed_field_key, "why-candidates-have-been-turned-down");
+  assert.equal(items[1].detail, "Park behind the imaging block.", "demote, don't drop");
+  assert.ok(
+    failures.some(
+      (f) => f.kind === "primer_source" && f.block_index === out.blocks.length - 1 &&
+        f.item_index === 1 && f.key === "why-candidates-have-been-turned-down" &&
+        f.reason === "field key not in the visible slice",
+    ),
+    "the failure names the block, the item and the key",
+  );
+});
+
+test("re-verifying a demoted primer item preserves its diagnostic and re-reports nothing", () => {
+  const pass1 = run(withPrimer("invented-key"));
+  const pass2 = run(pass1.payload);
+
+  assert.equal(pass2.payload.blocks.at(-1).props.items[1].failed_field_key, "invented-key");
+  assert.equal(pass2.failures.filter((f) => f.kind === "primer_source").length, 0, "not re-reported");
+  assert.deepEqual(briefSummary(pass2.payload), briefSummary(pass1.payload), "and the counts hold");
+});
+
+test("primer counts are additive and read off the payload's own markers", () => {
+  const summary = briefSummary(run(withPrimer("invented-key")).payload);
+  assert.equal(summary.primer_sourced, 1);
+  assert.equal(summary.primer_unsourced, 1);
+  assert.equal(summary.primer_total, 2);
+  // The competency and panel halves are untouched by the primer's arrival.
+  assert.deepEqual(
+    { sourced: summary.sourced, panel_total: summary.panel_total },
+    { sourced: 2, panel_total: 2 },
+  );
+});
+
 /* ── the caller's copy is not the verifier's copy ───────────────────────────────────────── */
 
 test("verifyBrief does not mutate the payload it was handed", () => {
@@ -184,6 +242,11 @@ test("briefSummary counts what the recruiter is being asked to stand behind", ()
     panel_sourced: 2,
     panel_unsourced: 0,
     panel_total: 2,
+    // The fixture predates #50, which is itself the assertion: a payload with no FirstDayPrimer
+    // — every stored pre-#50 brief — counts zero rather than failing.
+    primer_sourced: 0,
+    primer_unsourced: 0,
+    primer_total: 0,
   });
 });
 
@@ -270,6 +333,9 @@ test("a brief with nothing extractable summarises as zero rather than crashing",
     panel_sourced: 0,
     panel_unsourced: 0,
     panel_total: 0,
+    primer_sourced: 0,
+    primer_unsourced: 0,
+    primer_total: 0,
   });
   const { payload: out, failures } = verifyBrief(
     { role_title: "", blocks: [], competencies: [], questions: [] },

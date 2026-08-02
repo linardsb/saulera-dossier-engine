@@ -83,10 +83,12 @@ function countBlocks(blocks) {
 
 /* ── group 1: the export surface ───────────────────────────────────────────────────────── */
 
-test("REGISTRY is exactly decision 22's ten names", () => {
+test("REGISTRY is exactly decision 22's ten names plus #50's two", () => {
   // Written out literally rather than derived from the arrays above: this is the assertion that
   // catches a name being added to BOTH the array and the registry without a decision behind it.
-  const DECISION_22 = [
+  // #50 (epic #45, slice 3) extended the vocabulary deliberately: FirstDayPrimer on the brief
+  // side, LocumQuestions on the session side. Twelve names.
+  const DECIDED = [
     "PrimerCard",
     "CompetencyMap",
     "QuestionCard",
@@ -97,8 +99,10 @@ test("REGISTRY is exactly decision 22's ten names", () => {
     "StoryBankCard",
     "LogisticsRail",
     "DayBeforeMode",
+    "FirstDayPrimer",
+    "LocumQuestions",
   ];
-  assert.deepEqual(Object.keys(REGISTRY).sort(), [...DECISION_22].sort());
+  assert.deepEqual(Object.keys(REGISTRY).sort(), [...DECIDED].sort());
 });
 
 test("the two exported name lists are the registry, with nothing over and nothing missing", () => {
@@ -201,6 +205,8 @@ const VISIBLE_PROPS = {
   FeedbackNote: ["worked", "improve"],
   ProgressStrip: ["note"],
   DayBeforeMode: ["intro", "note"],
+  FirstDayPrimer: ["intro"],
+  LocumQuestions: [],
 };
 
 /** The props that are arrays of display strings. */
@@ -209,6 +215,7 @@ const VISIBLE_LISTS = {
   HelpLadder: ["structure"],
   ProgressStrip: ["covered", "queued"],
   DayBeforeMode: ["focus"],
+  LocumQuestions: ["client", "competency", "screening"],
 };
 
 /** Assert every visible string of every block in `blocks` reached `html`. */
@@ -282,7 +289,7 @@ test("a re-render replaces the page rather than appending to it", () => {
 
 /* ── group 4: the session specimens ────────────────────────────────────────────────────── */
 
-test("the five session-time blocks render from their specimen props", () => {
+test("the six session-time blocks render from their specimen props", () => {
   const payload = sessionPayload();
   const { mount, result, html } = render(payload);
 
@@ -601,6 +608,82 @@ test("the panel's mark and its caption cannot disagree about where an entry came
 
   // Not vacuous: one row is genuinely sourced and three are genuinely not.
   assert.equal(rows.filter((r) => serialize(r).includes("mark-unverified")).length, 3);
+});
+
+test("a FirstDayPrimer renders its items with the panel's own marks, sourced and demoted alike", () => {
+  // #50: the primer rides the same {source_field_key, failed_field_key} provenance as the
+  // panel, through the same single predicate — so the mark and the caption cannot disagree.
+  const payload = {
+    blocks: [
+      {
+        name: "FirstDayPrimer",
+        props: {
+          intro: "What we know that will help on day one.",
+          items: [
+            { topic: "Who to report to", detail: "The imaging services manager.", source_field_key: "their-process" },
+            {
+              topic: "Scanners and protocols",
+              detail: "A fleet we could not tie back.",
+              source_field_key: "",
+              failed_field_key: "their-processes",
+            },
+          ],
+        },
+      },
+    ],
+    competencies: [],
+  };
+  const { mount, html } = render(payload);
+
+  assert.ok(html.includes("Your first day"), "the COPY heading renders");
+  assert.ok(html.includes("What we know that will help on day one."), "the intro renders");
+  assert.ok(html.includes("Who to report to") && html.includes("The imaging services manager."));
+  assert.ok(html.includes("A fleet we could not tie back."), "demoted items still render");
+  assert.ok(html.includes("mark-unverified"), "the demoted item wears the mark");
+  assert.ok(html.includes("From our notes on this client"), "the sourced item names its source");
+
+  const rows = findAll(mount, (n) => n.classes.includes("prep-entry"));
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    const marked = serialize(row).includes("mark-unverified");
+    const sourced = textOf(row).includes("From our notes on this client");
+    assert.equal(marked, !sourced, `${textOf(row)}: the mark and the caption tell different stories`);
+  }
+
+  // #18's slug is internal, and the failed key doubly so — neither reaches the candidate.
+  assert.ok(!html.includes("their-process"), "an internal field key reached the candidate's screen");
+});
+
+test("LocumQuestions renders its groups under COPY headings, skips empty ones, and prints no type slug", () => {
+  const payload = {
+    blocks: [
+      {
+        name: "LocumQuestions",
+        props: {
+          client: ["What the manager asks about start dates."],
+          competency: [],
+          screening: ["Documents where you can reach them."],
+        },
+      },
+    ],
+    competencies: [],
+  };
+  const { mount, html } = render(payload);
+
+  assert.ok(html.includes("What this manager tends to ask"), "the client group heading renders");
+  assert.ok(html.includes("Have ready"), "the screening group heading renders");
+  assert.ok(
+    !html.includes("Expect to be asked about your experience"),
+    "an empty group renders no heading at all",
+  );
+  assert.ok(html.includes("What the manager asks about start dates."));
+  assert.ok(html.includes("Documents where you can reach them."));
+
+  // The slug is data plumbing; the heading is the candidate's language. "screening" appears in
+  // no COPY string and no question above, so its absence is the assertion.
+  assert.ok(!html.includes("screening"), "a raw type slug reached the page");
+  const labels = findAll(mount, (n) => n.classes.includes("prep-label"));
+  assert.equal(labels.length, 2, "exactly the two non-empty groups rendered labels");
 });
 
 test("no field key from the stored payload reaches the page either", () => {

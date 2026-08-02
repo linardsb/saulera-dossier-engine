@@ -191,6 +191,42 @@ test("a difficulty outside the enum is rejected", () => {
   assert.match(messageOf(() => assertBrief(p)), /questions\[1\]\.difficulty is brutal/);
 });
 
+test("a question type outside the enum is rejected; a valid or absent one passes", () => {
+  // #50, on #49's A3 rule: the fixture's questions predate `type`, so the happy path above is
+  // already the absence-tolerated case. A present value is checked against the enum.
+  const valid = payload();
+  valid.questions[0].type = "client";
+  valid.questions[1].type = "competency";
+  valid.questions[2].type = "screening";
+  assert.doesNotThrow(() => assertBrief(valid));
+
+  const invalid = payload();
+  invalid.questions[1].type = "clinical";
+  assert.match(messageOf(() => assertBrief(invalid)), /questions\[1\]\.type is clinical/);
+});
+
+test("a FirstDayPrimer with items renders as a valid brief; a non-array items is rejected", () => {
+  const p = payload();
+  p.blocks.push({
+    name: "FirstDayPrimer",
+    props: {
+      intro: "What we know about day one.",
+      items: [
+        { topic: "Getting in", detail: "Report to the imaging reception.", source_field_key: "their-process" },
+      ],
+    },
+  });
+  assert.doesNotThrow(() => assertBrief(p));
+
+  const bad = payload();
+  bad.blocks.push({ name: "FirstDayPrimer", props: { intro: "x", items: "not a list" } });
+  const i = bad.blocks.length - 1;
+  assert.match(
+    messageOf(() => assertBrief(bad)),
+    new RegExp(`blocks\\[${i}\\]\\.props\\.items must be an array`),
+  );
+});
+
 test("a source_field_key outside the visible slice is NOT a shape error", () => {
   // It is a provenance failure, and provenance failures demote rather than throw
   // (provenance.js:62). A model that writes `their-processes` for `their-process` must not kill

@@ -16,6 +16,7 @@
 // persists; #17 owns candidate_role.brief_json, and this function returns a plain object.
 
 import { MODEL, EFFORT, FALLBACK_BETA } from "../generate.js";
+import { briefProfile } from "../domain.js";
 import { cleanInput } from "../prompt.js";
 import { StoreError } from "../store.js";
 import { BRIEF_SCHEMA, assertBrief } from "./schema.js";
@@ -63,6 +64,13 @@ export async function generateBrief(
     interviewAt: String(interviewAt ?? ""),
   };
 
+  // #50: the deterministic flag every downstream branch reads, computed from the CLEANED
+  // inputs — the same strings the model sees. Never model-classified, never in BRIEF_SCHEMA
+  // (the model cannot produce it and additionalProperties: false would reject it if it tried);
+  // it is stamped onto the verified payload below, and send.js recomputes it from the same
+  // function before anything persists.
+  const engagement = briefProfile(inputs.brief, inputs.cv).role_shape;
+
   // The deliberate divergence from generatePack's `note_empty` guard. There, refusing is honest:
   // the note IS the pack's whole premise. Here, decision 2 makes per-field visibility the
   // RECRUITER'S control — a recruiter who has shared nothing has made a legitimate choice, and
@@ -95,7 +103,7 @@ export async function generateBrief(
     // the form. Pairing this header with the array form is a 400. Change neither in isolation.
     betas: [FALLBACK_BETA],
     fallbacks: "default",
-    messages: buildPrepMessages(inputs),
+    messages: buildPrepMessages({ ...inputs, engagement }),
   });
 
   const message = await stream.finalMessage();
@@ -144,7 +152,9 @@ export async function generateBrief(
   });
 
   return {
-    payload,
+    // Stamped on the VERIFIED payload, so verifyBrief's rebuild cannot drop it. assertBrief
+    // ignores unknown top-level keys, so a stored payload carrying it re-asserts cleanly.
+    payload: { ...payload, engagement },
     failures,
     provenance: briefSummary(payload),
     duration_ms: durationMs,

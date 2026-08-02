@@ -24,6 +24,7 @@ export const BLOCK_NAMES = [
   "PanelBrief",
   "StoryBankCard",
   "LogisticsRail",
+  "FirstDayPrimer",
 ];
 
 const str = (description) => ({ type: "string", description });
@@ -134,6 +135,42 @@ const BLOCKS = {
       note: str("Anything else practical. Say plainly where the material is silent."),
     }),
   ),
+
+  // #50: the locum booking's first-day surface. Same provenance mechanism as PanelBrief —
+  // every item names the client-knowledge field it came from, and the same deterministic
+  // check demotes an item whose key was not in the input.
+  FirstDayPrimer: block(
+    "FirstDayPrimer",
+    properties({
+      intro: str(
+        "One or two sentences on what this covers. Where the material is silent, say so.",
+      ),
+      items: {
+        type: "array",
+        description:
+          "The practical facts the candidate needs for day one, each from the client knowledge " +
+          "you were given — never from guesswork about the organisation. Emit this block only " +
+          "for a locum booking, and only when the client knowledge holds something practical.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            topic: str(
+              'The practical subject, in the candidate\'s language — "Getting in", "Scanners ' +
+                'and protocols", "PACS and RIS", "Who to report to".',
+            ),
+            detail: str("What the agency actually knows about this, plainly stated."),
+            source_field_key: str(
+              "The `key` attribute of the <field> in the client knowledge this came from, copied " +
+                "exactly. A deterministic check runs after you: a key that was not in the input is " +
+                "blanked and reported as unsourced.",
+            ),
+          },
+          required: ["topic", "detail", "source_field_key"],
+        },
+      },
+    }),
+  ),
 };
 
 const competency = {
@@ -176,8 +213,20 @@ const question = {
       description: 'Always "core" on this call. Variants are generated later, in session.',
     },
     difficulty: { type: "string", enum: ["gentle", "standard", "probing"] },
+    // #50: what a question is FOR, orthogonal to axis/difficulty. Required in the schema so
+    // fresh calls always carry it; assertBrief tolerates absence, because stored pre-#50
+    // payloads re-assert on every brief read and must not start failing.
+    type: {
+      type: "string",
+      enum: ["client", "competency", "screening"],
+      description:
+        '"client" = what THIS manager or client tends to probe, sourced from the client ' +
+        'knowledge. "competency" = verify the candidate\'s experience — never teach it. ' +
+        '"screening" = availability, rate, compliance logistics. Permanent-role briefs use ' +
+        '"competency" throughout.',
+    },
   },
-  required: ["competency_id", "text", "axis", "difficulty"],
+  required: ["competency_id", "text", "axis", "difficulty", "type"],
 };
 
 export const BRIEF_SCHEMA = {
@@ -288,6 +337,11 @@ export function assertBrief(brief) {
     if (b.name === "PanelBrief" && !Array.isArray(b.props.panel)) {
       throw new Error(`brief: ${where}.props.panel must be an array`);
     }
+    // The same reasoning for the primer half: verifyBrief reaches the note half of §3 through
+    // this array too, and skips silently when it is not one.
+    if (b.name === "FirstDayPrimer" && !Array.isArray(b.props.items)) {
+      throw new Error(`brief: ${where}.props.items must be an array`);
+    }
     // Only CompetencyMap nests, and only one level deep — the schema is non-recursive by
     // construction and this is the runtime half of that.
     if (b.name !== "CompetencyMap") {
@@ -318,6 +372,11 @@ export function assertBrief(brief) {
     }
     if (!["gentle", "standard", "probing"].includes(q.difficulty)) {
       throw new Error(`brief: questions[${i}].difficulty is ${q.difficulty}`);
+    }
+    // #49's A3 rule, not axis's hard requirement: `type` arrived on a contract with live stored
+    // payloads, so absence is tolerated and only a present-but-invalid value throws.
+    if (q.type !== undefined && !["client", "competency", "screening"].includes(q.type)) {
+      throw new Error(`brief: questions[${i}].type is ${q.type}`);
     }
     asked.add(q.competency_id);
   }

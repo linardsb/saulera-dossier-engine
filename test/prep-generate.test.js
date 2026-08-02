@@ -149,7 +149,28 @@ test("the breakpoint is on the visible slice, with the per-candidate inputs afte
   assert.ok(blocks[1].text.includes(BRIEF) && blocks[1].text.includes(CV));
 });
 
-/* ── the checks run before the payload is returned ─────────────────────────────────────── */
+/* ── the engagement stamp (#50) ────────────────────────────────────────────────────────── */
+
+test("engagement is computed from the cleaned inputs, stamped on the payload, and told to the prompt", async () => {
+  // The fixture brief says "permanent" outright; the other two are the same brief re-worded.
+  // The stamp is src/domain.js's own read — deterministic, never the model's.
+  const cases = [
+    [BRIEF, "permanent"],
+    ["Locum radiographer, day rate £320, inside IR35. CT and MRI lists.", "locum"],
+    ["Radiographer needed for a busy imaging department.", "unknown"],
+  ];
+  for (const [brief, expected] of cases) {
+    const db = fakeAnthropic(ok());
+    const result = await generateBrief(db, { ...INPUTS, brief });
+    assert.equal(result.payload.engagement, expected, `${expected} brief`);
+
+    // And the prompt saw the same flag: the locum call's second block asks for the primer, the
+    // others carry the one-line perm rule. The cached first block never varies (prep-prompt's
+    // byte-identity test owns that half).
+    const inputs = db.calls[0].messages[0].content[1].text;
+    assert.equal(inputs.includes("This is a locum booking"), expected === "locum");
+  }
+});
 
 test("a fabricated competency quote comes back demoted, marked, and not dropped", async () => {
   const result = await generateBrief(fakeAnthropic(ok()), INPUTS);
@@ -171,6 +192,9 @@ test("a fabricated competency quote comes back demoted, marked, and not dropped"
     panel_sourced: 2,
     panel_unsourced: 0,
     panel_total: 2,
+    primer_sourced: 0,
+    primer_unsourced: 0,
+    primer_total: 0,
   });
 });
 
