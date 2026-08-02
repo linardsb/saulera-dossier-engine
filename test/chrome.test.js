@@ -68,7 +68,8 @@ const FONTS_CSS = read("public/fonts.css");
 const INLINE_STYLE_PAGES = [
   "public/404.html",
   "public/prep/index.html",
-  "public/prep/login.html",
+  // public/prep/login.html is absent on the showcase branch: the candidate sign-in is removed
+  // there and the junction hands a visitor straight to the seeded demo session.
   "public/prep/privacy.html",
 ];
 

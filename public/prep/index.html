@@ -75,7 +75,7 @@
     .then(function (response) { return response.json(); })
     .then(function (body) {
       if (!body.ok) {
-        window.location.replace("/prep/login");
+        window.location.replace("/prep/demo");
         return;
       }
       // `replace`, not `assign`, on both branches: this page is a junction and never a
@@ -83,8 +83,9 @@
       window.location.replace("/prep/brief");
     })
     .catch(function () {
-      // A failed check is not a session. Fail closed, and let the login page explain itself.
-      window.location.replace("/prep/login");
+      // A failed check is not a session. On the showcase there is no sign-in to fall back to, so
+      // this hands off to /prep/demo, which mints the seeded demo session and comes straight back.
+      window.location.replace("/prep/demo");
     });
 })();
 </script>
