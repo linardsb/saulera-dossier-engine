@@ -966,16 +966,36 @@ a {
 
 /* ── act 3: the pack, the signature surface ────────────────────────────────────────────── */
 
-/* The headline number of the whole product: how much of this pack stands on evidence. Body
-   size, not caption, and each count wears its mark's colour WITH its word — the same
-   never-colour-alone rule the marks themselves follow. */
+/* The headline number of the whole product: how much of this pack stands on evidence. It is the
+   answer to the only question the recruiter has before sending, so it is one step above body and
+   one step below the act heading it supports — supporting it, not competing with it. Each count
+   wears its mark's colour WITH its word and now on its mark's ground too, so the summary and the
+   claims below say the same thing in the same grammar. The gap and the two grounds do the
+   separating that a middle dot used to. Wraps rather than overflows when the heading beside it
+   leaves the row too little. */
 .pack-summary {
-  font-size: var(--text-body);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-h4);
   color: var(--text-muted);
 }
 
-.summary-sourced   { color: var(--verified); font-weight: 600; }
-.summary-unverified { color: var(--unverified); font-weight: 600; }
+.summary-sourced,
+.summary-unverified,
+.summary-unverified-none {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.summary-sourced   { color: var(--verified); background: var(--tint-verified); }
+.summary-unverified { color: var(--unverified); background: var(--tint-warn); }
+
+/* Nothing unverified is not a warning, so it does not wear the warning's ground. It keeps the
+   chip's box so the two counts still sit on one baseline. */
+.summary-unverified-none { color: var(--text-muted); }
 
 .renderer-note {
   font-size: var(--text-body);
@@ -1036,8 +1056,13 @@ a {
 .claim-requirement { font-weight: 600; }
 
 /* A hairline that encodes grouping whitespace cannot: it ties the quote to the claim above it.
-   CRAFT allows a rule for exactly that and for nothing else. */
+   CRAFT allows a rule for exactly that and for nothing else.
+   The mono face is the second thing saying what this text is: a verbatim span lifted out of a
+   document, not more of our prose. It is what the epic decided the second face FOR, and mono
+   already means "quoted literally" everywhere else on the deployment — the code element, the
+   honest clock, the counts tiles. */
 .claim-source {
+  font-family: var(--font-mono);
   font-size: var(--text-body);
   color: var(--text-muted);
   margin: var(--space-2) 0 0;
@@ -1045,9 +1070,31 @@ a {
   border-left: 1px solid var(--border);
 }
 
-/* The provenance mark. Three signals, never colour alone: the WORD, the colour, and on the two
-   unverified states a left border on the whole claim. A recruiter who cannot distinguish the
-   colours still reads "Unverified". */
+/* The evidence disclosure. A native <details>, so the open/closed state is drawn by the browser
+   and announced by the screen reader without a line of ours. */
+.claim-evidence { margin-top: var(--space-2); }
+
+.claim-evidence-toggle {
+  /* No `display` here, deliberately: <summary> is list-item by default and ANY other display
+     value silently removes the disclosure marker in every engine — and the marker is the only
+     thing carrying open/closed, which is why the label never changes. A custom marker would go
+     through ::marker, never through display.
+     The padding is the hit area: the label's own line box is well under CRAFT's touch floor, and
+     a padded summary clears it while leaving the whole strip pressable. */
+  padding: var(--space-3) 0;
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* Hover raises the contrast rather than lowering it, which is the house rule for every state. */
+.claim-evidence-toggle:hover { color: var(--text-primary); }
+
+/* The provenance mark, now a chip. FOUR signals, never colour alone: the WORD, the colour, the
+   ground it sits on, and on the two unverified states a left border on the whole claim. A
+   recruiter who cannot distinguish the colours still reads "Unverified". The ground is what
+   turns a label into a status the eye finds without reading — the pattern act 3 borrows from
+   forcanopy's results page. */
 .mark {
   flex-shrink: 0;
   font-family: var(--font-ui);
@@ -1055,24 +1102,36 @@ a {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
 }
 
 /* --brief is act 4's word for the same fact act 3 calls --cv or --note: found, literally, in
    the material. It shares --verified rather than earning a fourth colour, because a fourth
-   provenance colour would mean a fourth thing to tell apart for no extra meaning. */
+   provenance colour would mean a fourth thing to tell apart for no extra meaning.
+   Mint under the sourced words, blush under both unsourced ones — the two states whose next
+   move differs share a ground because the recruiter's question of them is the same one. Each
+   pairing is already measured and gated by test/tokens.test.js's TINTS table: 6.24:1 for
+   --verified on mint, 5.59:1 for --unverified on blush, 7.08:1 for --failed on blush. No
+   border: --border is 2.53:1 on the powder tint and a chip that carries a word does not need
+   an edge to be found. */
 .mark-cv,
 .mark-note,
-.mark-brief { color: var(--verified); }
-.mark-unverified { color: var(--unverified); }
-.mark-failed { color: var(--failed); }
+.mark-brief { color: var(--verified); background: var(--tint-verified); }
+.mark-unverified { color: var(--unverified); background: var(--tint-warn); }
+.mark-failed { color: var(--failed); background: var(--tint-warn); }
 
 /* On a narrow screen the mark stops sitting beside the claim and sits under it.
    "Quote not found" is about 120px of unbreakable text, and beside a claim inside a 282px pack
    it left the claim roughly twenty characters a line. Measured at 390px before this rule. The
-   reading order is unchanged because the mark already follows the claim in the DOM. */
+   reading order is unchanged because the mark already follows the claim in the DOM.
+   inline-block rather than block now that the mark carries a ground: block would stretch it the
+   full width of the column and it would read as a banner across the claim rather than as a chip
+   under it. inline-block shrink-wraps to the word and still honours the margin-top, which a
+   plain inline element would not. */
 @media (max-width: 600px) {
   .claim-head { display: block; }
-  .mark { display: block; margin-top: var(--space-1); }
+  .mark { display: inline-block; margin-top: var(--space-1); }
 }
 
 .claim-unverified {
@@ -1100,6 +1159,22 @@ a {
 }
 
 .pack-questions li { margin-bottom: var(--space-2); }
+
+/* The one block of the pack that is neither sourced nor unsourced: it is the recruiter's own
+   list of things to confirm before sending. Powder is the info tint and this is the info, so
+   this is where #58's third tint was always going.
+   --text-primary on the head, never --text-muted: muted measures 3.75:1 on this ground and is
+   under the body-text floor (tokens.css:68-79), which is why the head is restated here rather
+   than inherited. No border either — --border is 2.53:1 on powder, under the non-text floor, and
+   the change of ground is the boundary. --radius and not --radius-sm: this is a panel, and
+   panels here take the softer corner; the small one belongs to the chips. */
+.pack-questions-panel {
+  background: var(--tint-info);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
+.pack-questions-panel .pack-section-head { color: var(--text-primary); }
 
 /* ── act 4: send to candidate ──────────────────────────────────────────────────────────── */
 
@@ -1332,5 +1407,20 @@ a {
   .act {
     transition: opacity var(--duration-2) var(--ease-out),
                 transform var(--duration-2) var(--ease-out);
+  }
+
+  /* The expander's one authored moment: the evidence arrives rather than simply being there.
+     Opacity and transform only, the same compositor pair .act takes above. The details element's
+     own height is deliberately NOT animated — that needs ::details-content and interpolate-size,
+     and a no-build static deployment has no browserslist and no way to state a browser floor, so
+     a support gamble is traded for a motion that degrades to nothing rather than to half of
+     itself. The @keyframes is nested INSIDE this guard on purpose: test/chrome.test.js strips
+     this block and then forbids the word anywhere that survives, which is the whole file. */
+  @keyframes evidence-in {
+    from { opacity: 0; transform: translateY(calc(var(--space-1) * -1)); }
+  }
+
+  .claim-evidence[open] .claim-source {
+    animation: evidence-in var(--duration-2) var(--ease-out);
   }
 }
