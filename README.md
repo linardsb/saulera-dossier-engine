@@ -95,6 +95,47 @@ without the doc to hand.
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
 
+**The build-a-pack flow is laid out as numbered sections in big type, and the corner radius is
+settled at 9px.** (2 Aug 2026, #59, the first layout ticket of epic #57.) #58 landed the token
+layer and moved no layout, so every screen was rendering the new palette on the old hierarchy.
+This is the layout half, on `public/index.html`, `public/app.css` and two additive tokens.
+
+*Type and rhythm.* The page title takes a new **`--text-display` (35px)** — the ramp's next ~1.2
+step above `--text-h1`'s 29px, and the step #58's Out of Scope reserved for this ticket by name.
+It was `--text-h2` (24px), four points above a subheading, which is not a ramp. The rhythm
+between zones takes a new **`--space-16` (64px)**, the 4px grid's next step: `--space-12` had
+been serving as both the largest gap and a common one, so "generous" was not expressible. Both
+tokens are non-colour, so no contrast gate moves and `test/tokens.test.js` needed no edit.
+
+*The acts became sections rather than labels.* `.act-head` was 12px uppercase tracked muted —
+the same treatment as `.rail-head`, which labels a *sidebar*. The three things a recruiter does
+on this screen were set more faintly than the hint text under a file picker. It is now
+`--text-h3` sentence case in the ink, with the numeral chip grown from 20px to 24px beside it.
+**The act heads and `.rail-head` are therefore no longer one grammar**, reversing #8's decision
+on purpose: the rail is chrome (a label over a list picked from once) and the acts are the work.
+No hairline was added between acts — `app.css` records that the pacing is whitespace rather than
+dividers, and at 64px it still is.
+
+*`--radius` stays 9px*, which **closes #58's open question 5**. The two references disagree —
+zig.ai soft, forcanopy tighter — and the epic gives zig.ai the *feel* of this flow while giving
+forcanopy only the *pattern language of the pack view*. Soft is right for the surfaces #59 owns.
+If #60 needs a tighter corner for the Canopy claim chips it adds a `--radius-sm` rather than
+moving this one, which sits on the card, the rail, the pack, every input and every button.
+
+*The `h1` change is shared chrome, deliberately.* `h1` is a bare element selector, so `/clients`,
+`/counts` and `404.html` inherit the 35px title — epic AC1's "one token set drives both surfaces"
+working as intended, and #61 inherits rather than re-decides it. The portal's two role-title
+pages already override `h1` in `prep.css`; the three that do not (`/prep/`, `/prep/login`,
+`/prep/privacy`) inherit it and are #62's to tune. A phone step-down to `--text-h1` sits in the
+mobile-density block.
+
+*`public/app.js` was not touched — not one line.* Every `getElementById` and the one
+`closest(".input-col")` call still resolves: the two markup edits (a `.step-label` span per step,
+a `.field-pair` wrapper around act 4's date and email) only wrap existing elements, so DOM order
+and therefore tab order are unchanged. The ticket allowed "keep hooks stable **or** update in
+lockstep"; keeping them stable is the half that cannot regress, and it is what let this run in a
+parallel worktree beside #61 and #62.
+
 **The palette is owner-decided from zig.ai, not the stackai default. One sans, one mono. Motion
 is opt-in.** (2 Aug 2026, #58, the foundation ticket of epic #57.) Three changes to the design
 base, all in `public/tokens.css`, `public/fonts.css` and `public/app.css`; no markup, no
