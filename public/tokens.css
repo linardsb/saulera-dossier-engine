@@ -106,8 +106,14 @@
   --text-note:    16px;   /* the textarea and any rendered note prose */
   --text-h4:      17px;
   --text-h3:      20px;   /* the selected client's name */
-  --text-h2:      24px;   /* page h1, matching index.html's existing 24px */
+  --text-h2:      24px;   /* what the page h1 was until #59 */
   --text-h1:      29px;   /* the next 1.2 step up: the candidate pages' role title */
+  /* 29 × 1.2 = 34.8 → 35. The ramp's top step, and the page h1 on every recruiter screen from
+     #59 — it was --text-h2 (24px), which put the page title four points above a subheading and
+     is not a ramp. The epic's decided direction is big type; this is the step #58's Out of
+     Scope reserved for #59 by name, spent on the one element it named. Disciplined rather than
+     round: 35, not 40. */
+  --text-display: 35px;
 
   /* provenance status. Whether a claim is sourced is this product's core distinction, so these
      are text colours and are held to the 4.5:1 body-text floor rather than to the 3:1 a
@@ -131,7 +137,20 @@
   /* 4px grid */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
+  /* The next step up, added by #59 for the rhythm BETWEEN zones: the gap under the page head
+     and between the acts. CRAFT.md asks that rhythm between zones be visibly larger than
+     spacing within them, and --space-12 could not deliver that while it was also the common
+     large gap — it separated the acts AND the page head AND the .visibility fieldset AND
+     .editor-remove. 64px is the zone break; 48px goes back to being an ordinary large step. */
+  --space-16: 64px;
 
+  /* Decided and settled in #59, closing #58's open question 5, which asked #59 or #60 to pick
+     once because the two references disagree — zig.ai is soft, forcanopy tighter. 9px stays:
+     the epic assigns zig.ai the FEEL of the build-a-pack flow and gives forcanopy only the
+     pattern language of the pack view, so soft is the right answer for the surfaces #59 owns,
+     and 9px is already that. If #60 wants a tighter corner for the Canopy claim chips it adds
+     a --radius-sm rather than moving this one — this one is on the card, the rail, the pack,
+     every input and every button. */
   --radius: 9px;
   --max-width: 1024px;
 

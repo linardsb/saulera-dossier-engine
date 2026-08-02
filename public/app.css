@@ -32,11 +32,21 @@ main {
    the CSS font-matching algorithm resolves a desired weight between 400 and 500 DOWNWARD — so a
    500 heading would render at regular weight rather than snapping up to the 600 sitting right
    there. This read 500 while a single-500-face family carried the UI; that family is gone, and
-   600 is now the file's one bold, shared with .claim-requirement and .client-name. */
+   600 is now the file's one bold, shared with .claim-requirement and .client-name.
+
+   The page title takes the ramp's top step from #59 (--text-display, 35px; it was --text-h2's
+   24px, four points above a subheading, which is not a ramp). This is SHARED CHROME and the
+   blast radius is deliberate: `h1` is a bare element selector, so /, /clients, /counts and
+   404.html all take it — epic AC1's "one token set drives both surfaces" working as intended.
+   The portal's two role-title pages are unaffected, because prep.css already overrides
+   `.brief .page-head h1` / `.session .page-head h1` to --text-h1. The letter-spacing is the
+   optical tracking correction display sizes need, the same value and the same reason as
+   prep.css's own top-step heading. The phone step-down is in the mobile-density block. */
 h1 {
   font-family: var(--font-ui);
-  font-size: var(--text-h2);
+  font-size: var(--text-display);
   font-weight: 600;
+  letter-spacing: -0.02em;
   line-height: 1.2;
   margin: 0 0 var(--space-4);
   text-wrap: balance;
@@ -263,7 +273,10 @@ a {
 
 /* ── layout ────────────────────────────────────────────────────────────────────────────── */
 
-.page-head { margin-bottom: var(--space-12); }
+/* --space-16 rather than --space-12 from #59: the head and the work are two zones, and the gap
+   between them has to be visibly larger than the gaps inside either. 48px was doing both jobs at
+   once. The phone counterpart is in the mobile-density block, unchanged at --space-8. */
+.page-head { margin-bottom: var(--space-16); }
 .page-sub  { color: var(--text-muted); margin: 0; }
 
 /* The journey map: the three act chips, shown before the acts exist. Reads as a row on a
@@ -291,9 +304,13 @@ a {
   margin-bottom: var(--space-12);
 }
 
+/* The base gap stays --space-8: on a phone the rail sits ABOVE the work rather than beside it,
+   and 32px already reads as a zone break in that direction. The 48px gutter below is what makes
+   the two columns read as chrome-and-work rather than as two columns of a table. */
 @media (min-width: 860px) {
   .workspace {
     grid-template-columns: 280px 1fr;
+    gap: var(--space-12);
     align-items: start;
   }
 }
