@@ -78,6 +78,12 @@
     return node;
   }
 
+  /** One number cell. `|| 0` is where a client with no row at all becomes a nought. */
+  function number(value) {
+    var n = value || 0;
+    return cell("td", String(n), n === 0 ? "counts-number is-zero" : "counts-number");
+  }
+
   function render(clients, events) {
     // Keyed by client_id so the join is a lookup rather than a scan per row. A client with no
     // events at all simply has no entry, which is what the zeros below are for.
@@ -92,9 +98,13 @@
       tr.firstChild.setAttribute("scope", "row");
       // ZERO, never a blank. A blank cell reads as "we do not know", and we do know: the
       // answer is none. That distinction is the whole reliability of a sales number.
-      tr.appendChild(cell("td", String(row.packs || 0), "counts-number"));
-      tr.appendChild(cell("td", String(row.invites_sent || 0), "counts-number"));
-      tr.appendChild(cell("td", String(row.invites_opened || 0), "counts-number"));
+      //
+      // The zero is printed in full and then marked, never dropped. `is-zero` only quiets it in
+      // the CSS so the eye lands on the numbers that are not zero; the digit still carries what
+      // a blank cell would fail to say.
+      tr.appendChild(number(row.packs));
+      tr.appendChild(number(row.invites_sent));
+      tr.appendChild(number(row.invites_opened));
       el.body.appendChild(tr);
     });
 

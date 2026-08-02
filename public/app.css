@@ -1090,12 +1090,15 @@ a {
   padding: var(--space-2) var(--space-3) var(--space-2) 0;
 }
 
+/* --space-4 rather than --space-3 down the sides: these rows are read across, one client at a
+   time, and 12px of vertical padding packed four columns of digits into a block. Air is what
+   makes a table scan as rows. */
 .counts-table tbody th,
 .counts-table tbody td {
   text-align: left;
   font-weight: 400;
   border-bottom: 1px solid var(--border-hairline);
-  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+  padding: var(--space-4) var(--space-3) var(--space-4) 0;
   min-height: var(--tap-target);
 }
 
@@ -1104,12 +1107,28 @@ a {
 .counts-table tbody th { overflow-wrap: anywhere; }
 
 /* Tabular figures so the columns line up digit-for-digit; right-aligned because these are
-   quantities being compared down a column, not labels being read across. */
+   quantities being compared down a column, not labels being read across. nowrap so a figure
+   never breaks across two lines mid-number, which is the one way a count can be misread.
+   tabular-nums stays even though the mono face below is fixed-width: it costs nothing and it is
+   what keeps the fallback stack aligned when DM Mono has not loaded. */
 .counts-number {
   text-align: right;
   font-variant-numeric: tabular-nums;
   padding-right: 0;
+  white-space: nowrap;
 }
+
+/* Mono for the numbers, which is the epic's rule for counts and data — and scoped to the body
+   cells on purpose. DM Mono ships 400 alone (fonts.css), and .counts-table thead th is 600: a
+   600 request against a single-weight family gets synthetic bold rather than a real face. The
+   header labels are words anyway, and words stay in the UI sans. */
+.counts-table tbody .counts-number { font-family: var(--font-mono); }
+
+/* A zero is printed in full and then quieted, so the eye lands on the numbers that are not
+   zero. The digit still carries the information; the colour only ranks it. --text-muted is held
+   to the 4.5:1 body-text floor by test/tokens.test.js, so this is a legible value rather than a
+   decorative grey. */
+.counts-number.is-zero { color: var(--text-muted); }
 
 .counts .save-state { margin-top: var(--space-4); }
 
