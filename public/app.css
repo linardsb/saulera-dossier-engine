@@ -394,13 +394,14 @@ a {
 
 /* ── the editor ────────────────────────────────────────────────────────────────────────── */
 
-/* One measure for the whole column, so the note, the two readouts under it and the delete
-   action share an edge and the column reads as a document rather than as a stretched form.
-   Measured: at --max-width (1024px) minus the 280px rail and the --space-8 gutter the column is
-   712px, which at --text-note is about 89 characters — past CRAFT.md's 65-75ch ceiling. 75ch
-   lands at about 656px here. The min-width: 0 above stays: it is what stops a grid item being
-   sized by its widest child, and a max-width does not do that job. */
-.editor { max-width: 75ch; }
+/* No max-width here, and that is a measured decision rather than an omission. The column already
+   sits inside CRAFT's 65-75ch measure: at --max-width (1024px) minus the 280px rail and the
+   --space-8 gutter it renders 712px, and 1ch on this column is 10.59px (Geist at --text-note,
+   16px, measured in Chrome and Safari), so 712px is 67.2ch. A `max-width: 75ch` reads as
+   diligence and does nothing — 75ch resolves to 795px, above a column that can never exceed
+   712. .pack below needs its 68ch because it is full-width under --max-width; this column is
+   held by the grid instead. The min-width: 0 above is the rule that matters here, and it is a
+   different job: it stops a grid item being sized by its widest child. */
 
 .editor-head { margin-bottom: var(--space-4); }
 
