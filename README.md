@@ -95,6 +95,45 @@ without the doc to hand.
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
 
+**The palette is owner-decided from zig.ai, not the stackai default. One sans, one mono. Motion
+is opt-in.** (2 Aug 2026, #58, the foundation ticket of epic #57.) Three changes to the design
+base, all in `public/tokens.css`, `public/fonts.css` and `public/app.css`; no markup, no
+JavaScript, no layout.
+
+*Colour.* The ground is a warm off-white `#fdfafa`, the ink a grey-green `#2e3332`, the accent a
+deep green `#08906c`, plus three state tints. This replaces stackai's white / grey / `#0099ff`.
+It is still a **neutral** base and not saulera's Sunrise brand, so the "Visual base: neutral"
+decision below is untouched — this is a warmer neutral, chosen by the owner, not a brand.
+
+*The accent split, which is the one place a decided value lost to a gate.* `--accent` `#08906c`
+measures **4.03:1 with white** and **3.19:1 with the ink** — both under the 4.5:1 body-text
+floor — and `.btn-primary` puts a label directly on its fill. #58's AC2 says the gates win over a
+raw reference value, so the palette gained **`--accent-strong` `#087e60`** (white on it is
+**5.04:1**, the minimum darkening that clears the floor) for that one fill, and `--on-accent` for
+the label. `--accent` keeps the owner's decided hex and is now **decorative only**: the focus
+ring, two underlines, the `.client-row` marker bar and the dragover edge, all non-text uses at
+the 3:1 floor, which it clears at 3.88 / 3.53 / 3.63 on the three grounds. It is 2.57:1 on
+`--tint-info`, which is why the focus ring keeps a `--text-primary` hairline inside it.
+
+*Type.* Consolidated to **Geist + DM Mono**. The third family the stackai reference brought with
+it is deleted — the epic asks for one sans, and Geist was already on disk with two real weights.
+Geist ships 400 and 600 and **nothing may ask for 500**: CSS font-matching resolves a desired
+weight between 400 and 500 *downward*, so a 500 heading renders at regular weight rather than
+snapping up to the 600 sitting right there. Headings are 600.
+
+*Motion.* Inverted from opt-out to **opt-in**. `app.css` used to scatter six transitions through
+its rules and neutralise them with a blanket `prefers-reduced-motion: reduce` override using
+`!important`; they now live in one `prefers-reduced-motion: no-preference` block at the foot of
+the file, which is the idiom `prep.css` already used. `test/chrome.test.js` is the new gate:
+a transition added to a rule is now a test failure rather than a live animation nobody chose.
+It also gates that `app.css` and the four page-scoped `<style>` blocks declare no raw colour, and
+that `fonts.css` requests nothing off-origin.
+
+One thing that inversion caught: `public/prep/session.css`'s typing indicator is an *infinite*
+animation that was relying on the deleted blanket block, and no test covered it — deleting the
+block would have left it pulsing for a user who asked for no motion, silently. It now carries its
+own `no-preference` guard, and `test/prep-session-ui.test.js` asserts it.
+
 **Model access: `POST /api/generate` on this deployment, behind a per-deployment API key.
 The recruiter's own Claude session is the fallback route.** (28 Jul 2026, owner decision,
 superseding the whole entry below.) The tab trip was designed honestly and it was still the
@@ -184,17 +223,27 @@ writing real client notes is not acceptable, and the notes name real hiring mana
 preference. The old value measures 3.08:1 on `--surface` and fails the 4.5:1 body-text
 contrast floor, and row meta and the note scaffold both sit on `--surface`. The new value is
 4.89:1 there and 5.33:1 on `--background`. This is an engine-side token, so every agency
-inherits the fix. Two related facts worth knowing before using the palette: `--accent` is
-3.00:1 on white, so it is a fill and never a text colour, and a button label on it must be
-`--text-primary` (5.62:1) rather than white (3.00:1).
+inherits the fix.
+
+*The reasoning above stands; the two numbers it closed with do not.* It ended by noting that
+`--accent` was 3.00:1 on white and that a button label on it must therefore be `--text-primary`
+(5.62:1). **Both halves were superseded by #58** (entry at the top): the palette is no longer
+stackai's, `--text-muted` is now `#5c6764` (5.65 / 5.15 / 5.29 on the three grounds), and a
+primary button's label is now `--on-accent` on `--accent-strong` at 5.04:1. What survives
+unchanged is the rule that produced them — a colour carrying a word is text and takes the 4.5:1
+floor, and `test/tokens.test.js` is what enforces it rather than a number in a comment.
 
 **The provenance tokens are text colours held to 4.5:1.** (27 Jul 2026, #8.) Same shape of fix
 as `--text-muted` above, on the tokens that matter most. `--verified` and `--unverified` shipped
 in #3 as aliases of `--success` (#22c55e) and `--warning` (#c68a0b), which measure **2.28:1** and
 **2.98:1** on `--background`. Whether a claim is sourced is this product's core distinction and
 the mark carries the word "Unverified", so these are body text and take the 4.5:1 floor rather
-than the 3:1 a decorative state colour could take. They are now `#166534` (7.13:1 / 6.54:1 on
-`--background` / `--surface`), `#8a5300` (6.33:1 / 5.81:1) and `#9f1239` (8.02:1 / 7.35:1).
+than the 3:1 a decorative state colour could take. They are `#0b5c46` (7.68:1 / 7.00:1 / 7.20:1
+on `--background` / `--surface` / `--surface-signature`), `#8a5300` (6.10:1 / 5.55:1 / 5.71:1)
+and `#9f1239` (7.72:1 / 7.03:1 / 7.23:1) — the last two unchanged since #8 and re-measured
+against #58's palette, the first moved from `#166534` by #58. That move was **not** gate-forced:
+the old value cleared every floor. It moved so the "sourced" green sits inside the accent's hue
+family rather than beside it, which is a judgment and cheap to revert.
 `--success` and `--warning` are gone rather than left orphaned; nothing else referenced them.
 `test/tokens.test.js` measures every pairing in `tokens.css` and fails the suite under the
 floor, including for an agency that swaps a colour.

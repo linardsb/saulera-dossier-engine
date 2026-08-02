@@ -714,6 +714,37 @@ test("session.css keeps app.css's focus rule, and animates exactly one thing", (
   assert.equal(count(SESSION_CSS, "@keyframes"), 1, "exactly one animation: the typing indicator");
 });
 
+test("session.css's one animation sits behind the reduced-motion guard", () => {
+  // Added in #58, and the gap it closes is the reason it exists. This file's animation used to
+  // be neutralised by a blanket `prefers-reduced-motion: reduce` block in app.css — session.css
+  // said so in its own header and was the only file relying on it. #58 inverted that guard to
+  // opt-in, which would have left an INFINITE animation running under reduced motion, and the
+  // test above would still have passed: counting the keyframes says nothing about where they
+  // sit. The same brace-counting strip prep-registry.test.js:863-879 runs over prep.css.
+  let outsideGuard = SESSION_CSS;
+  for (
+    let at = outsideGuard.search(/@media[^{]*prefers-reduced-motion:\s*no-preference/);
+    at !== -1;
+    at = outsideGuard.search(/@media[^{]*prefers-reduced-motion:\s*no-preference/)
+  ) {
+    let depth = 0;
+    let end = outsideGuard.indexOf("{", at);
+    do {
+      const ch = outsideGuard[end];
+      if (ch === "{") depth += 1;
+      if (ch === "}") depth -= 1;
+      end += 1;
+    } while (depth > 0 && end < outsideGuard.length);
+    outsideGuard = outsideGuard.slice(0, at) + outsideGuard.slice(end);
+  }
+  assert.doesNotMatch(
+    outsideGuard.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /animation|@keyframes|transition/,
+    "the typing indicator must sit inside a prefers-reduced-motion: no-preference block — " +
+      "app.css no longer carries a blanket guard that would neutralise it",
+  );
+});
+
 test("session.css restates no selector app.css or prep.css already owns", () => {
   const selectorsOf = (source) => {
     const found = new Set();

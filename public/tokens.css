@@ -2,51 +2,99 @@
    through one of these custom properties, so an agency's branding is an override of this
    file — never a fork of the markup that uses it.
 
-   Values are the stackai-design defaults: neutral (white / light grey / near-black) with a
-   single accent, which is what the README's "neutral, not the saulera Sunrise palette"
-   decision asks for. The --font-* families have no .woff2 files behind them and fall back to
-   system-ui. #8 was where they were meant to land and did not: there are no font files in this
-   repo, "Aspekta 500" and "Geist" both need a licensing decision, and the fallback renders
-   correctly and costs nothing against the ten-minute guardrail. Fonts are also
-   branding-adjacent, and branding is per-agency config. The tokens stay so shipping them
-   later is a one-file change. */
+   The palette is owner-decided (#57, 2 Aug 2026), derived from zig.ai: a warm off-white ground,
+   grey-green ink, one deep-green accent and three state tints. It replaces the stackai defaults
+   (white / grey / #0099ff blue) this file shipped with. It is still a NEUTRAL base rather than
+   the saulera Sunrise brand, so the README's "one deployment per agency, the tool sits inside
+   the agency's own client relationship" decision is untouched — this is a warmer neutral, not
+   saulera's colours.
+
+   Where a decided value and a contrast gate disagreed, the gate won (#58 AC2). That happened
+   exactly once, at --accent, and --accent-strong below is the result.
+
+   The --font-* families now have real .woff2 files behind them (fonts.css, on disk since #8).
+   test/tokens.test.js measures every pairing here and fails the suite under the floor,
+   including for an agency that swaps a colour. */
 
 :root {
-  /* colour */
-  --background:   #ffffff;
-  --surface:      #f5f5f5;
-  --text-primary: #1d1d1d;
-  /* Darkened from stackai's #8c8c8c for a contrast MUST, not a preference (#5). #8c8c8c on
-     --surface measures 3.08:1 and row meta and the note scaffold both sit on --surface, so it
-     failed the 4.5:1 body-text floor. #6b6b6b is 4.89:1 on --surface and 5.33:1 on
-     --background. This is engine-side, so #8 inherits the fix. */
-  --text-muted:   #6b6b6b;
-  --accent:       #0099ff;
-  --border:       #595959;
+  /* colour. Ratios below are quoted against the three grounds text renders on, in the order
+     --background / --surface / --surface-signature, which is the order test/tokens.test.js
+     checks them in. */
+  --background:   #fdfafa;
+  --surface:      #f4efee;   /* one warm step down from the ground: 1.10:1, a tone not an edge */
+  --text-primary: #2e3332;   /* 12.37 / 11.27 / 11.59 */
+  /* Kept at the 4.5:1 body-text floor through the repalette, for the same reason it was darkened
+     from stackai's #8c8c8c in #5: row meta and the note scaffold both sit on --surface, so this
+     is body text and not a decorative grey. The warm-neutral equivalent measures 5.65 / 5.15 /
+     5.29 — comfortably clear, and it must stay that way through any agency swap.
+     NOT usable on --tint-info: 3.75:1 there. See the tints below. */
+  --text-muted:   #5c6764;
+  /* The owner's decided accent, and DECORATIVE ONLY. Its uses are the focus ring, the link and
+     aria-current underlines, .client-row's marker bar and the dragover edge — every one a
+     non-text use at the 3:1 floor, which it clears at 3.88 / 3.53 / 3.63. It cannot carry a
+     label: 4.03:1 with white and 3.19:1 with the ink, both under the 4.5:1 body-text floor.
+     That is what --accent-strong is for. It is also 2.57:1 on --tint-info, which is why
+     :focus-visible keeps a --text-primary hairline inside the ring (app.css) rather than
+     trusting the accent alone. */
+  --accent:       #08906c;
+  /* The accent darkened until a white label clears the body-text floor: 5.04:1. This exists
+     because #58 AC2 says the gates win over a raw reference value, and .btn-primary puts a label
+     directly on its fill. It is the minimum darkening that satisfies the floor, so the decided
+     hue survives at every one of the six sites where it is legal. One consumer: .btn-primary. */
+  --accent-strong: #087e60;
+  /* The label colour on --accent-strong. A token rather than a literal so app.css needs no raw
+     hex — which test/chrome.test.js now enforces. */
+  --on-accent:    #ffffff;
+  --border:       #78827f;   /* 3.82 / 3.48 / 3.58 — the 3:1 non-text floor, held */
   /* Decorative only: card edges, the top bar's rule, dividers whose grouping the surface
      change already carries. Never the sole boundary of a meaningful control — inputs and
      textareas keep --border, which is what holds the 3:1 non-text floor. That is why this
-     token is deliberately NOT in test/tokens.test.js's PAIRINGS. */
-  --border-hairline: #e3e3e3;
+     token is deliberately NOT in test/tokens.test.js's PAIRINGS. 1.25:1 on --background. */
+  --border-hairline: #e7e1e0;
   /* Its width, tokenised so component files can draw a hairline without a raw px. */
   --hairline: 1px;
-  --danger:       #78350f;
+  --danger:       #78350f;   /* unchanged: 8.74 / 7.96 / 8.19 on the new grounds */
 
-  /* The signature surface: one card per candidate page renders on this accent-tinted
-     ground. Measured 31 Jul 2026: --text-primary 15.25:1, --text-muted 4.82:1, and all
-     three provenance colours ≥5.7:1 on it, so every existing text token holds its floor
-     unchanged. The border is decorative, same licence as --border-hairline. */
-  --surface-signature: #eaf5ff;
-  --border-signature:  #cbe2f3;
+  /* The signature surface: one card per candidate page renders on this accent-tinted ground.
+     Retinted blue → mint in #58 so the portal does not ship a blue card on a green page in the
+     window before #62 restyles it. Every text token holds its floor on it unchanged — the third
+     column of every ratio in this file is this surface, and test/tokens.test.js now checks it
+     rather than trusting this comment. The border is decorative, same licence as
+     --border-hairline: 1.18:1 on its own ground. prep.css:69-74 is the consumer, and #60 may
+     replace the pair wholesale with the Canopy chip pattern. */
+  --surface-signature: #eaf6f1;
+  --border-signature:  #cfe7dd;
+
+  /* The three state tints, named for their ROLE and not their colour (mint / powder / blush),
+     because that is what keeps an agency's branding a value swap. These are BACKGROUNDS: #60
+     builds the claim chips on them. A chip carries --text-primary or its own mark colour, never
+     --text-muted, which is 3.75:1 on --tint-info and under the floor.
+       --tint-verified  ink 10.05, --verified 6.24
+       --tint-info      ink 8.21   (--border is 2.53:1 on it: a chip here needs a darker edge, or
+                                    a border that is genuinely decorative because the chip also
+                                    carries a word — this product's existing pattern)
+       --tint-warn      ink 11.34, --unverified 5.59, --failed 7.08, --danger 8.01
+     --tint-info has NO consumer yet. It is defined here because #58 owns the token layer and the
+     set is decided as three; the first consumer is #60. That is a deliberate hand-off, not dead
+     weight. test/tokens.test.js's TINTS table measures all three. */
+  --tint-verified: #c4ece1;
+  --tint-info:     #b0d4e8;
+  --tint-warn:     #fbeeec;
 
   /* stackai's soft layered card shadow, one token so every card lifts identically. Alpha hex
      is fine here: the contrast gate reads single whole-value hex tokens only, and a shadow is
-     not a colour pairing. */
-  --shadow-card: 0 1px 1px #0000000a, 0 4px 6px #1d1d1d05, 0 20px 60px #1d1d1d0a,
+     not a colour pairing. The two tinted layers carry the ink's own hue, so they moved with it
+     from #1d1d1d to #2e3332 — nothing measures this, so it is a manual correspondence. */
+  --shadow-card: 0 1px 1px #0000000a, 0 4px 6px #2e333205, 0 20px 60px #2e33320a,
                  0 2px 4px #0000000a;
 
-  /* type — font files deferred, reason in the header; tokens exist now so it is a one-file change */
-  --font-ui:   "Aspekta 500", system-ui, -apple-system, sans-serif;
+  /* type. One sans, one mono (#58): Geist carries the whole UI. Both names
+     stay pointing at the same stack rather than collapsing into one --font-sans, because they
+     have 14 + 3 call sites across app.css and prep.css and prep.css belongs to #62 — a rename
+     is a cross-ticket edit for no functional gain. Deliberate, not an oversight.
+     Geist ships 400 and 600 only. Nothing may ask for 500: CSS font-matching resolves a request
+     between 400 and 500 DOWNWARD, so a 500 heading would silently render at regular weight. */
+  --font-ui:   "Geist", system-ui, -apple-system, sans-serif;
   --font-body: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
 
@@ -64,16 +112,19 @@
   /* provenance status. Whether a claim is sourced is this product's core distinction, so these
      are text colours and are held to the 4.5:1 body-text floor rather than to the 3:1 a
      decorative state colour could take — the mark carries the WORD ("Unverified"), and a word
-     is text. Measured on --background / --surface, the two surfaces they render on:
-       --verified   7.13:1 / 6.54:1
-       --unverified 6.33:1 / 5.81:1
-       --failed     8.02:1 / 7.35:1
+     is text. Measured on --background / --surface / --surface-signature:
+       --verified   7.68:1 / 7.00:1 / 7.20:1
+       --unverified 6.10:1 / 5.55:1 / 5.71:1
+       --failed     7.72:1 / 7.03:1 / 7.23:1
      They replace aliases of --success (#22c55e, 2.28:1) and --warning (#c68a0b, 2.98:1), which
      both failed the floor. Those two tokens are gone rather than left orphaned: nothing else
      referenced them. test/tokens.test.js is the gate that keeps these numbers true.
      --failed is its own red rather than var(--danger) so it separates from --unverified at
-     12px; --danger stays the state-line error colour. */
-  --verified:   #166534;
+     12px; --danger stays the state-line error colour.
+     --verified moved from #166534 to #0b5c46 in #58, and that one is NOT gate-forced: the old
+     value cleared every floor (6.87 / 6.26). It moved so the "sourced" green sits inside the
+     accent's hue family rather than beside it — a hue-harmony judgment, cheap to revert. */
+  --verified:   #0b5c46;
   --unverified: #8a5300;
   --failed:     #9f1239;
 
@@ -95,9 +146,10 @@
   --duration-1: 150ms;   /* press and hover response */
   --duration-2: 200ms;   /* the one authored moment: the saved-state line arriving */
 
-  /* Focus. Two concentric lines rather than one: --accent is 2.75:1 against --surface, which
-     misses the 3:1 a non-text indicator needs, so a --text-primary hairline sits inside the
-     accent ring and guarantees the indicator is visible on any surface in this palette. */
+  /* Focus. Two concentric lines rather than one. --accent clears the 3:1 non-text floor on all
+     three grounds (3.53:1 at worst), but it is 2.57:1 on --tint-info and #60 puts focusable
+     controls on the tints, so a --text-primary hairline sits inside the accent ring and
+     guarantees the indicator is visible on any surface in this palette. */
   --focus-width:  2px;
   --focus-inner:  1px;
 }

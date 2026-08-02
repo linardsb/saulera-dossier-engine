@@ -3,23 +3,19 @@
    origin: this page accepts CVs, and a third-party font host in the waterfall is a thing to
    have to explain to a trust.
 
-   Sources and licences, checked 28 Jul 2026: Aspekta (Ivo Dolenc, MIT) from the stackai design
-   reference; Geist (Vercel) and DM Mono (Colophon) under the SIL Open Font License from Google
-   Fonts' hosted woff2. The Geist files are the latin subset — pasted text outside latin falls
-   back to system-ui, which is the stack's next entry and costs nothing.
+   Sources and licences, checked 28 Jul 2026 and unchanged 2 Aug 2026: Geist (Vercel) and DM Mono
+   (Colophon), both under the SIL Open Font License, from Google Fonts' hosted woff2. The Geist
+   files are the latin subset — pasted text outside latin falls back to system-ui, which is the
+   stack's next entry and costs nothing.
 
-   Aspekta ships as its single 500 face on purpose (that is the stackai register: family carries
-   the weight). app.css sets headings to 500 so nothing asks the browser to synthesise a bold
-   that does not exist. Geist carries a real 600 for the two places body text uses weight as a
-   signal: a claim's requirement and the selected client's name. */
+   One sans and one mono since #58 — the third family the stackai reference brought with it is
+   deleted, and Geist carries the whole UI. (README, Decisions, has the why.)
 
-@font-face {
-  font-family: "Aspekta 500";
-  src: url("/fonts/Aspekta500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
+   Geist ships 400 and 600 — and NOTHING may ask for 500. Under the CSS font-matching algorithm a
+   desired weight between 400 and 500 checks weights below the target first, so a 500 heading
+   resolves DOWN to 400 and renders at regular weight rather than up to the 600 that is sitting
+   right there. That is why app.css sets headings to 600 and why a 500 anywhere in this
+   deployment is a silent bug rather than a rounding choice. */
 
 @font-face {
   font-family: "Geist";

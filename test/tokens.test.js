@@ -68,9 +68,12 @@ function token(name) {
   return value;
 }
 
-// The two surfaces anything on this deployment renders on. Every pairing below is checked
-// against BOTH, because which one a component sits on is a layout decision that moves.
-const SURFACES = ["background", "surface"];
+// The three surfaces anything on this deployment renders on. Every pairing below is checked
+// against ALL THREE, because which one a component sits on is a layout decision that moves.
+// --surface-signature joined the list in #58: it is the mint-tinted ground under the portal's
+// first block (prep.css:69-74), so text renders on it as much as on the other two, and it was
+// previously asserted only by a comment in tokens.css.
+const SURFACES = ["background", "surface", "surface-signature"];
 
 // [token, floor, why]. The floor is 4.5 wherever the token colours TEXT, which is every
 // provenance mark: the mark carries the word "Unverified", and a word is text. --border takes
@@ -83,6 +86,7 @@ const PAIRINGS = [
   ["failed", 4.5, "the mark reads 'Quote not found'"],
   ["danger", 4.5, "the state line's error text"],
   ["border", 3.0, "a border that encodes grouping"],
+  ["accent", 3.0, "a focus ring, an underline and a marker bar — never text"],
 ];
 
 for (const [name, floor, why] of PAIRINGS) {
@@ -99,13 +103,46 @@ for (const [name, floor, why] of PAIRINGS) {
   }
 }
 
-test("--text-primary on --accent clears 4.5:1, which is .btn-primary's label", () => {
-  // app.css:100-105 puts --text-primary on --accent for exactly this reason: white on --accent
-  // measures 3.00:1. If an agency swaps --accent, this is the assertion that catches it.
-  const measured = contrast(token("text-primary"), token("accent"));
+// The three tints are BACKGROUNDS a chip renders on, and they are deliberately NOT in SURFACES.
+// Putting them there would check every token against every tint and fail immediately on two
+// pairings that never render: --text-muted is 3.75:1 on --tint-info and --border is 2.53:1 on it.
+// This table asserts what actually goes on a tint instead. The constraint #60 inherits when it
+// builds the chips: a chip on the powder tint carries --text-primary (8.21:1) or its own mark
+// colour, never --text-muted. Muted is fine on mint (4.59:1) and blush (5.18:1), but the rule is
+// simpler than the exceptions. No assertion here says muted FAILS — an agency darkening it must
+// not break this suite.
+const TINTS = [
+  ["tint-verified", ["text-primary", "verified"]],
+  ["tint-info", ["text-primary"]],
+  ["tint-warn", ["text-primary", "unverified", "failed", "danger"]],
+];
+
+for (const [tint, marks] of TINTS) {
+  for (const name of marks) {
+    test(`--${name} on --${tint} clears 4.5:1 (a chip's word on its own ground)`, () => {
+      const measured = contrast(token(name), token(tint));
+      assert.ok(
+        measured >= 4.5,
+        `--${name} (${token(name)}) on --${tint} (${token(tint)}) measures ` +
+          `${measured.toFixed(2)}:1, under the 4.5:1 floor. A chip carries a WORD, so its colour ` +
+          `is text: darken the mark or lighten the tint rather than lowering this number.`,
+      );
+    });
+  }
+}
+
+test("--on-accent on --accent-strong clears 4.5:1, which is .btn-primary's label", () => {
+  // The PAIR changed in #58, and why it changed is the whole argument for --accent-strong. This
+  // asserted --text-primary on --accent back when --accent was stackai's #0099ff. The owner's
+  // decided accent #08906c measures 4.03:1 with white and 3.19:1 with the ink — both under the
+  // body-text floor — and .btn-primary puts a label directly on the fill. #58's AC2 says the
+  // gates win over a raw reference value, so the fill became the accent DARKENED
+  // (--accent-strong, 5.04:1 with white) and the label became --on-accent. The floor did not
+  // move; the token did. If an agency swaps either, this is the assertion that catches it.
+  const measured = contrast(token("on-accent"), token("accent-strong"));
   assert.ok(
     measured >= 4.5,
-    `--text-primary on --accent measures ${measured.toFixed(2)}:1. A button label is body text.`,
+    `--on-accent on --accent-strong measures ${measured.toFixed(2)}:1. A button label is body text.`,
   );
 });
 
@@ -143,5 +180,14 @@ test("the palette is measurable: every colour token this gate reads is opaque he
   }
   for (const surface of SURFACES) {
     assert.ok(TOKENS.has(surface), `--${surface} is not in a form this gate can measure`);
+  }
+  for (const [tint, marks] of TINTS) {
+    assert.ok(TOKENS.has(tint), `--${tint} is not in a form this gate can measure`);
+    for (const name of marks) {
+      assert.ok(TOKENS.has(name), `--${name} is not in a form this gate can measure`);
+    }
+  }
+  for (const name of ["accent-strong", "on-accent"]) {
+    assert.ok(TOKENS.has(name), `--${name} is not in a form this gate can measure`);
   }
 });
