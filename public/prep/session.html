@@ -36,7 +36,7 @@
   <section id="act-prime" class="session-act" aria-labelledby="prime-head" hidden>
     <h2 id="prime-head" class="block-head">Before you start</h2>
     <div id="prime-blocks"></div>
-    <p><button type="button" class="btn" id="start">Start practising</button></p>
+    <p><button type="button" class="btn btn-primary btn-block" id="start">Start practising</button></p>
   </section>
 
   <!-- Act 2: the drill. The log is a live region so an answer's feedback is announced when it
@@ -50,15 +50,21 @@
 
     <form id="answer-form" class="answer-form">
       <label class="prep-label" for="answer">Your answer</label>
-      <textarea id="answer" rows="6"></textarea>
+      <!-- The textarea class is load-bearing, not decorative: app.css:248 sizes this box at
+           --text-note (16px), and iOS Safari zooms the whole viewport when a focused control
+           computes under 16px. Without it the box rendered at the user agent's default —
+           monospace, UA border, ~13px — and the page jumped under a candidate's thumb on the one
+           surface they type into for ten minutes. Invisible on every desktop browser, which is
+           why test/prep-content.test.js gates it. -->
+      <textarea class="textarea" id="answer" rows="6"></textarea>
       <!-- The fidelity caveat lives in the markup, so it appears exactly once and no script
            decides when. -->
       <p class="prep-caption">Say your answer out loud first if you can. An interview is spoken,
         and typing is useful practice of a slightly different skill.</p>
-      <p><button type="submit" class="btn" id="send">Send answer</button></p>
+      <p><button type="submit" class="btn btn-primary btn-block" id="send">Send answer</button></p>
     </form>
 
-    <p><button type="button" class="btn" id="close-drill" hidden>Wrap up for now</button></p>
+    <p><button type="button" class="btn btn-block" id="close-drill" hidden>Wrap up for now</button></p>
   </section>
 
   <!-- Act 3: close. Composed by session.js from this session's own turns; the two static lines
@@ -68,7 +74,7 @@
     <div id="close-body"></div>
     <p class="prep-caption">Leave whenever you need to. This page brings you back to where you
       stopped.</p>
-    <p><a class="btn" href="/prep/brief">Back to your prep</a></p>
+    <p><a class="btn btn-block" href="/prep/brief">Back to your prep</a></p>
   </section>
 
 </main>
