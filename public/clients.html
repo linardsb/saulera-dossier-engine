@@ -89,35 +89,47 @@
           <span class="save-state" id="save-state" role="status"></span>
         </div>
 
-        <!-- Below Save because it describes the SAVED note, and above the delete block so the
-             two most opposite actions on the screen stay non-adjacent. The list itself is built
-             in clients.js from what the API returns; the legend and the hint render before any
-             of that, so the rule is on screen even while the list is loading. -->
-        <!-- aria-describedby, because in a screen reader's forms mode only the legend is
-             announced beside each checkbox and a loose <p> is never reached. The one sentence
-             that says nothing is shared by default is the sentence that most needs to be heard
-             next to the control it governs, not just seen by whoever is reading down the page. -->
-        <fieldset class="visibility" id="visibility" aria-describedby="visibility-hint">
-          <legend class="field">What a candidate can see</legend>
-          <p class="field-hint" id="visibility-hint">Nothing in this note reaches a candidate
-            unless you tick it here. Tick only what would help someone get ready for the
-            interview, and never anything you would not say to their face.</p>
-          <p class="visibility-empty" id="visibility-empty" hidden></p>
-          <ul class="visibility-list" id="visibility-list"></ul>
-          <p class="save-state" id="visibility-state" role="status"></p>
-        </fieldset>
+        <!-- Both fieldsets below describe the SAVED note: what a candidate may see of it, and
+             whether it records the five locum facts. One zone with one hairline above the pair
+             is the grouping whitespace alone cannot encode, which is the licence CRAFT.md gives
+             a rule. A plain <div> with no ARIA — two fieldsets inside it keep their own groups,
+             and a role here would only add a layer a screen reader has to walk past. -->
+        <div class="note-facts">
 
-        <!-- The locum checklist (#48). Same discipline as the visibility block: it describes
-             the SAVED note, so it sits below Save; the list is built in clients.js from the
-             API's locum_fields readout. Shown for every client — role shape is a property of
-             a brief, not a client, so the title is what lets a perm-desk reader skip it. -->
-        <fieldset class="visibility locum" id="locum" aria-describedby="locum-hint">
-          <legend class="field">For locum supply</legend>
-          <p class="field-hint" id="locum-hint">Bookings move faster when the note records these.
-            Add a missing one and write what you know, then save.</p>
-          <ul class="visibility-list" id="locum-list"></ul>
-          <p class="save-state" id="locum-state" role="status"></p>
-        </fieldset>
+          <!-- Below Save because it describes the SAVED note, and above the delete block so the
+               two most opposite actions on the screen stay non-adjacent. The list itself is built
+               in clients.js from what the API returns; the legend and the hint render before any
+               of that, so the rule is on screen even while the list is loading. -->
+          <!-- aria-describedby, because in a screen reader's forms mode only the legend is
+               announced beside each checkbox and a loose <p> is never reached. The one sentence
+               that says nothing is shared by default is the sentence that most needs to be heard
+               next to the control it governs, not just seen by whoever is reading down the page. -->
+          <fieldset class="visibility" id="visibility" aria-describedby="visibility-hint">
+            <!-- zone-head, not field: this names a zone of the page, and .field is the grammar of
+                 a label sitting above one control. Rendering both through .field is what made a
+                 new zone look like another field. -->
+            <legend class="zone-head">What a candidate can see</legend>
+            <p class="field-hint" id="visibility-hint">Nothing in this note reaches a candidate
+              unless you tick it here. Tick only what would help someone get ready for the
+              interview, and never anything you would not say to their face.</p>
+            <p class="visibility-empty" id="visibility-empty" hidden></p>
+            <ul class="visibility-list" id="visibility-list"></ul>
+            <p class="save-state" id="visibility-state" role="status"></p>
+          </fieldset>
+
+          <!-- The locum checklist (#48). Same discipline as the visibility block: it describes
+               the SAVED note, so it sits below Save; the list is built in clients.js from the
+               API's locum_fields readout. Shown for every client — role shape is a property of
+               a brief, not a client, so the title is what lets a perm-desk reader skip it. -->
+          <fieldset class="visibility locum" id="locum" aria-describedby="locum-hint">
+            <legend class="zone-head">For locum supply</legend>
+            <p class="field-hint" id="locum-hint">Bookings move faster when the note records these.
+              Add a missing one and write what you know, then save.</p>
+            <ul class="visibility-list" id="locum-list"></ul>
+            <p class="save-state" id="locum-state" role="status"></p>
+          </fieldset>
+
+        </div>
 
         <!-- Removal, away from Save on purpose: the two most opposite actions on the screen
              should not be neighbours. The confirm in clients.js names the client and what

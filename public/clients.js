@@ -528,18 +528,22 @@
       // textContent, never innerHTML — same rule as every other rendered string here.
       name.textContent = field.heading;
 
+      // The status is the row's right-hand column and the hint is the row under both, so they
+      // are appended in that order — a grid places items in source order, and this is the order
+      // the row reads. `locum-detail` marks the hint so the CSS can tell the two metas apart;
+      // not `locum-hint`, which is already the fieldset's aria-describedby paragraph.
+      var status = document.createElement("span");
+      status.className = "visibility-meta";
+      status.textContent = field.present ? COPY.locumPresent : COPY.locumMissing;
+
       var meta = document.createElement("span");
-      meta.className = "visibility-meta";
+      meta.className = "visibility-meta locum-detail";
       meta.textContent = field.hint;
 
       var item = document.createElement("li");
       item.appendChild(name);
-      item.appendChild(meta);
-
-      var status = document.createElement("span");
-      status.className = "visibility-meta";
-      status.textContent = field.present ? COPY.locumPresent : COPY.locumMissing;
       item.appendChild(status);
+      item.appendChild(meta);
 
       if (!field.present) {
         var button = document.createElement("button");
