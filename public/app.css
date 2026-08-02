@@ -32,11 +32,21 @@ main {
    the CSS font-matching algorithm resolves a desired weight between 400 and 500 DOWNWARD — so a
    500 heading would render at regular weight rather than snapping up to the 600 sitting right
    there. This read 500 while a single-500-face family carried the UI; that family is gone, and
-   600 is now the file's one bold, shared with .claim-requirement and .client-name. */
+   600 is now the file's one bold, shared with .claim-requirement and .client-name.
+
+   The page title takes the ramp's top step from #59 (--text-display, 35px; it was --text-h2's
+   24px, four points above a subheading, which is not a ramp). This is SHARED CHROME and the
+   blast radius is deliberate: `h1` is a bare element selector, so /, /clients, /counts and
+   404.html all take it — epic AC1's "one token set drives both surfaces" working as intended.
+   The portal's two role-title pages are unaffected, because prep.css already overrides
+   `.brief .page-head h1` / `.session .page-head h1` to --text-h1. The letter-spacing is the
+   optical tracking correction display sizes need, the same value and the same reason as
+   prep.css's own top-step heading. The phone step-down is in the mobile-density block. */
 h1 {
   font-family: var(--font-ui);
-  font-size: var(--text-h2);
+  font-size: var(--text-display);
   font-weight: 600;
+  letter-spacing: -0.02em;
   line-height: 1.2;
   margin: 0 0 var(--space-4);
   text-wrap: balance;
@@ -269,26 +279,59 @@ a {
 
 /* ── layout ────────────────────────────────────────────────────────────────────────────── */
 
-.page-head { margin-bottom: var(--space-12); }
+/* --space-16 rather than --space-12 from #59: the head and the work are two zones, and the gap
+   between them has to be visibly larger than the gaps inside either. 48px was doing both jobs at
+   once. The phone counterpart is in the mobile-density block, unchanged at --space-8. */
+.page-head { margin-bottom: var(--space-16); }
 .page-sub  { color: var(--text-muted); margin: 0; }
 
-/* The journey map: the three act chips, shown before the acts exist. Reads as a row on a
-   desktop and stacks on a phone. */
+/* The journey map: the four act chips, shown before the acts exist. Its one job is the whole
+   journey visible before any of it happens (index.html:39-43), and as a wrapping inline row it
+   had stopped doing that — four full sentences with `flex-wrap: wrap` broke into two ragged
+   lines at 1024px and the numerals stopped being scannable, which is the only thing a map is
+   for. Four equal 1fr tracks with the numeral over its label is the same information as a band
+   you read across, and equal tracks are what keep the numbers on one line regardless of how
+   long any single label runs.
+
+   On a phone it is four rows, numeral beside label, because vertical space is the scarce thing
+   there — the mobile-density argument at the foot of this file. That shape is the BASE here and
+   the band is the override, so the map needs no entry in the max-width: 859px block. */
 .steps {
   list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-6);
-  margin: var(--space-4) 0 0;
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-6) 0 0;
   padding: 0;
   font-size: var(--text-body);
   color: var(--text-muted);
 }
 
 .steps li {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The label is wrapped in its own span rather than left as a bare text node beside the chip.
+   A bare text node in a flex container becomes an ANONYMOUS flex item: it lays out, but it
+   cannot be selected, so it can carry no min-width: 0 and no later rule can reach it. A 1fr
+   grid track whose child holds a full sentence and cannot be styled is a blowout waiting for
+   the first long label. The span costs one element and makes the item addressable. */
+.step-label { min-width: 0; }
+
+@media (min-width: 860px) {
+  .steps {
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-6);
+  }
+  /* The numeral moves above its label, and align-items: start is what holds every numeral on
+     one line across the band while the labels below them wrap to different depths. */
+  .steps li {
+    flex-direction: column;
+    align-items: start;
+    gap: var(--space-2);
+  }
 }
 
 .workspace {
@@ -297,9 +340,13 @@ a {
   margin-bottom: var(--space-12);
 }
 
+/* The base gap stays --space-8: on a phone the rail sits ABOVE the work rather than beside it,
+   and 32px already reads as a zone break in that direction. The 48px gutter below is what makes
+   the two columns read as chrome-and-work rather than as two columns of a table. */
 @media (min-width: 860px) {
   .workspace {
     grid-template-columns: 280px 1fr;
+    gap: var(--space-12);
     align-items: start;
   }
 }
@@ -692,49 +739,90 @@ a {
 
 .rail-hint { font-size: var(--text-body); color: var(--text-muted); margin: 0; }
 
-/* Rhythm BETWEEN the acts is --space-12 and within them --space-4, so the pacing of the flow is
-   whitespace rather than dividers. There is not one rule between these three sections. */
-.act + .act { margin-top: var(--space-12); }
+/* Rhythm BETWEEN the acts is --space-16 and within them --space-4 to --space-6, so the pacing of
+   the flow is whitespace rather than dividers. THERE IS STILL NOT ONE RULE BETWEEN THESE
+   SECTIONS, and that claim survives #59 deliberately: "numbered sections" is exactly the phrase
+   that invites a hairline above each act, and at 64px the whitespace already does the job the
+   epic asked for. The phone counterpart steps back to --space-12 in the mobile-density block —
+   64px there is most of a viewport of nothing. */
+.act + .act { margin-top: var(--space-16); }
 
-/* The one authored moment: an act arriving. Opacity only, and gated behind a class the
-   transition adds rather than sitting on the element, because CHECKLIST forbids an entrance on
-   anything rebuilt per render and this file cannot tell the two cases apart on its own. */
+/* The one authored moment: an act arriving. Opacity AND an 8px rise from #59 — both compositor
+   properties, and the rise is what makes an act read as arriving rather than as appearing.
+   Gated behind a class the transition adds rather than sitting on the element, because
+   CHECKLIST forbids an entrance on anything rebuilt per render and this file cannot tell the
+   two cases apart on its own.
+
+   The transform makes .act a containing block for position: fixed and position: absolute
+   descendants, for the ~200ms the class is on. Inert today — this file declares no `position`
+   anywhere — but it is the rule that would explain the surprise if #60 adds an absolutely
+   positioned chip inside act 3.
+
+   setPhase calls scrollIntoView synchronously right after showAct, so at that instant the
+   arriving act is 8px low and the scroll target is 8px off. It settles as the transition runs.
+   Known and accepted; do not paper over it with a setTimeout. */
 .act {
   opacity: 1;
 }
 
-.act.is-entering { opacity: 0; }
+.act.is-entering { opacity: 0; transform: translateY(var(--space-2)); }
 
-/* Same treatment as .rail-head, deliberately: the act numbering and the rail label are one
-   grammar, not two. */
+/* The act heads and .rail-head were one grammar (#8) — both small, tracked, uppercase and muted.
+   #59 SPLITS them, on purpose, because they are not the same kind of thing. The rail is chrome:
+   a label over a list the recruiter picks from once. The acts are the work, and the epic's
+   decided direction is numbered sections in big type. A section heading set quieter than the
+   hint text under a file picker is not a hierarchy. So .rail-head keeps the small tracked label
+   treatment — it is still a label — and .act-head takes the ramp's --text-h3 in sentence case
+   with the numeral beside it. That pair is what carries "numbered sections"; nothing else in
+   this file has to change for it to read.
+
+   The type declarations restate what the base h2 rule already sets at identical values. They are
+   here for the same reason .rail-head restates its own: a head class should say what it is
+   without the reader having to hold the element it happens to be written on. */
 .act-head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   font-family: var(--font-ui);
-  font-size: var(--text-caption);
+  font-size: var(--text-h3);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin: 0 0 var(--space-4);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-6);
 }
 
-/* The step number as a chip, so the three-act shape is visible at a glance rather than read
+/* The step number as a chip, so the four-act shape is visible at a glance rather than read
    out of running text. aria-hidden in the markup: the heading names the act; the number is
-   the visual rhythm. */
+   the visual rhythm.
+
+   ONE class in TWO places — the steps map (index.html:45-48) and the four act headings — and
+   that is deliberate: "same chip grammar as the acts, so the map and the flow read as one
+   thing" (index.html:41-42). Size its CONTEXT, never the chip.
+
+   24px, up from 20px in #59: a 20px chip beside a 20px heading reads as a bullet, and 24px
+   reads as a numeral. The 12px mono stays — 12px centred in a 24px box is comfortable and 14px
+   is not. --radius on a 24px box is a squircle rather than a pill, which is the child-under-
+   parent concentric case and the reason not to reach for border-radius: 50%.
+
+   The letter-spacing: 0 that sat here is GONE: it existed only to cancel the 0.08em .act-head
+   used to impose, and .act-head no longer tracks anything. It was a dead declaration whose
+   comment had stopped being true. */
 .act-num {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-5);
-  height: var(--space-5);
+  width: var(--space-6);
+  height: var(--space-6);
+  /* A flex item's default flex-shrink: 1 lets a fixed width be squashed by a long sibling on
+     the main axis, and the chip is now a flex item in two containers — .act-head, and .steps li
+     which is a row on a phone. At 360px, "Send the candidate their prep once the interview is
+     booked" beside this chip is exactly that case. Same line and same reason as .strike-box and
+     the visibility list's checkbox. */
+  flex-shrink: 0;
   background: var(--surface);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius);
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  letter-spacing: 0;
   color: var(--text-primary);
 }
 
@@ -766,9 +854,14 @@ a {
 
 /* ── act 1: the inputs ─────────────────────────────────────────────────────────────────── */
 
+/* The bottom margin puts the two-route button row in its own zone rather than crowding the
+   boxes. EXPECT 32px BETWEEN THEM, NOT 48px, and do not "fix" it: .act is a plain block box, so
+   this 32px and .act-row's 16px top margin are adjacent sibling margins and COLLAPSE to
+   max(32, 16). The gap doubles from today's 16px, which is the intent; it does not sum. */
 .input-pair {
   display: grid;
   gap: var(--space-6);
+  margin-bottom: var(--space-8);
 }
 
 @media (min-width: 860px) {
@@ -777,6 +870,18 @@ a {
 
 /* Both columns hold pasted prose with long unbreakable lines. Same trap as .stage. */
 .input-col { min-width: 0; }
+
+/* The two boxes are the work of this screen, so their labels take the ramp step above the
+   chrome around them and the ink rather than the muted grey. Scoped to .input-pair rather than
+   applied to .field itself, deliberately: .field also labels act 2's reply box, act 4's two
+   fields and every control on /clients, where 14px muted is correct — those are form labels,
+   and these two name the material the pack is built from. .field is used 11 times across the
+   three screens, so editing it here would restyle a screen this ticket does not own. */
+.input-pair .field {
+  font-size: var(--text-h4);
+  color: var(--text-primary);
+  margin-bottom: var(--space-3);
+}
 
 .file-row { margin-top: var(--space-2); }
 
@@ -844,6 +949,20 @@ a {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* The clock in act 2's head row is the only thing on screen that changes for a minute or two,
+   and the recruiter is watching it from wherever they put the laptop down. It takes the same
+   ramp step as the heading beside it. Scoped to .act-head-row because .elapsed is ALSO
+   #send-elapsed in act 4's .act-row, where the send takes seconds and a 20px counter beside two
+   buttons would shout. .act-head-row aligns on baseline, so a 20px clock and a 20px heading now
+   share one — which is why the head row keeps `baseline` rather than switching to `center`. */
+.act-head-row .elapsed { font-size: var(--text-h3); }
+
+/* The one thing a recruiter actually reads while waiting, so it takes reading size rather than
+   chrome size — the same 16px the pack itself uses, for the same reason (CRAFT: prefer 16px for
+   prose a person reads). .act-note's 60ch measure holds: at 16px it grows in px but stays 60
+   characters, inside CRAFT's 65-75ch band, so there is no second max-width here. */
+#act-waiting .act-note.generating-only { font-size: var(--text-note); }
 
 /* ── act 3: the pack, the signature surface ────────────────────────────────────────────── */
 
@@ -986,8 +1105,10 @@ a {
 
 /* The preview is a second zone inside act 4, so the step between it and the two fields above
    is a whole rhythm step larger than the spacing within it — CRAFT's "rhythm between zones
-   must be visibly larger than spacing within them", using whitespace rather than a rule. */
-.send-preview { margin-top: var(--space-8); }
+   must be visibly larger than spacing within them", using whitespace rather than a rule.
+   --space-16 from #59: the argument was already this, and 32px stopped expressing it once
+   --space-16 existed and the acts themselves opened to it. Steps back on a phone. */
+.send-preview { margin-top: var(--space-16); }
 
 /* The competency rows ARE provenance rows, so they reuse .claim / .claim-head / .claim-text /
    .claim-source / .mark verbatim from act 3. That reuse is the point: the recruiter has just
@@ -1051,11 +1172,28 @@ a {
   min-width: 0;
 }
 
-/* The two inputs are act 4's only fields and sit in a narrow column: a date and an email
-   address are both short, and a full-width input over a 65ch measure reads as a mistake. */
-#interview-date,
-#candidate-email {
-  max-width: 32ch;
+/* The two inputs are act 4's only fields: a date and an email address are both short, and two
+   full-width inputs stacked over a 65ch measure read as a form nobody thought about. They are
+   one question — when, and to whom — so they sit as one row on a desktop and stack on a phone.
+   This REPLACES the max-width: 32ch the two ids carried: the column bounds them now, so the cap
+   is the grid's job rather than two id selectors'. The 60ch on the pair is what keeps that true
+   — without it the row stretches the full stage and a 500px-wide date picker is worse than the
+   stacked version it replaced. With it each column is ~30ch, near the 32ch the ids had, which
+   is why removing that cap is safe rather than merely relocating it.
+
+   Same shape as .input-pair / .input-col for act 1, applied to short fields, and the names say
+   so. Not a <fieldset>: act 4 already has one (#send-fields) with its own legend, and a second
+   one around two fields that are not a group of related choices adds a landmark for nothing. */
+.field-pair {
+  display: grid;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+.field-col { min-width: 0; }
+
+@media (min-width: 860px) {
+  .field-pair { grid-template-columns: 1fr 1fr; max-width: 60ch; }
 }
 
 /* ── the counts page ───────────────────────────────────────────────────────────────────── */
@@ -1143,6 +1281,17 @@ a {
   .client-row { margin-bottom: 0; }
   .topbar { margin-bottom: var(--space-6); }
   .page-head { margin-bottom: var(--space-8); }
+  /* 64px between zones is right on a desktop, where an act is about one screenful. On a phone
+     it is most of a viewport of nothing, and the argument above applies unchanged: every wasted
+     pixel pushes the work further off the first screen. --space-12 is the step that still reads
+     as a zone break at this width. */
+  .act + .act { margin-top: var(--space-12); }
+  .send-preview { margin-top: var(--space-12); }
+  /* The ramp's top step is a display size: 35px over a 360px viewport takes three lines for
+     "Client knowledge" and its subtitle before any work is visible. This is the shared element
+     selector again, so /clients, /counts and 404.html step down with it — correct and
+     consistent, and the first rule to look at if #61 reports a heading problem. */
+  h1 { font-size: var(--text-h1); }
 }
 
 /* ── motion, defined once ──────────────────────────────────────────────────────────────── */
@@ -1176,7 +1325,12 @@ a {
   .client-row { transition: background-color var(--duration-1) var(--ease-out); }
   .file-input::file-selector-button { transition: border-color var(--duration-1) var(--ease-out); }
 
-  /* The two authored moments, both opacity only, both at the slower step. */
+  /* The two authored moments, both at the slower step. The act's is opacity and transform —
+     the two properties named explicitly rather than `all`, which CRAFT forbids, matching the
+     three-property list .btn carries above. Both are compositor properties. */
   .save-state { transition: opacity var(--duration-2) var(--ease-out); }
-  .act { transition: opacity var(--duration-2) var(--ease-out); }
+  .act {
+    transition: opacity var(--duration-2) var(--ease-out),
+                transform var(--duration-2) var(--ease-out);
+  }
 }

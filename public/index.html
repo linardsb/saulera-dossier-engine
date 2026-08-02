@@ -42,10 +42,10 @@
          describes the primary route; the Claude-tab route is the fallback and introduces
          itself when chosen. -->
     <ol class="steps" aria-label="How this works">
-      <li><span class="act-num" aria-hidden="true">1</span>Pick a client and add the brief and the CV</li>
-      <li><span class="act-num" aria-hidden="true">2</span>Generate the pack and wait a minute or two</li>
-      <li><span class="act-num" aria-hidden="true">3</span>Copy the pack once every claim is checked</li>
-      <li><span class="act-num" aria-hidden="true">4</span>Send the candidate their prep once the interview is booked</li>
+      <li><span class="act-num" aria-hidden="true">1</span><span class="step-label">Pick a client and add the brief and the CV</span></li>
+      <li><span class="act-num" aria-hidden="true">2</span><span class="step-label">Generate the pack and wait a minute or two</span></li>
+      <li><span class="act-num" aria-hidden="true">3</span><span class="step-label">Copy the pack once every claim is checked</span></li>
+      <li><span class="act-num" aria-hidden="true">4</span><span class="step-label">Send the candidate their prep once the interview is booked</span></li>
     </ol>
   </div>
 
@@ -196,11 +196,19 @@
           built from the brief, their CV, and the parts of your client note you ticked as
           shareable. It never sends the pack, and never anything you did not tick.</p>
 
-        <label class="field" for="interview-date">When is the interview?</label>
-        <input class="input" type="date" id="interview-date" name="interview-date">
-
-        <label class="field" for="candidate-email">The candidate's email address</label>
-        <input class="input" type="email" id="candidate-email" name="candidate-email" autocomplete="off">
+        <!-- One question in two fields — when, and to whom — so they sit as one row rather than
+             as two full-width inputs stacked down the stage. DOM order is unchanged, so the tab
+             order is date → email → Send to candidate, exactly as before. -->
+        <div class="field-pair">
+          <div class="field-col">
+            <label class="field" for="interview-date">When is the interview?</label>
+            <input class="input" type="date" id="interview-date" name="interview-date">
+          </div>
+          <div class="field-col">
+            <label class="field" for="candidate-email">The candidate's email address</label>
+            <input class="input" type="email" id="candidate-email" name="candidate-email" autocomplete="off">
+          </div>
+        </div>
 
         <div class="act-row">
           <button class="btn btn-primary" type="button" id="prepare-send" aria-disabled="true">Send to candidate</button>
