@@ -7,7 +7,16 @@
 // a candidate's entire footprint, and a 30-day post-interview purge plus a delete-now endpoint
 // exercise that statement (architecture decision 13).
 //
-// Neither regime survives on prose, so this file is a lockfile: it parses the migrations and
+// #67 adds a THIRD regime, and the same way: spike #66's architecture doc
+// (docs/epics/locum-fit-2.architecture.md) decides that compliance state — what is missing,
+// what is about to expire — is durable candidate data with its own retention. It is caged
+// exactly as the portal's is, at a new root: every compliance table reaches `candidate`
+// through ON DELETE CASCADE, so one `DELETE FROM candidate` erases the cage, and a 12-month
+// dormancy purge plus delete-now exercise that statement. It is METADATA only — statuses,
+// reference numbers, expiry dates, never document bytes — and the engine's candidate-shaped
+// ban below is byte-for-byte the one #17 left, because the engine still writes none of this.
+//
+// No regime survives on prose, so this file is a lockfile: it parses the migrations and
 // locks every table's exact columns, the cascade chain, the `attempt.mode` honesty CHECK and
 // the closed `events.kind` vocabulary. Widening any of it is a schema change to make in the
 // open — change the assertion deliberately and say why in the PR.
@@ -126,7 +135,7 @@ test("every ALTER TABLE in the migrations is an ADD COLUMN this test could read"
   );
 });
 
-// ── the tables that exist, and the two regimes that govern them ────────────────────────
+// ── the tables that exist, and the three regimes that govern them ──────────────────────
 
 // note_visibility (#18) is an ENGINE table, not a portal one: a row is a client id and a
 // heading slug from the agency's own note, so it holds no candidate data and no note text and
@@ -137,13 +146,22 @@ test("every ALTER TABLE in the migrations is an ADD COLUMN this test could read"
 const ENGINE_TABLES = ["agency", "clients", "events", "note_visibility"];
 const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invite", "otp", "question"];
 
-test("the schema declares exactly the engine's four tables and the portal's seven", () => {
+// The third regime (#67, decided by spike #66): durable compliance METADATA, caged to a
+// `candidate` root with its own retention — a 12-month dormancy purge and delete-now, both
+// one `DELETE FROM candidate`. The name `candidate` is legal HERE and still banned in the
+// engine regime below, which is the whole point of naming the regimes separately: the engine
+// pipeline writes no candidate data anywhere, and this cage is the second place — after the
+// portal's — where a decision moved that line on purpose.
+const COMPLIANCE_TABLES = ["assignment", "candidate", "compliance_item"];
+
+test("the schema declares exactly the engine's four, the portal's seven and the compliance cage's three", () => {
   assert.deepEqual(
     [...byName.keys()].sort(),
-    [...ENGINE_TABLES, ...PORTAL_TABLES].sort(),
-    "a twelfth table means a boundary moved without a decision. The engine's four carry " +
+    [...ENGINE_TABLES, ...PORTAL_TABLES, ...COMPLIANCE_TABLES].sort(),
+    "a fifteenth table means a boundary moved without a decision. The engine's four carry " +
       "no candidate data (architecture §5.6); the portal's seven are candidate data inside " +
-      "decision 13's retention cage. A new table must pick a regime, in the open.",
+      "decision 13's retention cage; the compliance cage's three are durable candidate " +
+      "metadata inside spike #66's. A new table must pick a regime, in the open.",
   );
 });
 
@@ -203,10 +221,27 @@ const EXPECTED_COLUMNS = {
   // dies with it. Still no `code` column and no email — the invite the row hangs off owns
   // the identity, and this table owns only the guess count.
   otp: ["attempts", "code_hash", "expires_at", "id", "invite_id"],
+  // #67. The cage root: identity and contact, and nothing that describes a person's health,
+  // right to work or criminal record — those live one table down as a status word. created_at
+  // is load-bearing, not bookkeeping: it is the dormancy clock for a candidate who never
+  // gained an assignment.
+  candidate: ["created_at", "email", "full_name", "id", "phone"],
+  // #67. Dates and a booking state. It is the other half of the dormancy clock and all of
+  // #69's extension radar, which is why end_date is a real column and not a derived guess.
+  assignment: ["candidate_id", "client_id", "created_at", "end_date", "id", "start_date", "status"],
+  // #67, and metadata-only is exactly this lock. Spike #66's first decision was that no
+  // document byte rests on our infrastructure: a `document_url`, an `evidence_blob` or a
+  // `photo` column here is the descope this test exists to fail on, and it would put
+  // special-category data in a table whose entire claim is that it holds only a status word,
+  // a reference number and a date.
+  compliance_item: ["candidate_id", "checked_at", "expiry_date", "id", "item_key", "reference", "status"],
 };
 
 test("every table's columns are exactly the locked list", () => {
-  assert.deepEqual(Object.keys(EXPECTED_COLUMNS).sort(), [...ENGINE_TABLES, ...PORTAL_TABLES].sort());
+  assert.deepEqual(
+    Object.keys(EXPECTED_COLUMNS).sort(),
+    [...ENGINE_TABLES, ...PORTAL_TABLES, ...COMPLIANCE_TABLES].sort(),
+  );
   for (const [table, expected] of Object.entries(EXPECTED_COLUMNS)) {
     assert.deepEqual(
       [...(byName.get(table) ?? [])].sort(),
@@ -218,15 +253,21 @@ test("every table's columns are exactly the locked list", () => {
   }
 });
 
-// ── the retention cage: one DELETE FROM invite takes the whole scope ───────────────────
+// ── the retention cages: one DELETE takes a whole scope, in both of them ───────────────
 
-// Every foreign key a portal table declares, and the parent it must cascade from. The chain
-// bottoms out at invite, which itself cascades from clients — so deleting a client, purging
-// an expired invite and delete-now all erase whole scopes through the same mechanism.
+// Every foreign key a caged table declares, and the parent it must cascade from. The portal
+// chain bottoms out at invite, which itself cascades from clients — so deleting a client,
+// purging an expired invite and delete-now all erase whole scopes through the same mechanism.
 //
 // note_visibility is the one engine table here. It cascades from clients for the same reason
 // events does: deleting a client must take its permissions with it by the schema, not by a
 // second statement in deleteClient. It either works for both or is already broken.
+//
+// The compliance rows (#67) bottom out at `candidate` instead — a second root, the same
+// mechanism. `candidate` itself has no foreign key, exactly as `clients` has none: it is a
+// root, and a root that cascaded from something else would put the cage inside another
+// lifetime. assignment.client_id is the one edge that leaves the cage sideways: deleting a
+// client must take its bookings, and it does so by the schema.
 const CASCADE_CHAIN = {
   note_visibility: { client_id: "clients" },
   invite: { client_id: "clients" },
@@ -236,6 +277,8 @@ const CASCADE_CHAIN = {
   attempt: { competency_id: "competency", question_id: "question" },
   habit: { role_id: "candidate_role" },
   otp: { invite_id: "invite" },
+  assignment: { candidate_id: "candidate", client_id: "clients" },
+  compliance_item: { candidate_id: "candidate" },
 };
 
 test("every foreign key in the chain declares ON DELETE CASCADE toward its parent", () => {
@@ -246,8 +289,9 @@ test("every foreign key in the chain declares ON DELETE CASCADE toward its paren
         body,
         new RegExp(`${column}[^,]*REFERENCES\\s+${parent}\\s*\\(\\s*id\\s*\\)\\s+ON\\s+DELETE\\s+CASCADE`, "i"),
         `${table}.${column} must cascade from ${parent}. Decision 13's purge and delete-now ` +
-          `are one \`DELETE FROM invite\` statement each — a missing cascade leaves orphaned ` +
-          `candidate data behind the very mechanism that promises there is none.`,
+          `are one \`DELETE FROM invite\` statement each, and spike #66's are one ` +
+          `\`DELETE FROM candidate\` — a missing cascade leaves orphaned candidate data ` +
+          `behind the very mechanism that promises there is none.`,
       );
     }
   }
@@ -317,6 +361,76 @@ test("note_visibility holds exactly {client, field, timestamp} and nothing else"
       "section body — is exactly the descope this test exists to fail on, and it would put " +
       "personal data in a table whose entire claim is that it holds none.",
   );
+});
+
+// ── the compliance cage's own structural promises (#67) ────────────────────────────────
+
+test("compliance_item.status is CHECK-typed to the five checklist states", () => {
+  const body = bodyOf.get("compliance_item") ?? "";
+  assert.match(
+    body,
+    /status\s+TEXT\s+NOT\s+NULL\s+DEFAULT\s+'missing'\s+CHECK/i,
+    "the checklist vocabulary is closed, and it opens at 'missing': a candidate who has " +
+      "handed over nothing is the honest starting state, and the DDL default is the one " +
+      "place that decides it.",
+  );
+  for (const status of ["'missing'", "'submitted'", "'verified'", "'expiring'", "'expired'"]) {
+    assert.ok(
+      body.includes(status),
+      `compliance_item.status must admit ${status}: #70's expiry sweep writes 'expiring' ` +
+        `and 'expired', the recruiter writes 'verified', and a sixth state invented at ` +
+        `write time would make the dashboard's "7 of 12 complete" mean something new.`,
+    );
+  }
+});
+
+test("assignment.status is CHECK-typed to the four booking states", () => {
+  const body = bodyOf.get("assignment") ?? "";
+  assert.match(
+    body,
+    /status\s+TEXT\s+NOT\s+NULL\s+DEFAULT\s+'booked'\s+CHECK/i,
+    "a booking's state is a closed vocabulary like attempt.mode, not free text",
+  );
+  for (const status of ["'booked'", "'active'", "'ended'", "'cancelled'"]) {
+    assert.ok(
+      body.includes(status),
+      `assignment.status must admit ${status}. The dormancy purge deliberately ignores this ` +
+        `column and answers to end_date alone — a status and a date can disagree, and ` +
+        `retention must not be extendable by a bookkeeping error.`,
+    );
+  }
+});
+
+test("one checklist row per candidate per item — compliance_item (candidate_id, item_key) is UNIQUE", () => {
+  // `columns()` filters UNIQUE out as a table-level keyword, so this constraint is invisible
+  // to every exact-column lock above. It is not decoration: two rows for one candidate's HCPC
+  // registration would let the passport show 'verified' and 'expired' at once, and it is also
+  // what makes a second createCandidate for the same id throw instead of doubling the
+  // checklist.
+  assert.match(
+    bodyOf.get("compliance_item") ?? "",
+    /UNIQUE\s*\(\s*candidate_id\s*,\s*item_key\s*\)/i,
+    "compliance_item must be UNIQUE (candidate_id, item_key): one candidate, one row per item.",
+  );
+});
+
+test("the compliance cage stores no document bytes — metadata columns only", () => {
+  // Spike #66's first decision, in its structural form. Documents keep moving over the
+  // agency's existing channels; what rests here is a status word, a reference number and a
+  // date. A column named for a file — even a URL pointing at one — is the moment this
+  // product takes custody of health documents, and that is a DPIA and a paid milestone
+  // (the R2 vault), not a drive-by column.
+  const forbidden = /blob|bytes|image|photo|document|file|url|evidence/i;
+  for (const table of COMPLIANCE_TABLES) {
+    for (const col of byName.get(table) ?? []) {
+      assert.ok(
+        !forbidden.test(col),
+        `${table}.${col} looks like document custody. The compliance epic is metadata-only ` +
+          `(architecture "Storage: metadata-only") — bytes need their own spike, their own ` +
+          `retention and a commercial agreement first.`,
+      );
+    }
+  }
 });
 
 // ── the two things the product needs to be there ───────────────────────────────────────
