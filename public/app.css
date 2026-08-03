@@ -146,10 +146,15 @@ a {
 
 .topbar-nav a:hover { color: var(--text-primary); }
 
+/* The current screen. A white pill on the warm topbar surface was a 1.10:1 tone difference
+   plus a shadow, which is invisible at a glance — the one thing a selected state cannot be.
+   The recruiter-guide tint is the fix rather than a new colour: blue already means "where you
+   are in this product" on these screens, ink holds 9.39:1 on it, and 600 is the file's one
+   bold. The shadow goes with the white: a tone this clear needs no lift. */
 .topbar-nav a[aria-current="page"] {
   color: var(--text-primary);
-  background: var(--background);
-  box-shadow: var(--shadow-card);
+  font-weight: 600;
+  background: var(--tint-guide-recruiter);
 }
 
 /* ── card ──────────────────────────────────────────────────────────────────────────────── */
