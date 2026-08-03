@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Compliance · saulera dossier engine</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<!-- The same chrome as the other four screens. Static aria-current, because each file knows
+     which screen it is. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Dossier engine</span>
+    <nav class="topbar-nav" aria-label="Screens">
+      <a href="/">Submission pack</a>
+      <a href="/clients">Client knowledge</a>
+      <a href="/counts">Prep sent</a>
+      <a href="/assignments">Bookings</a>
+      <a href="/compliance" aria-current="page">Compliance</a>
+      <a href="/prep/demo" target="_blank" rel="noopener">Candidate portal ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-head">
+    <h1>Compliance</h1>
+    <!-- The promise and its bound in one breath, in a recruiter's words. "Compliance" is the
+         word recruiters and TTR's own site use, so unlike `assignment` it is not a code word to
+         be translated. The second sentence is the bound: this screen is a record of what has
+         been checked, not a filing cabinet. -->
+    <p class="page-sub">What every candidate still owes you, and what is about to run out. Tick
+      off each document as you check it, or send it back with a line saying why. We keep the
+      reference number and the date — never the document itself.</p>
+  </div>
+
+  <div class="compliance">
+
+    <!-- One card per candidate, all of it built in JS: the rows are per-candidate and the
+         controls are reached through closures rather than by id. -->
+    <div id="compliance-list"></div>
+
+    <p class="save-state" id="list-state" role="status"></p>
+
+  </div>
+
+</main>
+<script src="/compliance.js"></script>
+</body>
+</html>

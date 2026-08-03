@@ -53,7 +53,12 @@ import {
   dueExpiryItems,
   dueExtensionNudges,
 } from "./store.js";
-import { COMPLIANCE_CATALOGUE, EXTENSION_LEAD_DAYS, MAX_AMBER_DAYS } from "./catalogue.js";
+import {
+  CATALOGUE_BY_KEY,
+  EXTENSION_LEAD_DAYS,
+  MAX_AMBER_DAYS,
+  targetFor,
+} from "./catalogue.js";
 import { getAgency } from "../store.js";
 import {
   sendExpiryDigestEmail,
@@ -142,27 +147,12 @@ export async function sendDueExtensionNudges(env) {
 
 // ── the expiry radar (#70) ─────────────────────────────────────────────────────────────
 
-/** The catalogue as a lookup, built once: the sweep asks it per row. */
-const CATALOGUE_BY_KEY = new Map(COMPLIANCE_CATALOGUE.map((item) => [item.key, item]));
-
-/**
- * Amber, red, or leave it alone — the whole radar rule, in three lines.
- *
- * RED IS TESTED FIRST. An item whose date passed a fortnight ago satisfies "inside the amber
- * window" too (every negative number is <= amberDays), and answering `expiring` for it would
- * tell a candidate their lapsed DBS "runs out soon". Order is the fix; there is no second
- * condition to get wrong.
- *
- * `daysLeft === 0` — it runs out TODAY — is amber and not red, `isNotPast`'s argument
- * (src/prep/dates.js): a certificate valid to the 3rd is valid all day on the 3rd.
- *
- * `daysLeft` is computed by SQLITE, never here. See dueExpiryItems for why that matters.
- */
-function targetFor(daysLeft, amberDays) {
-  if (daysLeft < 0) return "expired";
-  if (daysLeft <= amberDays) return "expiring";
-  return null;
-}
+// `CATALOGUE_BY_KEY` and `targetFor` were written here in #70 and MOVED to ./catalogue.js in
+// #71, imported above. The rule now has two callers asking at two different moments — this sweep
+// WRITES the state, and functions/api/compliance.js computes it at render time because nothing
+// sweeps when a recruiter opens their dashboard — and two homes for "is this red" would be two
+// answers about the same certificate. The catalogue is the home because a route can import it
+// without dragging this module's mail layer along.
 
 /**
  * Move every checklist row that has crossed a line, and report what moved.
@@ -224,9 +214,16 @@ export async function sweepExpiryStates(db) {
  *
  * TWO INDEPENDENT CONFIGURATION GUARDS, because these are two independent messages with two
  * independent requirements. The candidate's nudge needs a base URL (it carries a link); the
- * recruiter's digest needs a validated recipient (it carries none). A deployment with
- * PREP_BASE_URL and no RECRUITER_EMAIL should still tell the candidates — refusing both because
- * one is unset is the coupling `sendDueExtensionNudges` could afford and this cannot.
+ * recruiter's digest needs a validated recipient. A deployment with PREP_BASE_URL and no
+ * RECRUITER_EMAIL should still tell the candidates — refusing both because one is unset is the
+ * coupling `sendDueExtensionNudges` could afford and this cannot.
+ *
+ * #71 GAVE THE DIGEST A LINK AND DID NOT COUPLE THE GUARDS. `/compliance` now exists, so the
+ * digest points at it when `base` is available — but the base URL is passed as an ENRICHMENT and
+ * is NOT added to the digest's guard. Adding it would mean a deployment carrying RECRUITER_EMAIL
+ * and no PREP_BASE_URL stops receiving the digest it receives today, which is a regression
+ * dressed as a feature. Without a base the message is byte-identical to #70's, and
+ * sendExpiryDigestEmail's own comment says so from the other side.
  *
  * Nothing is rolled back on a failure and nothing is retried: the states are already claimed,
  * and the header says why. Each send has its own try/catch, so one candidate's bad address does
@@ -274,7 +271,15 @@ export async function mailExpiryNudges(env, claimed = []) {
 
   if (to) {
     try {
-      await sendExpiryDigestEmail(env, { to, agencyName: agency?.name, rows: claimed });
+      await sendExpiryDigestEmail(env, {
+        to,
+        agencyName: agency?.name,
+        rows: claimed,
+        // The recruiter's own compliance screen, Access-gated by being outside /prep/*. Never a
+        // portal path: that would point the recruiter at the candidate's door. `undefined` when
+        // there is no base URL, which is the enrichment rule above — not a precondition.
+        link: base ? `${base}/compliance` : undefined,
+      });
     } catch (err) {
       console.error("expiry digest send failed:", err?.code ?? err?.name ?? "unknown");
     }

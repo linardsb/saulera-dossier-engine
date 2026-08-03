@@ -749,3 +749,200 @@ export async function candidateBySessionHash(db, sessionHash) {
     .bind(String(sessionHash ?? ""))
     .first();
 }
+
+// ── the recruiter dashboard (#71) ──────────────────────────────────────────────────────
+//
+// The other side of #68's door. Everything above this line either serves one candidate reading
+// their own checklist or serves a sweep with no person in front of it; these four statements
+// serve a recruiter looking at everybody's at once, and deciding.
+//
+// `verified` HAS NEVER BEEN WRITTEN BY ANYTHING. It has been in `compliance_item.status`'s CHECK
+// since #67 and in ITEM_STATUSES since #68, and no code path in the product could set it:
+// item.js writes `submitted` and refuses the word (its header says "#71's write"), and
+// claimItemExpiry validates against EXPIRY_STATES precisely so a clock can never mark a document
+// as checked. `verifyItem` below is that write, and it is the only one.
+
+/**
+ * Every candidate's whole checklist, in one statement, for the dashboard to group.
+ *
+ * `days_left` IS COMPUTED BY SQLITE AND NEVER IN JAVASCRIPT — `dueExpiryItems`' argument
+ * verbatim (line 460-464). The dashboard decides amber and red from this number at RENDER time,
+ * and the sweep decides the same thing from the same arithmetic; computing one of them in V8
+ * would put the two surfaces a day apart near midnight UTC, on the one screen whose promise is
+ * that its flags are current.
+ *
+ * THE `CASE` GUARD. Unlike `dueExpiryItems` this selects rows with a NULL `expiry_date` — every
+ * `missing` item, and both items the catalogue marks `expires: false`. `julianday(NULL)` is
+ * NULL, so the arithmetic would answer NULL anyway; the CASE makes that null EXPLICIT, so a
+ * reader knows a null `days_left` means "there is no deadline" rather than "the arithmetic
+ * failed and nobody noticed".
+ *
+ * `candidate_id` IS PROJECTED, AND THIS IS THE ONE STORE READ THAT RETURNS IT. `listAssignments`
+ * and `dueExtensionNudges` both refuse it and test/compliance-store.test.js asserts that for
+ * them. It is right here because THIS LIST IS THE ADDRESS BOOK FOR A WRITE: the dashboard's PUT
+ * is `/api/compliance/:candidateId`, and a screen that cannot name the row it is acting on
+ * cannot act. What is still refused is the whole point of saying so — no `email`, no session
+ * column, no `id` of the item row (verify and reject address it by the `(candidate_id,
+ * item_key)` pair the schema makes UNIQUE, which a URL can carry without exposing a sequence).
+ *
+ * NO `email`. The reject email's address is fetched by the write route, one column at a time,
+ * through `candidateEmailById` below. A dashboard payload that carried addresses would be one
+ * careless template away from putting one in a log line, and the recruiter's screen never
+ * displays one.
+ *
+ * THE BOUND, STATED. This returns `8 × candidates` rows in one call, with no pagination, no
+ * LIMIT and no filter. At the pilot agency's scale that is tens of rows. The day it is not, the
+ * fix is a per-candidate expansion — the list summarised, the checklist fetched on demand — and
+ * not a LIMIT bolted onto this statement, which would silently hide candidates from a screen
+ * whose whole job is that nobody is missed.
+ *
+ * `ORDER BY candidate.full_name, candidate.id, i.item_key` — the name for a stable human order,
+ * the id to break the tie between two candidates who share one (locum agencies have several),
+ * and the key last. The DISPLAY order is the catalogue's and is applied by the caller, exactly
+ * as `itemsByCandidate` says: this is a stable READ order, not a rendering decision.
+ *
+ * IT DRIVES FROM `candidate` AND LEFT JOINS THE ITEMS, WHICH IS THE OPPOSITE WAY ROUND FROM
+ * `dueExpiryItems`. The sweep starts at the rows because a row is what it moves. This screen
+ * starts at the PEOPLE, because its promise is "every candidate the agency has recorded" and an
+ * inner join would answer with every candidate who still has checklist rows. Those are the same
+ * set today — `createCandidate` seeds all eight and nothing but the cascade deletes them — and
+ * the day they are not, an inner join makes a candidate SILENTLY VANISH from the one screen
+ * whose whole job is that nobody is missed. A candidate with no rows comes back as a single row
+ * with a null `item_key`, which the caller's catalogue-driven map ignores, so they render as
+ * eight items nobody has started. That is what functions/prep/compliance/api/items.js already
+ * shows the candidate themselves for the same state, and the two screens agreeing matters more
+ * than the join being symmetrical with the sweep's.
+ *
+ * `candidate.id AS candidate_id` and not `i.candidate_id` for the same reason: on the row where
+ * there is no item, the item's copy of the id is null and the candidate's is not.
+ *
+ * No bound parameters at all, and that is correct — there is no caller value in this statement.
+ */
+export async function listComplianceState(db) {
+  const { results } = await db
+    .prepare(
+      `SELECT candidate.id AS candidate_id, candidate.full_name AS candidate_name,
+              i.item_key, i.status, i.reference, i.expiry_date, i.checked_at,
+              CASE WHEN i.expiry_date IS NULL THEN NULL
+                   ELSE CAST(julianday(date(i.expiry_date)) - julianday(date('now')) AS INTEGER)
+              END AS days_left
+         FROM candidate
+         LEFT JOIN compliance_item i ON i.candidate_id = candidate.id
+        ORDER BY candidate.full_name, candidate.id, i.item_key`,
+    )
+    .all();
+  return results ?? [];
+}
+
+/**
+ * The recruiter marks one submitted item verified. The first and only writer of `verified`.
+ *
+ * Four arguments, because each of them is a tidy-up somebody will propose in review.
+ *
+ * 1. WHY NOT `setItemState`. It writes `reference = ?` and `expiry_date = ?` UNCONDITIONALLY
+ *    (line 396). Routing a verify through it means passing those values back in, and the route
+ *    does not have them — it has a candidate id, an item key and the word "verify" — so they
+ *    would arrive as `""` and `null`, and VERIFYING A DOCUMENT WOULD WIPE THE REFERENCE NUMBER
+ *    AND THE EXPIRY DATE THAT MADE IT VERIFIABLE. The item then has no date, drops out of
+ *    `dueExpiryItems` (`WHERE expiry_date IS NOT NULL`), and never expires again: a silent,
+ *    permanent hole in the radar, opened by the one action whose entire point is diligence.
+ *    That is why this is a second narrow statement rather than a third caller of a wide one.
+ *
+ * 2. WHY `AND status = 'submitted'` — A COMPARE-AND-SWAP, NOT A FILTER. It closes three things
+ *    at once.
+ *      · It refuses to verify an item nobody submitted. A `missing` item ticked green is a lie
+ *        about a document that does not exist.
+ *      · IT CLOSES THE RE-NUDGE LOOP. `dueExpiryItems` selects `verified` (line 484) and
+ *        `claimItemExpiry` accepts `from = 'verified'`, so verifying an item already at
+ *        `expiring` would set it back to `verified` and the very next sweep would re-amber it
+ *        and send the candidate a SECOND email about the same expiry date — breaking the "one
+ *        message per state change" promise DEPLOY.md makes to the operator.
+ *      · It makes a double-click safe: the second request finds `verified`, matches nothing, and
+ *        answers not-updated rather than re-stamping `checked_at` with a moment nobody acted at.
+ *
+ * 3. WHY `checked_at` IS STAMPED HERE, when `claimItemExpiry` declines to. That column means
+ *    "when did a PERSON last touch this" — claimItemExpiry's comment (line 527-531) says so and
+ *    is the reason it stamps nothing. A verify is a person. The two functions are opposite for
+ *    exactly the same reason.
+ *
+ * THE CONSEQUENCE, IN THE OPEN: AN ITEM THAT AMBERS WHILE AWAITING REVIEW HAS NO VERIFY. The
+ * CAS refuses `expiring`, so a certificate that crosses into its amber window while sitting on
+ * the recruiter's desk can only be cleared by the candidate re-submitting. That is the correct
+ * trade against the re-nudge loop above, and it is carried to the owner as Open Question 1 of
+ * this ticket's plan rather than hidden. The row still RENDERS correctly meanwhile — the
+ * dashboard shows the chase state and the real risk side by side — which is what makes the hole
+ * survivable rather than invisible.
+ *
+ * `'verified'` and `'submitted'` are LITERALS in the SQL and not interpolated from
+ * ITEM_STATUSES: this file's rule (line 209-210, 444-446) — a status list is not a bound value.
+ * The candidate id and the item key are bound, always.
+ *
+ * @returns `{ updated }` — false when nothing matched, which the route answers 409 rather than
+ *   404: the row almost certainly exists and it is the STATE that refused.
+ */
+export async function verifyItem(db, { candidateId, itemKey } = {}) {
+  requireFields({ candidateId, itemKey });
+  requireOneOf("itemKey", itemKey, ITEM_KEYS);
+  const result = await db
+    .prepare(
+      `UPDATE compliance_item
+          SET status = 'verified', checked_at = datetime('now')
+        WHERE candidate_id = ? AND item_key = ? AND status = 'submitted'`,
+    )
+    .bind(candidateId, itemKey)
+    .run();
+  return { updated: (result.meta?.changes ?? 0) === 1 };
+}
+
+/**
+ * The recruiter sends one submitted item back. `verifyItem`'s compare-and-swap, inverted.
+ *
+ * Everything argued above holds here — the same guard, the same `checked_at` stamp, the same
+ * refusal to route through `setItemState`. One thing is this function's own:
+ *
+ * WHY REJECT CLEARS `reference` AND `expiry_date`. A rejected item has no valid document behind
+ * it, so it has no deadline. Clearing the date drops the row out of `dueExpiryItems` — otherwise
+ * a refused certificate would go on generating expiry nudges to the candidate about a document
+ * the recruiter has just told them is not accepted. The reference goes for the same reason: it
+ * is the number they typed for a document that was not accepted, and leaving it standing in the
+ * box invites them to re-submit the identical value. What the passport then shows is the truth:
+ * nothing valid is on file, and the item is theirs to start again.
+ *
+ * The REASON is not stored, here or anywhere. It exists in the email the route sends and nowhere
+ * else — no column, no migration, and no durable free-text recruiter note about a candidate's
+ * health-adjacent document (the architecture doc's minimal-fields posture). The cost is real and
+ * is Open Question 2 of this ticket's plan: a locum who deletes the email cannot recover why.
+ */
+export async function rejectItem(db, { candidateId, itemKey } = {}) {
+  requireFields({ candidateId, itemKey });
+  requireOneOf("itemKey", itemKey, ITEM_KEYS);
+  const result = await db
+    .prepare(
+      `UPDATE compliance_item
+          SET status = 'missing', reference = '', expiry_date = NULL, checked_at = datetime('now')
+        WHERE candidate_id = ? AND item_key = ? AND status = 'submitted'`,
+    )
+    .bind(candidateId, itemKey)
+    .run();
+  return { updated: (result.meta?.changes ?? 0) === 1 };
+}
+
+/**
+ * One candidate's address, for the rejection email. ONE COLUMN AND NO SECOND.
+ *
+ * `candidateBySessionHash`'s rule ("two columns and no third") at its narrowest. The message
+ * this feeds does not greet the candidate by name — `sendExpiryNudgeEmail` greets nobody either
+ * — so `full_name` is not selected. A column taken "in case someone needs it" is how a
+ * projection widens without a decision, and this one is read on the path where an address is
+ * about to be handed to a third-party mail provider.
+ *
+ * `String(id ?? "")` fails closed for `claimExtensionNudge`'s reason: an `undefined` bind is a
+ * D1 error, and the empty string matches nothing, which is the answer we want when the caller
+ * has no id.
+ */
+export async function candidateEmailById(db, id) {
+  return db
+    .prepare("SELECT email FROM candidate WHERE id = ?")
+    .bind(String(id ?? ""))
+    .first();
+}

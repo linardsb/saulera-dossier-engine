@@ -454,6 +454,8 @@ the dashboard.
 | items are turning amber/red on the passport but no expiry emails arrive | `RESEND_API_KEY`, `PREP_BASE_URL` or `RECRUITER_EMAIL` is missing or malformed | set them (section 5b) and redeploy. **Unlike the extension radar, the state transitions have already happened and will not be re-sent** — the status change *is* the claim. Check `SELECT status, count(*) FROM compliance_item GROUP BY status`. Newly-crossing items will nudge normally once the config is right |
 | a candidate's magic link points at a preview URL | an invite sent BEFORE 30 Jul 2026, when the link fell back to the origin the recruiter's browser used | links already sent cannot be repointed; the candidate can sign in at `<origin>/prep/login` with a code instead. New sends cannot reach this state — see the row above |
 | `400 {"error":"interview_too_far"}` from `/api/prep/prepare` or `/api/prep/send` | the interview date is more than 24 months ahead, which is a mistyped year essentially always | correct the year. The bound exists because `interview_at` is the clock the 30-day purge runs on: `2226` for `2026` keeps the candidate's CV and a live link in D1 for two centuries, silently |
+| `503 {"error":"mail_not_configured"}` from `PUT /api/compliance/:id` on a **send-back** | `RESEND_API_KEY` or `PREP_BASE_URL` is unset or malformed in this environment, or that candidate's row carries no email address | set the secrets (section 5b) and redeploy, or fix the candidate's address. **Nothing was written** — the item is still awaiting review and the send-back is safe to retry. The reason exists only in the email, which is why this route refuses to reset an item it cannot explain. **Verify** is unaffected: it sends no mail |
+| `409 {"error":"not_submitted"}` from `PUT /api/compliance/:id` | the item is no longer `submitted`, so the compare-and-swap matched nothing. Most often it turned amber while it sat on the desk; sometimes the candidate re-submitted first | reload `/compliance`. **An item that has gone amber cannot be verified** and the candidate has to re-submit it — a known trade against the re-nudge loop, not a fault. Nothing was written |
 | `502 {"error":"bad_brief"}` from `/api/prep/prepare` | the model's answer was a valid JSON payload that broke a rule the schema cannot state — a competency with no questions, a non-core `axis`, or two competencies sharing an id | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis. This used to surface as `500 internal`, which sent you to the migration row below for a model output problem |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
@@ -723,8 +725,42 @@ the new date. That is decision 17's ethos: a courtesy, not a campaign.
 
 The candidate's message links to `/prep/compliance/login` (the compliance door, never
 `/prep/login` — the two portals hold independent cookies) and carries no token and no reference
-number. The recruiter's digest carries **no link at all**: there is no recruiter compliance
-surface until #71, and `/assignments` deliberately shows no compliance state.
+number. The recruiter's digest links to **`/compliance`** — #71's dashboard, added after this
+radar shipped — whenever `PREP_BASE_URL` is set, and to nothing when it is not. The link is an
+**enrichment, not a precondition**: the digest's guard is still `RECRUITER_EMAIL` alone, so a
+deployment carrying a recipient and no base URL keeps receiving exactly the message it received
+before. `/assignments` still shows no compliance state at all, and that half stays deliberate —
+bookings and dates on one screen, checklists on the other.
+
+### The recruiter dashboard (#71) — a screen, not a sweep
+
+`/compliance` lists every candidate with their whole checklist: how many items are verified, how
+many are waiting for the recruiter, and how many are at risk. Two controls per submitted item —
+**Verify**, which is the only thing in the product that ever writes `verified`, and **Send back**,
+which resets the item to `missing` with its reference and date cleared and emails the candidate a
+one-line reason.
+
+**It runs no sweep, and it does not need one.** The at-risk flags are computed from
+`compliance_item.expiry_date` on every request, against that item's own lead time in the
+catalogue. That is the whole reason this screen is trustworthy on a deployment where nobody has
+visited `/prep/*` for a fortnight: the sweep in the section above only fires on candidate traffic,
+so a screen reading `status` alone would under-report exactly when it matters. Each row therefore
+shows **two** chips — the chase state (from the column) and the risk (from the date) — and
+"Waiting for you" beside "Ran out four days ago" is not a contradiction, it is the row to act on.
+
+**No new Access application, and `scripts/setup-access.py` is unchanged by this ticket.**
+`/compliance` and `/api/compliance` are gated by the ordinary production application, because the
+portal's two bypass apps are scoped to the `/prep` path **segment** (section 3b). Adding a bypass
+here would open a screen listing every candidate's compliance state to the internet.
+
+**The send-back refuses to write when it cannot send**, unlike either radar above. The reason
+exists only in the email — nothing stores it — so a reset with no message leaves a locum staring
+at an item that has emptied itself with no way to learn why. If `RESEND_API_KEY` or
+`PREP_BASE_URL` is unset, or the candidate's row has no address, the route answers 503 and the
+item stays exactly where it was. **Verify** has no such requirement: it sends no mail.
+
+**No migration.** This screen reads and writes `compliance_item` and creates nothing;
+`migrations/` and `test/schema.test.js` are untouched.
 
 ---
 
@@ -750,6 +786,10 @@ page and tells you nothing about the site itself. Log in in a browser first.
 - [ ] `curl -s $P/api/events` shows the event landed, with the round-trip `duration_ms`
 - [ ] A client whose note is empty answers `note_empty` and offers a link to `/clients`
 - [ ] `curl -sI $P/ | grep -i x-content-type-options` returns the header from `public/_headers`
+- [ ] `/compliance` loads with **Compliance** current in the nav, lists every candidate
+      worst-first, and shows two chips on a row whose date has passed. **Verify** a submitted item
+      and check the reference number and the date are still on screen afterwards; **Send back**
+      one and check the candidate's inbox has the reason and the subject does not
 - [ ] Mobile: 375px width, no horizontal scroll, through all three acts
 
 Unauthenticated, the only thing any of these tells you is that the door is shut — Access

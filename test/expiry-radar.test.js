@@ -447,18 +447,38 @@ test("the candidate's email links to the COMPLIANCE door and carries no referenc
   assert.ok(!JSON.stringify(body).includes("REF-immunisations"), "no reference number, either half");
 });
 
-test("the digest carries no link at all", { skip }, async () => {
+test("the digest links to the RECRUITER's screen, never to a candidate door (#71)", { skip }, async () => {
   const { db, d1 } = open();
   await seedItem(d1, db, { itemKey: "immunisations", expiryDays: 5 });
 
   const { sends } = await sweep(d1, CONFIGURED);
   const digest = sends.find((sent) => sent.to === CONFIGURED.RECRUITER_EMAIL);
 
-  // There is no recruiter compliance surface until #71, and /assignments deliberately projects
-  // no compliance state — a link there would point at a screen that cannot show what this email
-  // is about. Asserted so a future "convenience" link has to argue with a red test.
-  assert.doesNotMatch(digest.text, /https?:\/\//, "no URL in the text half");
-  assert.doesNotMatch(digest.html, /https?:\/\//, "nor in the html half");
+  // This message carried NO link when #70 shipped it, because there was no recruiter compliance
+  // surface to point at — /assignments deliberately projects no compliance state, so a link
+  // there would have pointed at a screen that could not show what the email is about. #71 built
+  // /compliance and this is the assertion that changed with it.
+  for (const [half, content] of Object.entries({ text: digest.text, html: digest.html })) {
+    assert.ok(content.includes(`${CONFIGURED.PREP_BASE_URL}/compliance`), `the ${half} half links the dashboard`);
+    // The rule that did NOT change, and the one that matters more: a /prep/* link would send the
+    // recruiter to a candidate's door, where the cookies are a different product's.
+    assert.ok(!content.includes("/prep/"), `the ${half} half points at no portal path`);
+  }
+});
+
+test("with no PREP_BASE_URL the digest still sends, unchanged (#71)", { skip }, async () => {
+  const { db, d1 } = open();
+  await seedItem(d1, db, { itemKey: "immunisations", expiryDays: 5 });
+
+  // The two configuration guards stay INDEPENDENT. The link is an enrichment: coupling the
+  // digest to PREP_BASE_URL would stop a deployment that has RECRUITER_EMAIL and no base URL
+  // receiving the digest it receives today — a regression dressed as a feature.
+  const { sends } = await sweep(d1, { ...CONFIGURED, PREP_BASE_URL: "" });
+  const digest = sends.find((sent) => sent.to === CONFIGURED.RECRUITER_EMAIL);
+
+  assert.ok(digest, "the digest still goes out");
+  assert.doesNotMatch(digest.text, /https?:\/\//, "and carries no URL, exactly as it did in #70");
+  assert.doesNotMatch(digest.html, /https?:\/\//);
 });
 
 test("THE STATE MOVES WITH NO MAIL CONFIGURATION WHATSOEVER", { skip }, async () => {

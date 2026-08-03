@@ -132,20 +132,29 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
 // read back to them in a message that could sit in an inbox for years. The recruiter's digest
 // takes the extension nudge's rule (it names candidates to a third party, so its recipient is
 // validated as a single operator-configured address in src/compliance/nudges.js) with one
-// difference: it carries NO LINK AT ALL, because there is no recruiter compliance surface until
-// #71 and `/assignments` deliberately shows no compliance state.
+// difference: its link is OPTIONAL. It shipped with none in #70 because there was no recruiter
+// compliance surface to point at; #71 built `/compliance` and passes it when `PREP_BASE_URL` is
+// set, and the message is unchanged when it is not.
+//
+// The seventh is the rejection (#71, at the foot). Its rule is one no other message here has:
+// ITS CONTENT EXISTS NOWHERE ELSE. Every other message describes state the recipient can also
+// read on a screen; this one carries the recruiter's REASON for sending a document back, and the
+// reason is deliberately not stored anywhere. That is why the route bails before writing rather
+// than after — see functions/api/compliance/[id].js — and why the subject carries the item's
+// label and never the reason itself.
 //
 // This module is prep-named and now carries non-prep messages. That cost was weighed: the
 // stronger invariant is that EVERY email this product sends is in this file, and this note says
 // why each is different. A message in a second file would break that to gain tidiness.
 //
-// The six are different BY DESIGN. None should be "harmonised" toward another —
+// The seven are different BY DESIGN. None should be "harmonised" toward another —
 // removing the invite's link breaks the product, adding one to the OTP mail teaches
 // candidates that a message asking them to click is normal (the lesson a phishing email
 // needs them to have already learned), a tokenized reminder link would be a second
 // credential in flight for a message that only needs to say "it is ready", pointing the
-// nudge at /prep/* would send the recruiter to the candidate's portal, and adding a link to
-// the expiry digest would point the recruiter at a screen that cannot show what it is about.
+// extension nudge or the digest at /prep/* would send the recruiter to the candidate's portal,
+// and pointing the rejection anywhere but /prep/compliance/login would sign a locum in to the
+// interview-prep product instead of their checklist.
 
 /** How long an agency name may get before it stops being a display name. */
 const NAME_MAX = 120;
@@ -464,12 +473,19 @@ export async function sendExpiryNudgeEmail(env, { to, agencyName, items = [], li
  * sweep sends anything, and the comma check matters more here for the same reason it mattered
  * there, multiplied.
  *
- * IT CARRIES NO LINK, deliberately, and that is not an omission to be tidied up. There is no
- * recruiter compliance surface until #71: `/assignments` shows bookings and dates and
- * deliberately projects no compliance state (src/compliance/store.js, listAssignments), so a
- * link to it would point at a screen that cannot show what this email is about. #71 adds the
- * link when it adds the screen. This is also why the digest states the facts in full rather
- * than teasing them — it has to be readable as the whole answer.
+ * `link` IS OPTIONAL, AND THAT IS THE #71 SEAM. This message carried no link at all until the
+ * recruiter's compliance screen existed to point at — `/assignments` shows bookings and dates
+ * and deliberately projects no compliance state, so a link there would have pointed at a screen
+ * that could not show what the email is about. #71 built the screen and passes `/compliance`.
+ *
+ * It stays OPTIONAL rather than becoming required, because the caller's two configuration
+ * guards are independent by design (src/compliance/nudges.js, mailExpiryNudges): the digest
+ * needs a recipient and the candidate's nudge needs a base URL, and a deployment with
+ * `RECRUITER_EMAIL` and no `PREP_BASE_URL` must keep receiving the digest it receives today. So
+ * the link is an ENRICHMENT, never a precondition, and with none passed this message is
+ * byte-identical to the one that shipped in #70. That is also why the digest still states the
+ * facts in full rather than teasing them — it has to be readable as the whole answer to a
+ * recruiter who never clicks.
  *
  * It says nothing about whether the candidates were emailed. They usually were, and the
  * sentence would still be a claim this function cannot check: the candidate half runs under its
@@ -481,7 +497,8 @@ export async function sendExpiryNudgeEmail(env, { to, agencyName, items = [], li
  * no name — an inbox preview naming a locum's compliance problem on a shared desk is a
  * disclosure nobody chose.
  */
-export async function sendExpiryDigestEmail(env, { to, agencyName, rows = [] } = {}) {
+export async function sendExpiryDigestEmail(env, { to, agencyName, rows = [], link } = {}) {
+  const url = String(link ?? "");
   const header = (value) =>
     String(value ?? "")
       .replace(CONTROLS, " ")
@@ -496,12 +513,16 @@ export async function sendExpiryDigestEmail(env, { to, agencyName, rows = [] } =
 
   const subject = `Compliance expiries — ${rows.length} to chase`;
 
+  // The link clauses are spread in rather than written with a conditional inside the template,
+  // so a digest sent without one is the #70 message unchanged down to the trailing newline —
+  // which is what makes "the link is an enrichment" a property of the code and not a claim.
   const text = [
     "Hello,",
     "",
     "These compliance items have just changed state:",
     "",
     ...rows.map((row) => `  ${line(row)}`),
+    ...(url ? ["", "Everyone's compliance state, on one screen:", url] : []),
   ].join("\n");
 
   const html = [
@@ -510,6 +531,102 @@ export async function sendExpiryDigestEmail(env, { to, agencyName, rows = [] } =
     `<ul>`,
     ...rows.map((row) => `<li>${escapeHtml(line(row))}</li>`),
     `</ul>`,
+    ...(url
+      ? [`<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your compliance screen</a></p>`]
+      : []),
+  ].join("\n");
+
+  return sendEmail(env, { to, subject, text, html, from: mailFrom(env, agencyName) });
+}
+
+// ── the rejection (#71) ────────────────────────────────────────────────────────────────
+
+/**
+ * The seventh message: the recruiter has looked at something the candidate sent, and it is not
+ * accepted.
+ *
+ * IT IS THE ONLY MESSAGE IN THIS FILE WHOSE CONTENT EXISTS NOWHERE ELSE. Every other one
+ * describes state the recipient can also read on a screen — an invite links to a page, an expiry
+ * nudge names an item the passport also shows. The rejection carries a REASON, and the reason is
+ * not stored (src/compliance/store.js, rejectItem: no column, no migration, no durable free-text
+ * note about a candidate's health-adjacent document). That is why the route refuses to write the
+ * reset at all unless it can send this — a locum staring at an item that has silently returned to
+ * "Not sent in", with no way to learn why, would most likely re-submit the identical reference.
+ *
+ * THE SUBJECT CARRIES THE ITEM LABEL AND NEVER THE REASON. `sendExpiryDigestEmail`'s argument
+ * exactly: an inbox preview is the first surface this reaches, and a preview reading "your DBS
+ * check was refused because the certificate is in your maiden name" on a shared phone is a
+ * disclosure nobody chose. The label alone is the least it can say and still be openable.
+ *
+ * `label` reaches a header, so it takes the CONTROLS strip and then the NAME_MAX cap, the
+ * treatment this file gives ANY value that reaches one. It is ours — it comes from
+ * COMPLIANCE_CATALOGUE — and that is not a reason to skip it: a catalogue edit is one careless
+ * paste away from carrying a newline.
+ *
+ * `reason` is BODY ONLY, in both halves. It takes the CONTROLS strip (a "one-line reason" with a
+ * newline in it is not one line) and `escapeHtml` in the html half. It is NOT capped here — the
+ * route owns the cap (`REASON_MAX`), and capping twice with two different numbers is how a
+ * message ends up truncated at a length nobody chose.
+ *
+ * The link is `/prep/compliance/login`, the COMPLIANCE door and never `/prep/login`: the two
+ * portals hold independent cookies and a candidate sent to the wrong one signs in to the wrong
+ * product (`sendExpiryNudgeEmail`'s note).
+ *
+ * NO REFERENCE NUMBER, anywhere. The item was just cleared, so there is nothing valid to quote,
+ * and reading their own paperwork back to them is what `sendExpiryNudgeEmail` refuses.
+ *
+ * Decision 17's tone rule, and it is hardest to hold here of all seven: calm, no deadline
+ * pressure, no exclamation mark, nothing implying a consequence we cannot know. The recruiter
+ * needs a new document; the message says what is needed and where to put it, and nothing about
+ * bookings at risk.
+ */
+export async function sendRejectionEmail(env, { to, agencyName, label, reason, link } = {}) {
+  const agency = String(agencyName || "").trim() || "your recruitment agency";
+  const header = (value) =>
+    String(value ?? "")
+      .replace(CONTROLS, " ")
+      .trim()
+      .slice(0, NAME_MAX)
+      .trim();
+
+  const item = header(label) || "One of your compliance items";
+  // The strip, but no cap: the route's REASON_MAX is the one bound on this value.
+  const note = String(reason ?? "").replace(CONTROLS, " ").trim();
+  const url = String(link ?? "");
+
+  const subject = `${item}: we need a new one`;
+
+  const text = [
+    "Hello,",
+    "",
+    `${agency} has looked at the ${item} you sent over and needs a different one.`,
+    "",
+    "What they said:",
+    "",
+    `  ${note}`,
+    "",
+    `Send the new one to ${agency} the way you always have. Then open your checklist and`,
+    "fill that item in again:",
+    "",
+    url,
+    "",
+    "We do not store your documents — only the reference number and the date it runs out.",
+  ].join("\n");
+
+  // Inline styles and literal colours, as ever: mail clients strip <style> blocks and resolve
+  // no custom property, so public/tokens.css cannot reach here (sendOtpEmail's note).
+  const html = [
+    `<p>Hello,</p>`,
+    `<p>${escapeHtml(agency)} has looked at the ${escapeHtml(item)} you sent over and needs a`,
+    `different one.</p>`,
+    `<p>What they said:</p>`,
+    `<blockquote style="margin:16px 0;padding-left:16px;border-left:3px solid #cccccc">`,
+    `${escapeHtml(note)}</blockquote>`,
+    `<p>Send the new one to ${escapeHtml(agency)} the way you always have. Then open your`,
+    `checklist and fill that item in again.</p>`,
+    `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your checklist</a></p>`,
+    `<p style="color:#666666;font-size:13px">We do not store your documents — only the`,
+    `reference number and the date it runs out.</p>`,
   ].join("\n");
 
   return sendEmail(env, { to, subject, text, html, from: mailFrom(env, agencyName) });

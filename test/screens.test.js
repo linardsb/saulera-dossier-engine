@@ -37,14 +37,17 @@ function declares(markup, id) {
 
 // Scoped to the recruiter screens on purpose. app.js queries ids that live on /prep pages and on
 // 404.html, so widening this scan would fail for reasons that have nothing to do with the pages
-// below. #69 registers a third — the bookings screen — which resolves its elements the same way
-// and so is gated the same way. Its per-row controls are deliberately built with createElement
-// and reached through closures rather than by id, which is why this scan sees only the page's own
-// static markup and why that is the right amount for it to see.
+// below. #69 registers a third — the bookings screen — and #71 a fourth, the compliance
+// dashboard; both resolve their elements the same way and so are gated the same way. Their
+// per-row controls are deliberately built with createElement and reached through closures rather
+// than by id, which is why this scan sees only each page's own static markup and why that is the
+// right amount for it to see. The dashboard declares only two ids for that reason: everything
+// per-candidate is a node this file cannot and should not follow.
 const SCREENS = [
   ["clients", "public/clients.js", "public/clients.html"],
   ["counts", "public/counts.js", "public/counts.html"],
   ["assignments", "public/assignments.js", "public/assignments.html"],
+  ["compliance", "public/compliance.js", "public/compliance.html"],
 ];
 
 for (const [screen, script, page] of SCREENS) {

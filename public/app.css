@@ -1468,6 +1468,135 @@ a {
 
 .assignments .save-state { margin-top: var(--space-4); }
 
+/* ── the compliance dashboard (#71) ────────────────────────────────────────────────────── */
+
+/* A CARD LIST RATHER THAN A TABLE, which is the one structural difference from the bookings
+   screen above. Eight items per candidate in a six-column table would put a whole page of
+   repeated headers between one candidate's name and the next; the card makes the candidate the
+   unit, which is how a recruiter reads this screen — "who do I chase" before "what about". The
+   container still scrolls inside its own box rather than widening the page (CRAFT), same width
+   as .assignments for the same reason: this row carries a label, a reference and a control
+   group. */
+.compliance {
+  max-width: 88ch;
+  overflow-x: auto;
+}
+
+/* The gap between cards has to read as a zone break, or two candidates' items merge into one
+   list — .page-head's argument at a smaller scale. */
+.compliance-card { margin-bottom: var(--space-8); }
+
+/* A candidate name is typed by a person and may contain no spaces at all — .counts-table tbody
+   th's reasoning, and the same fix. */
+.compliance-name {
+  font-size: var(--text-h4);
+  margin: 0 0 var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+/* The completeness line. --text-muted holds the 4.5:1 body floor, so this quiets the sentence
+   under the name without dropping it below legibility. */
+.compliance-summary {
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  margin: 0 0 var(--space-3);
+}
+
+.compliance-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* One hairline per item, and wrap as a group: on a phone the chips and the controls drop below
+   the label rather than forcing the card into a horizontal scroll. */
+.compliance-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-hairline);
+  padding: var(--space-3) 0;
+  font-size: var(--text-body);
+}
+
+/* The label takes the slack so the chips sit at a consistent place across a card's eight rows.
+   `min-width: 0` because a flex item's default min-content floor is what lets a long item name
+   push the row wider than its container. */
+.compliance-item-label {
+  flex: 1 1 22ch;
+  min-width: 0;
+}
+
+/* A reference number is a stranger's typing: it may be one unbroken run of characters. */
+.compliance-ref {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Dates are data, so they take the mono face and tabular figures: a column of dates is read by
+   comparing them, and that only works if the digits line up. nowrap because a date broken across
+   two lines is a date that can be misread. .assignments-date-cell's rule at a second root. */
+.compliance-date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* Both chips. Each always carries the WORD — the colour ranks it and never says it on its own,
+   which is tokens.css's rule for every tint here. That matters more on this screen than on the
+   bookings one, because a row carries TWO chips and their difference (chase state versus risk)
+   is carried by the words, not by the colours. */
+.compliance-chip {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+/* Running out. --unverified on --tint-warn is 5.59:1, measured in tokens.css:76 and gated by
+   test/tokens.test.js — no new token, and an agency's branding swap reaches it. */
+.compliance-chip.is-amber {
+  background: var(--tint-warn);
+  color: var(--unverified);
+}
+
+/* Already run out. The SAME ground with the darker ink rather than a second tint: --failed on
+   --tint-warn is 7.08:1, measured on the same line, and one ground with two inks is what keeps
+   red reading as "more of the same problem" instead of a different kind of thing. */
+.compliance-chip.is-red {
+  background: var(--tint-warn);
+  color: var(--failed);
+}
+
+/* The per-item controls sit on one line and wrap as a group on a narrow viewport. */
+.compliance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Sized to the row rather than the .input default of 100%, which would push both buttons onto
+   their own line on every item. */
+.compliance-reason {
+  width: auto;
+  flex: 1 1 24ch;
+  min-width: 0;
+}
+
+/* --text-caption on a control, which is below the body size — allowed here for the reason
+   .assignments-action states: these are one or two words on a button whose tap target is set by
+   the padding rather than by the type, and both stay at or above the 12px floor. */
+.compliance-action {
+  font-size: var(--text-caption);
+  padding: var(--space-2) var(--space-3);
+}
+
+.compliance .save-state { margin-top: var(--space-4); }
+
 /* ── mobile density ────────────────────────────────────────────────────────────────────── */
 
 /* Under the one-column breakpoint the rail sits above the work, so every wasted pixel in it

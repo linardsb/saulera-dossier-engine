@@ -3,9 +3,10 @@
 // immunisations, indemnity, references, WTR opt-out. That page today ends in "contact TTR for
 // forms"; this array is the same list with a state a candidate and a recruiter can both see.
 //
-// Pure data, no imports, and deliberately its OWN file rather than a section of store.js — but
-// NOT because the browser imports it. It cannot: src/ is not in the Pages build output, so an
-// import from public/ would 404 at runtime. #68's passport reads this list through
+// Pure data and two pure functions over it, no imports, and deliberately its OWN file rather
+// than a section of store.js — but NOT because the browser imports it. It cannot: src/ is not in
+// the Pages build output, so an import from public/ would 404 at runtime. #68's passport reads
+// this list through
 // GET /prep/compliance/api/items, which joins it server-side, which is why the browser needs no
 // copy of it and no drift test to keep one honest.
 //
@@ -73,3 +74,34 @@ export const EXPIRY_STATES = ["expiring", "expired"];
  * whose amberDays is null.
  */
 export const MAX_AMBER_DAYS = Math.max(...COMPLIANCE_CATALOGUE.map((item) => item.amberDays ?? 0));
+
+/** The catalogue as a lookup, built once: a caller with a row in hand asks it per item_key. */
+export const CATALOGUE_BY_KEY = new Map(COMPLIANCE_CATALOGUE.map((item) => [item.key, item]));
+
+/**
+ * Amber, red, or leave it alone — the whole radar rule, in three lines.
+ *
+ * RED IS TESTED FIRST. An item whose date passed a fortnight ago satisfies "inside the amber
+ * window" too (every negative number is <= amberDays), and answering `expiring` for it would
+ * tell a candidate their lapsed DBS "runs out soon". Order is the fix; there is no second
+ * condition to get wrong.
+ *
+ * `daysLeft === 0` — it runs out TODAY — is amber and not red, `isNotPast`'s argument
+ * (src/prep/dates.js): a certificate valid to the 3rd is valid all day on the 3rd.
+ *
+ * `daysLeft` is computed by SQLITE, never here. See dueExpiryItems for why that matters.
+ *
+ * IT LIVES IN THE CATALOGUE AND NOT IN nudges.js, WHICH IS WHERE #70 WROTE IT. Two callers now
+ * ask this question and they ask it at different moments: `sweepExpiryStates` asks it to WRITE
+ * the state, and functions/api/compliance.js asks it at RENDER time because the sweep runs only
+ * on /prep/* and a recruiter opening the dashboard triggers none of it. Two homes for the
+ * amber/red rule would be two answers to "is this red" on two screens describing the same
+ * certificate — and the one that drifted would be the recruiter's, because nothing writes to
+ * their screen for them to notice. A route importing nudges.js to reach it would also drag
+ * src/prep/email.js and getAgency into a read that sends no mail.
+ */
+export function targetFor(daysLeft, amberDays) {
+  if (daysLeft < 0) return "expired";
+  if (daysLeft <= amberDays) return "expiring";
+  return null;
+}

@@ -35,10 +35,14 @@ import {
   issueCandidateOtp,
   itemsByCandidate,
   listAssignments,
+  candidateEmailById,
+  listComplianceState,
   purgeDormant,
+  rejectItem,
   rotateCandidateSession,
   setItemState,
   updateAssignment,
+  verifyItem,
 } from "../src/compliance/store.js";
 
 /** The error code a call throws, or the string "did not throw". */
@@ -708,4 +712,162 @@ test("claimItemExpiry's own 400s all fire before any SQL runs", async () => {
   for (const state of EXPIRY_STATES) {
     assert.ok(ITEM_STATUSES.includes(state), "a subset of the column's CHECK, never a sixth state");
   }
+});
+
+// ── the dashboard's four statements (#71) ──────────────────────────────────────────────
+//
+// STATEMENT SHAPE ONLY, and the split matters here exactly as it did for #70: `run()` returns
+// `changes: 1` unconditionally, so the compare-and-swap's LOSER cannot be seen in this file at
+// all. test/compliance-dashboard.test.js owns that against real SQLite. What this proves is what
+// was BUILT — what is bound, what is projected, and what each write refuses to touch.
+
+test("listComplianceState computes days_left in SQL — one clock, not two", async () => {
+  const db = fakeD1([[]]);
+  await listComplianceState(db);
+
+  assert.equal(db.calls.length, 1, "the whole screen is one statement");
+  const sql = db.calls[0].sql;
+  assert.deepEqual(db.calls[0].args, [], "no caller value in this statement, so no bind");
+
+  // dueExpiryItems' argument verbatim: the dashboard decides amber and red from this number at
+  // render time and the sweep decides it from the same arithmetic. Computing one of them in V8
+  // would put the two surfaces a day apart near midnight UTC.
+  assert.match(sql, /julianday\(date\(i\.expiry_date\)\) - julianday\(date\('now'\)\)/);
+  assert.match(sql, /AS days_left/);
+  // The CASE makes the null EXPLICIT. Unlike dueExpiryItems this selects rows with no date at
+  // all, and a reader has to be able to tell "there is no deadline" from "the arithmetic failed".
+  assert.match(sql, /CASE WHEN i\.expiry_date IS NULL THEN NULL/);
+  // No catalogue threshold is ever written into this statement: the per-item window is applied
+  // by the route, from the catalogue, one item at a time.
+  for (const threshold of new Set(COMPLIANCE_CATALOGUE.map((item) => item.amberDays).filter(Boolean))) {
+    assert.ok(!sql.includes(String(threshold)), `the ${threshold}-day window is never a literal here`);
+  }
+});
+
+test("listComplianceState projects candidate_id, and no address", async () => {
+  // DELIBERATELY NOT ADDED TO THE PROJECTION LOOP ABOVE. That loop asserts
+  // doesNotMatch(projection, /candidate_id/) for the booking screens, and this statement has to
+  // violate it — so the assertion lives here, where the reason can sit beside it. #70's
+  // dueExpiryItems is in this file for the same reason.
+  const db = fakeD1([[]]);
+  await listComplianceState(db);
+  const sql = db.calls[0].sql;
+  const projection = sql.slice(0, sql.search(/\bFROM\b/));
+
+  assert.ok(!projection.includes("*"), "named columns, never SELECT *");
+  // THE ADDRESS BOOK FOR A WRITE. The dashboard's PUT is /api/compliance/:candidateId, and a
+  // screen that cannot name the row it is acting on cannot act.
+  assert.match(projection, /candidate\.id AS candidate_id/);
+  // And what it still refuses. The reject email's address is read by the write route through
+  // candidateEmailById, one column at a time — this payload never carries one.
+  assert.doesNotMatch(projection, /\bemail\b/, "the recruiter's screen needs no address");
+  // It drives from `candidate` and LEFT JOINs the items: the promise is "every candidate the
+  // agency has recorded", and an inner join would answer with every candidate who still has
+  // rows — making a candidate vanish from the one screen whose job is that nobody is missed.
+  assert.match(sql, /FROM candidate\s+LEFT JOIN compliance_item/);
+  assert.match(sql, /ORDER BY candidate\.full_name, candidate\.id, i\.item_key/, "name, then the id tiebreak");
+});
+
+test("verifyItem is a compare-and-swap that touches NEITHER the reference NOR the date", async () => {
+  const db = fakeD1([]);
+  assert.deepEqual(await verifyItem(db, { candidateId: "cand-1", itemKey: "dbs_enhanced" }), { updated: true });
+
+  assert.equal(db.calls.length, 1);
+  const sql = db.calls[0].sql;
+  assert.deepEqual(db.calls[0].args, ["cand-1", "dbs_enhanced"]);
+
+  const set = sql.slice(sql.indexOf("SET"), sql.indexOf("WHERE"));
+  // THE `setItemState` TRAP, asserted. That function writes `reference = ?` and `expiry_date = ?`
+  // unconditionally, so a verify routed through it would arrive with "" and null and WIPE the
+  // number and the date that made the document verifiable — dropping the row out of
+  // dueExpiryItems permanently, by the one action whose whole point is diligence.
+  assert.ok(!set.includes("reference"), "the number the recruiter just checked is left standing");
+  assert.ok(!set.includes("expiry_date"), "and so is the date");
+  assert.match(set, /status = 'verified'/, "the first and only write of `verified` in the product");
+  // checked_at means "when did a PERSON last touch this". claimItemExpiry declines to stamp it
+  // for exactly that reason; a verify is a person, so it does.
+  assert.match(set, /checked_at = datetime\('now'\)/);
+
+  const where = sql.slice(sql.indexOf("WHERE"));
+  // THE GUARD, WHICH IS NOT A FILTER. It refuses an item nobody submitted, it closes the
+  // re-nudge loop (dueExpiryItems selects `verified`, so verifying an item already at `expiring`
+  // would let the next sweep re-amber it and send a SECOND email for the same date), and it
+  // makes a double-click's second request a no-op rather than a re-stamped checked_at.
+  assert.match(where, /AND status = 'submitted'/);
+  assert.ok(!where.includes("IN ("), "never broadened to a status list — that is the re-nudge loop");
+});
+
+test("rejectItem clears the reference and the date, under the same guard", async () => {
+  const db = fakeD1([]);
+  assert.deepEqual(await rejectItem(db, { candidateId: "cand-1", itemKey: "dbs_enhanced" }), { updated: true });
+
+  const sql = db.calls[0].sql;
+  const set = sql.slice(sql.indexOf("SET"), sql.indexOf("WHERE"));
+  assert.match(set, /status = 'missing'/);
+  // A rejected item has no valid document behind it, so it has no deadline. Clearing the date
+  // drops the row out of dueExpiryItems — otherwise a refused certificate would go on nudging
+  // the candidate about a document the recruiter has just told them is not accepted.
+  assert.match(set, /expiry_date = NULL/);
+  assert.match(set, /reference = ''/, "and the number they typed for it goes with it");
+  assert.match(set, /checked_at = datetime\('now'\)/, "a person did this too");
+  assert.match(sql.slice(sql.indexOf("WHERE")), /AND status = 'submitted'/);
+  // `NULL` and `''` are literal fragments with NO placeholder, so the ?-to-bind parity
+  // test/helpers/fake-d1.js enforces still holds. Do not "tidy" them into bound values: the
+  // columns are being CLEARED, not set to a caller's value.
+  assert.deepEqual(db.calls[0].args, ["cand-1", "dbs_enhanced"]);
+});
+
+test("the two writes name their statuses as LITERALS, never interpolated from ITEM_STATUSES", async () => {
+  // This file's rule (dueExtensionNudges, dueExpiryItems): a status list is not a bound value.
+  // The inverse also has to hold — a status must never arrive as a bound one either, or the
+  // narrow write becomes the wide one it was split off from.
+  for (const call of [verifyItem, rejectItem]) {
+    const db = fakeD1([]);
+    await call(db, { candidateId: "cand-1", itemKey: "dbs_enhanced" });
+    assert.ok(!db.calls[0].sql.includes("status = ?"), "the status is decided by the function, not by the caller");
+    for (const value of db.calls[0].args) {
+      assert.ok(!ITEM_STATUSES.includes(value), `${value} is a status and must not be bound here`);
+    }
+  }
+});
+
+test("verifyItem's and rejectItem's own 400s fire before any SQL runs", async () => {
+  const cases = [
+    ["an item_key outside the catalogue", { candidateId: "cand-1", itemKey: "passport_photo" }],
+    ["a blank item_key", { candidateId: "cand-1", itemKey: "" }],
+    ["a missing item_key", { candidateId: "cand-1" }],
+    ["a blank candidate id", { candidateId: "", itemKey: "dbs_enhanced" }],
+    ["a missing candidate id", { itemKey: "dbs_enhanced" }],
+    ["no arguments at all", {}],
+  ];
+
+  for (const call of [verifyItem, rejectItem]) {
+    for (const [name, args] of cases) {
+      const db = fakeD1([]);
+      assert.equal(await codeOf(() => call(db, args)), "missing_fields", `${name} must be the store's 400`);
+      assert.equal(db.calls.length, 0, `${name} must not reach the database`);
+    }
+  }
+
+  // And the vocabulary they check against is the exported one, not a second list.
+  assert.deepEqual(ITEM_KEYS, COMPLIANCE_CATALOGUE.map((item) => item.key));
+});
+
+test("candidateEmailById takes ONE column and no second", async () => {
+  const db = fakeD1([{ email: "priya@example.com" }]);
+  assert.deepEqual(await candidateEmailById(db, "cand-1"), { email: "priya@example.com" });
+
+  const sql = db.calls[0].sql;
+  assert.equal(sql, "SELECT email FROM candidate WHERE id = ?");
+  // candidateBySessionHash's "two columns and no third" at its narrowest. The rejection message
+  // greets nobody by name — sendExpiryNudgeEmail greets nobody either — so a `full_name` here
+  // would be a column selected in case someone needs it, on the path where an address is handed
+  // to a third-party mail provider.
+  assert.ok(!sql.includes("full_name"), "the message needs an address and nothing else");
+  assert.deepEqual(db.calls[0].args, ["cand-1"]);
+
+  // An undefined bind is a D1 error; the empty string matches nothing, which is fail-closed.
+  const absent = fakeD1([null]);
+  await candidateEmailById(absent, undefined);
+  assert.deepEqual(absent.calls[0].args, [""]);
 });
