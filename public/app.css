@@ -294,54 +294,64 @@ a {
   line-height: 1.5;
 }
 
-/* The journey map: the four act chips, shown before the acts exist. Its one job is the whole
-   journey visible before any of it happens (index.html:39-43), and as a wrapping inline row it
-   had stopped doing that — four full sentences with `flex-wrap: wrap` broke into two ragged
-   lines at 1024px and the numerals stopped being scannable, which is the only thing a map is
-   for. Four equal 1fr tracks with the numeral over its label is the same information as a band
-   you read across, and equal tracks are what keep the numbers on one line regardless of how
-   long any single label runs.
+/* The journey guide: the whole product walked step by step, as a column of pills under the
+   page head of every screen. It replaces the four-chip steps map: the map named this page's
+   acts, where this names the JOURNEY across screens (note, inputs, pack, prep, counts), with
+   one short explanation per step, so any screen a first-time reader lands on says where they
+   are in the whole. Two grounds, one grammar: --tint-guide-recruiter on the recruiter screens
+   and .journey-candidate swaps in --tint-guide-candidate on the portal.
 
-   On a phone it is four rows, numeral beside label, because vertical space is the scarce thing
-   there — the mobile-density argument at the foot of this file. That shape is the BASE here and
-   the band is the override, so the map needs no entry in the max-width: 859px block. */
-.steps {
+   Pills carry --text-primary only: --text-muted is 4.29:1 on the recruiter tint, under the
+   body-text floor (tokens.css, same rule as the state tints). No border either, same licence
+   as .notice on --tint-info: the pill is found by its tone and the words it carries.
+
+   Each pill is fit-content rather than full-bleed, so the column reads as a stack of pills
+   and never as striped rows. The li keeps max-width: 100% and the text span min-width: 0 —
+   the wide-content blowout guard every wrapping flex text needs. */
+.journey {
   list-style: none;
-  display: grid;
-  gap: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
   margin: var(--space-6) 0 0;
   padding: 0;
   font-size: var(--text-body);
-  color: var(--text-muted);
 }
 
-.steps li {
+.journey li {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
+  gap: var(--space-3);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-1);
+  background: var(--tint-guide-recruiter);
+  color: var(--text-primary);
+  border-radius: var(--radius-pill);
 }
 
-/* The label is wrapped in its own span rather than left as a bare text node beside the chip.
-   A bare text node in a flex container becomes an ANONYMOUS flex item: it lays out, but it
-   cannot be selected, so it can carry no min-width: 0 and no later rule can reach it. A 1fr
-   grid track whose child holds a full sentence and cannot be styled is a blowout waiting for
-   the first long label. The span costs one element and makes the item addressable. */
-.step-label { min-width: 0; }
+.journey-candidate li { background: var(--tint-guide-candidate); }
 
-@media (min-width: 860px) {
-  .steps {
-    grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-6);
-  }
-  /* The numeral moves above its label, and align-items: start is what holds every numeral on
-     one line across the band while the labels below them wrap to different depths. */
-  .steps li {
-    flex-direction: column;
-    align-items: start;
-    gap: var(--space-2);
-  }
+/* The numeral, concentric inside the pill's rounded end: same 24px box as .act-num but fully
+   rounded, because inside a pill the squircle reads as a mismatched corner. On the page
+   ground so it separates from the tint without a border. flex-shrink: 0 for the same squash
+   reason as .act-num below. */
+.journey-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  flex-shrink: 0;
+  background: var(--background);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
 }
+
+.journey-text { min-width: 0; }
+
+.journey-text strong { font-weight: 600; }
 
 .workspace {
   display: grid;
@@ -803,9 +813,9 @@ a {
    out of running text. aria-hidden in the markup: the heading names the act; the number is
    the visual rhythm.
 
-   ONE class in TWO places — the steps map (index.html:45-48) and the four act headings — and
-   that is deliberate: "same chip grammar as the acts, so the map and the flow read as one
-   thing" (index.html:41-42). Size its CONTEXT, never the chip.
+   Its one home is the four act headings — the journey guide above carries its own numeral
+   (.journey-num), fully rounded to sit concentric inside a pill. Size the chip's CONTEXT,
+   never the chip.
 
    24px, up from 20px in #59: a 20px chip beside a 20px heading reads as a bullet, and 24px
    reads as a numeral. The 12px mono stays — 12px centred in a 24px box is comfortable and 14px
@@ -822,10 +832,8 @@ a {
   width: var(--space-6);
   height: var(--space-6);
   /* A flex item's default flex-shrink: 1 lets a fixed width be squashed by a long sibling on
-     the main axis, and the chip is now a flex item in two containers — .act-head, and .steps li
-     which is a row on a phone. At 360px, "Send the candidate their prep once the interview is
-     booked" beside this chip is exactly that case. Same line and same reason as .strike-box and
-     the visibility list's checkbox. */
+     the main axis, and the chip is a flex item beside a heading that wraps at 360px. Same line
+     and same reason as .strike-box and the visibility list's checkbox. */
   flex-shrink: 0;
   background: var(--surface);
   border: 1px solid var(--border-hairline);

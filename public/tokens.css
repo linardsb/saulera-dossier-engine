@@ -86,6 +86,17 @@
   --tint-info:     #b0d4e8;
   --tint-warn:     #fbeeec;
 
+  /* The two journey-guide grounds: the pill band that walks a first-time reader through the
+     whole product, blue on the recruiter screens and orange on the candidate portal, so the two
+     audiences' guides are told apart at a glance. Deliberately NOT --tint-info, although a
+     guide is information: the info tint is spent (open questions, dead-link notice) and a guide
+     that shared it would read as one of those states. Same discipline as the tints above: these
+     are BACKGROUNDS, the pill carries --text-primary (9.39:1 and 9.41:1) and never
+     --text-muted, and no border is drawn in them. test/tokens.test.js's TINTS table measures
+     both. */
+  --tint-guide-recruiter: #c7e0f2;
+  --tint-guide-candidate: #f8d8b1;
+
   /* stackai's soft layered card shadow, one token so every card lifts identically. Alpha hex
      is fine here: the contrast gate reads single whole-value hex tokens only, and a shadow is
      not a colour pairing. The two tinted layers carry the ink's own hue, so they moved with it

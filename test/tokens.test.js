@@ -115,6 +115,9 @@ const TINTS = [
   ["tint-verified", ["text-primary", "verified"]],
   ["tint-info", ["text-primary"]],
   ["tint-warn", ["text-primary", "unverified", "failed", "danger"]],
+  // The journey-guide pills (recruiter blue, candidate orange) carry ink only, same rule.
+  ["tint-guide-recruiter", ["text-primary"]],
+  ["tint-guide-candidate", ["text-primary"]],
 ];
 
 for (const [tint, marks] of TINTS) {
