@@ -51,3 +51,25 @@ export const ITEM_STATUSES = ["missing", "submitted", "verified", "expiring", "e
  * copy that could drift from the sweep's.
  */
 export const EXTENSION_LEAD_DAYS = 14;
+
+/**
+ * The two states the expiry sweep is allowed to write (#70).
+ *
+ * A subset of ITEM_STATUSES rather than a second list: `missing` is the candidate's starting
+ * state, `submitted` is theirs to write and `verified` is the recruiter's (#71). A sweep that
+ * could write `verified` would let a clock mark a document as checked, which is the one thing
+ * in this epic that has to mean a person looked. src/compliance/store.js validates against
+ * this, so that is structural rather than a convention.
+ */
+export const EXPIRY_STATES = ["expiring", "expired"];
+
+/**
+ * The widest amber window any item declares — the sweep's narrowing bound.
+ *
+ * DERIVED, never typed. A literal 60 here would mean retuning `hcpc_registration` to 90 days
+ * silently drops it out of the query's window and the radar goes quiet for that item with no
+ * error anywhere: exactly the failure "thresholds live in the catalogue, not code"
+ * (architecture, "Data model") exists to prevent. `?? 0` covers the `expires: false` rows,
+ * whose amberDays is null.
+ */
+export const MAX_AMBER_DAYS = Math.max(...COMPLIANCE_CATALOGUE.map((item) => item.amberDays ?? 0));

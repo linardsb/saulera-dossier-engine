@@ -16,7 +16,7 @@
 // acceptance criteria never mention.
 
 import { hashToken } from "../../../src/portal/store.js";
-import { createCandidate, rotateCandidateSession } from "../../../src/compliance/store.js";
+import { createCandidate, rotateCandidateSession, setItemState } from "../../../src/compliance/store.js";
 import { complianceCookie, sessionExpiry } from "../../../src/compliance/tokens.js";
 import { maxAgeFrom, mintToken } from "../../../src/prep/tokens.js";
 
@@ -37,7 +37,31 @@ export async function onRequestGet(context) {
   const existing = await env.DB.prepare("SELECT id FROM candidate WHERE id = ?")
     .bind(DEMO_CANDIDATE.id)
     .first();
-  if (!existing) await createCandidate(env.DB, DEMO_CANDIDATE);
+  if (!existing) {
+    await createCandidate(env.DB, DEMO_CANDIDATE);
+    // ONE ITEM, DELIBERATELY IN THE AMBER WINDOW. docs/handover-louis-meeting.md gives the demo
+    // persona a training expiry "on purpose — the demo point: the engine surfaces the expiry
+    // before the client does", and until #70 there was nothing to surface it with. 25 days
+    // against immunisations' 30-day amberDays puts it inside the window with five days of
+    // margin, so the demo does not turn on the hour it is run.
+    //
+    // The DATE COMES FROM SQLITE, not from JS: the sweep compares against date('now') and a
+    // fixture built on V8's clock is the ±1-day flip test/extension-radar.test.js's header calls
+    // worse than no test.
+    //
+    // Seeded only on FIRST click, so re-opening the demo does not reset an item the sweep has
+    // already ambered. And note the ordering: _middleware.js runs before this handler, so the
+    // sweep that ambers this row is the one on the NEXT request — the redirect to
+    // /prep/compliance/ — not this one.
+    const expiryDate = await env.DB.prepare("SELECT date('now', '+25 days') AS d").first("d");
+    await setItemState(env.DB, {
+      candidateId: DEMO_CANDIDATE.id,
+      itemKey: "immunisations",
+      status: "submitted",
+      reference: "IMM-2024-118",
+      expiryDate,
+    });
+  }
 
   const next = mintToken();
   const expiresAt = sessionExpiry();

@@ -16,7 +16,7 @@
 
 import { StoreError } from "../store.js";
 import { equalHex } from "../portal/store.js";
-import { COMPLIANCE_CATALOGUE, ITEM_KEYS, ITEM_STATUSES } from "./catalogue.js";
+import { COMPLIANCE_CATALOGUE, EXPIRY_STATES, ITEM_KEYS, ITEM_STATUSES } from "./catalogue.js";
 
 /**
  * The booking vocabulary, as `assignment.status`'s CHECK declares it.
@@ -421,6 +421,133 @@ export async function itemsByCandidate(db, candidateId) {
     .bind(String(candidateId ?? ""))
     .all();
   return results ?? [];
+}
+
+// ── the expiry radar (#70) ─────────────────────────────────────────────────────────────
+//
+// `compliance_item.expiry_date` was written by #67 and read by nobody: the passport renders it
+// as a line of text and public/prep/prep.css ships the amber and red chips with a comment
+// saying they cannot render until this sweep exists. These two functions are the sweep's whole
+// database half.
+
+/**
+ * Every checklist row that carries a date worth looking at, with the arithmetic already done.
+ *
+ * Five clauses and one computed column, and each is a decision:
+ *
+ *   1. `expiry_date IS NOT NULL` — an item with no date has no deadline. Non-expiring items
+ *      (`references`, `wtr_choice`) can never gain one: functions/prep/compliance/api/item.js
+ *      answers 400 for a date on an item the catalogue marks `expires: false`.
+ *   2. `status IN ('submitted','verified','expiring')` — the three states a transition can
+ *      start from. `missing` carries no date, and `expired` is terminal: an item cannot get
+ *      more expired, and re-entering the pool is what a renewal does by writing `submitted`.
+ *      The literals are written out here rather than interpolated from ITEM_STATUSES for
+ *      `dueExtensionNudges`' reason (line 209-210): a status list is not a bound value.
+ *   3. `date(expiry_date) <= date('now', '+' || ? || ' days')` with MAX_AMBER_DAYS bound —
+ *      the WIDEST window any item declares, not each item's own. Per-item thresholds cannot be
+ *      one comparison (they differ by item_key), and a CASE built from the catalogue array
+ *      would be a string-built statement at the centre of this file's no-interpolation rule.
+ *      So SQL narrows to a small candidate set and the caller applies the per-item number.
+ *      Everything this over-selects is discarded by `targetFor` returning null.
+ *   4. `date()` and not `datetime()` — DAY granularity, `isNotPast`'s argument
+ *      (src/prep/dates.js): a certificate valid to the 3rd is valid all day on the 3rd.
+ *   5. The JOIN reaches `candidate` for two columns this store has been careful never to
+ *      project together before. `candidateBySessionHash` takes two and no third; this takes
+ *      the name because the recruiter's digest names who to chase, and the address because
+ *      the candidate's own nudge has to reach them. Both are needed by the caller and neither
+ *      is ever logged — src/compliance/nudges.js logs a status code and nothing else.
+ *
+ * `days_left` IS THE POINT OF THIS QUERY. The amber/red decision needs today's date, and
+ * computing it in JavaScript would compare SQLite's clock (the WHERE) against V8's (the
+ * decision) — the ±1-day flip near midnight UTC that test/extension-radar.test.js's header
+ * calls "worse than no test". Both operands are date-only, so their julianday difference is an
+ * exact integer and the CAST truncates nothing. Negative means lapsed; 0 means today.
+ *
+ * `maxAmberDays` is ours and never a caller's, and it is still bound rather than templated —
+ * `dueExtensionNudges`' idiom, Number.isInteger guard included, because that guard is what
+ * makes SQLite's `'+' || ? || ' days'` produce a modifier it can read rather than a silent
+ * NULL.
+ */
+export async function dueExpiryItems(db, maxAmberDays) {
+  if (!Number.isInteger(maxAmberDays) || maxAmberDays <= 0) {
+    throw new StoreError("missing_fields", 400, "maxAmberDays: must be a positive integer");
+  }
+  const { results } = await db
+    .prepare(
+      `SELECT i.id, i.candidate_id, i.item_key, i.status, i.expiry_date,
+              CAST(julianday(date(i.expiry_date)) - julianday(date('now')) AS INTEGER) AS days_left,
+              candidate.full_name AS candidate_name,
+              candidate.email     AS candidate_email
+         FROM compliance_item i
+         JOIN candidate ON candidate.id = i.candidate_id
+        WHERE i.expiry_date IS NOT NULL
+          AND i.status IN ('submitted', 'verified', 'expiring')
+          AND date(i.expiry_date) <= date('now', '+' || ? || ' days')
+        ORDER BY date(i.expiry_date), i.candidate_id, i.item_key`,
+    )
+    .bind(maxAmberDays)
+    .all();
+  return results ?? [];
+}
+
+/**
+ * Claim one item's state change. `claimExtensionNudge`'s move with the guard on VALUES rather
+ * than on NULL, and the whole reason this ticket needs no migration: the status the sweep
+ * writes IS the record that it fired, so there is no second stamp to add and no lockfile to
+ * change.
+ *
+ * THE WHERE CARRIES BOTH OBSERVED VALUES, AND THE DATE IS THE LOAD-BEARING ONE. The obvious
+ * guard is `WHERE id = ? AND status = ?`, and it is not enough — because
+ * functions/prep/compliance/api/item.js ALWAYS writes `submitted`, so the ordinary renewal is
+ * `submitted → submitted` with a new date and a status-only guard matches it:
+ *
+ *     sweep reads   {id: 5, status: 'submitted', expiry_date: '2026-09-01', days_left: 29}
+ *     candidate renews          status='submitted', expiry_date='2028-01-01'
+ *     status-only CAS matches → status='expiring' over a date two years out
+ *
+ * The card would then read "Expiring · This runs out soon · Runs out 1 January 2028", the
+ * candidate's email would name a date no longer in the database, and it would be STICKY: the
+ * next sweep does not select that row at all (2028 is outside every window), so nothing heals
+ * it short of another manual re-submit. The window is not incidental either — the middleware
+ * runs this sweep on every /prep/* request including prep.css and passport.js, so a candidate
+ * sitting on the passport has sweeps in flight while their renewal POST is being handled.
+ *
+ * Binding `expiry_date` closes it, because A RENEWAL ALWAYS WRITES A NEW DATE — that is what
+ * makes it a renewal. A re-submit that only corrects a typo'd reference number keeps the same
+ * date and the claim still wins, which is right: nothing about the deadline changed.
+ *
+ * The other tempting tidy-up is `WHERE id = ? AND status IN ('submitted','verified')`. Same
+ * failure, wider: it would stamp an amber flag over a certificate renewed thirty seconds ago.
+ * There is no transaction on D1; this pair of bound values is what makes "one nudge per state
+ * change" structural rather than hopeful.
+ *
+ * `to` is checked against EXPIRY_STATES and not ITEM_STATUSES: a sweep that could write
+ * `verified` would let a clock mark a document as checked.
+ *
+ * IT DOES NOT STAMP `checked_at`, deliberately. That column means "when did a person last
+ * touch this" — `setItemState` stamps it for the candidate's submit and for #71's verify — and
+ * overwriting it with the moment a sweep read a date would destroy the one fact the recruiter
+ * dashboard wants. The sweep's answer is fully derivable from `status` and `expiry_date`
+ * already, so it needs no stamp of its own.
+ *
+ * The id guard fails closed for the same reason claimExtensionNudge's `String(id ?? "")` does:
+ * an `undefined` bind is a D1 error. `compliance_item.id` is an INTEGER PRIMARY KEY rather
+ * than a text id, and the bigint branch is there because a SQLite driver may hand an integer
+ * column back as one — test/expiry-radar.test.js records what this one actually returns.
+ */
+export async function claimItemExpiry(db, { id, from, to, expiryDate } = {}) {
+  const rowId = typeof id === "bigint" ? Number(id) : id;
+  if (!Number.isInteger(rowId)) {
+    throw new StoreError("missing_fields", 400, "id: must be an integer");
+  }
+  requireFields({ expiryDate });
+  requireOneOf("from", from, ITEM_STATUSES);
+  requireOneOf("to", to, EXPIRY_STATES);
+  const result = await db
+    .prepare("UPDATE compliance_item SET status = ? WHERE id = ? AND status = ? AND expiry_date = ?")
+    .bind(to, rowId, from, expiryDate)
+    .run();
+  return (result.meta?.changes ?? 0) === 1;
 }
 
 // ── the cage's own door (#68) ──────────────────────────────────────────────────────────

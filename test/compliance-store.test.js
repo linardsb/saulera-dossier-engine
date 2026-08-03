@@ -13,16 +13,24 @@ import assert from "node:assert/strict";
 
 import { fakeD1 } from "./helpers/fake-d1.js";
 import { StoreError } from "../src/store.js";
-import { ITEM_KEYS, ITEM_STATUSES } from "../src/compliance/catalogue.js";
+import {
+  COMPLIANCE_CATALOGUE,
+  EXPIRY_STATES,
+  ITEM_KEYS,
+  ITEM_STATUSES,
+  MAX_AMBER_DAYS,
+} from "../src/compliance/catalogue.js";
 import {
   ASSIGNMENT_STATUSES,
   candidateByEmail,
   candidateBySessionHash,
   claimExtensionNudge,
+  claimItemExpiry,
   consumeCandidateOtp,
   createAssignment,
   createCandidate,
   deleteCandidate,
+  dueExpiryItems,
   dueExtensionNudges,
   issueCandidateOtp,
   itemsByCandidate,
@@ -574,4 +582,130 @@ test("updateAssignment's own 400s fire before any SQL runs", async () => {
 
   // And the vocabulary it checks against is the exported one, not a second list.
   assert.deepEqual(ASSIGNMENT_STATUSES, ["booked", "active", "ended", "cancelled"]);
+});
+
+// ── the expiry radar's two statements (#70) ────────────────────────────────────────────
+//
+// STATEMENT SHAPE ONLY, and here the split matters more than anywhere: `run()` returns
+// `changes: 1` unconditionally, so the compare-and-swap's LOSER cannot be seen in this file at
+// all. test/expiry-radar.test.js owns that against real SQLite. What this file proves is what
+// was BUILT — what is bound, what is projected, and what is refused before any SQL runs.
+
+test("dueExpiryItems binds the widest window and interpolates nothing", async () => {
+  const db = fakeD1([[]]);
+  await dueExpiryItems(db, MAX_AMBER_DAYS);
+
+  assert.equal(db.calls.length, 1, "the radar's whole predicate is one statement");
+  const sql = db.calls[0].sql;
+  // dueExtensionNudges' idiom: the modifier is assembled by SQLite from a BOUND value, so the
+  // number stays outside the statement text even though it is ours and not a caller's.
+  assert.match(sql, /date\('now', '\+' \|\| \? \|\| ' days'\)/, "the bound-modifier idiom, not a template");
+  assert.deepEqual(db.calls[0].args, [MAX_AMBER_DAYS]);
+
+  // No catalogue threshold is ever written into the SQL. A literal here is the failure
+  // MAX_AMBER_DAYS exists to prevent, and it would fail SILENTLY.
+  for (const threshold of new Set(COMPLIANCE_CATALOGUE.map((item) => item.amberDays).filter(Boolean))) {
+    assert.ok(!sql.includes(String(threshold)), `the ${threshold}-day window is never a literal`);
+  }
+
+  // The clauses, each one a decision (read the function's comment for why).
+  assert.match(sql, /i\.expiry_date IS NOT NULL/, "an item with no date has no deadline");
+  assert.match(
+    sql,
+    /i\.status IN \('submitted', 'verified', 'expiring'\)/,
+    "the three states a crossing can start from; expired is terminal",
+  );
+  assert.match(sql, /date\(i\.expiry_date\) <= date\('now'/, "inclusive at the far edge");
+  assert.ok(!/datetime\(i\.expiry_date\)/.test(sql), "day granularity, not instants");
+});
+
+test("dueExpiryItems computes days_left in SQL — one clock, not two", async () => {
+  const db = fakeD1([[]]);
+  await dueExpiryItems(db, MAX_AMBER_DAYS);
+  const sql = db.calls[0].sql;
+
+  // THE POINT OF THE QUERY. Doing this arithmetic in JavaScript would compare SQLite's clock
+  // (the WHERE) against V8's (the decision) — the ±1-day flip near midnight UTC that
+  // test/extension-radar.test.js's header calls worse than no test.
+  assert.match(sql, /julianday\(date\(i\.expiry_date\)\) - julianday\(date\('now'\)\)/);
+  assert.match(sql, /AS days_left/, "and the caller reads an integer rather than computing one");
+
+  // Named columns, never SELECT *. This projection deliberately DOES carry the name and the
+  // address — the digest names who to chase and the nudge has to reach them — which is why it is
+  // asserted here rather than added to the booking screens' no-email loop above.
+  const projection = sql.slice(0, sql.search(/\bFROM\b/));
+  assert.ok(!projection.includes("*"), "named columns, never SELECT *");
+  assert.match(projection, /candidate\.full_name AS candidate_name/);
+  assert.match(projection, /candidate\.email\s+AS candidate_email/);
+  assert.ok(!/reference/.test(projection), "the sweep has no use for what the candidate typed");
+});
+
+test("dueExpiryItems refuses a non-integer window BEFORE any SQL runs", async () => {
+  for (const bad of [0, -1, 30.5, "30", null, undefined]) {
+    const db = fakeD1([]);
+    assert.equal(await codeOf(() => dueExpiryItems(db, bad)), "missing_fields", `maxAmberDays ${bad}`);
+    assert.equal(db.calls.length, 0, "the guard is what makes the bound modifier readable, so it runs first");
+  }
+});
+
+test("claimItemExpiry's WHERE carries BOTH observed values — the tidy-up this forbids", async () => {
+  const db = fakeD1([]);
+  const won = await claimItemExpiry(db, {
+    id: 5,
+    from: "submitted",
+    to: "expiring",
+    expiryDate: "2026-09-01",
+  });
+  assert.equal(won, true); // fake-d1 run() reports changes: 1
+
+  assert.equal(db.calls.length, 1, "one statement: the claim IS the state change");
+  const sql = db.calls[0].sql;
+  assert.deepEqual(db.calls[0].args, ["expiring", 5, "submitted", "2026-09-01"]);
+
+  const where = sql.slice(sql.indexOf("WHERE"));
+  assert.match(where, /status = \?/, "the observed status");
+  // THE ONE THAT MUST NOT BE DROPPED AS REDUNDANT. item.js always writes `submitted`, so the
+  // ordinary renewal is submitted → submitted with a NEW date, and a status-only guard matches
+  // it — stamping `expiring` over a date two years out, stickily. test/expiry-radar.test.js
+  // proves the failure; this asserts the mechanism is still in the statement.
+  assert.match(where, /expiry_date = \?/, "and the observed date, which is the load-bearing half");
+  assert.ok(!where.includes("IN ("), "never broadened to a status list — that is the same bug, wider");
+
+  // The SET clause names `status` and nothing else. `expiry_date` appears in the WHERE, so this
+  // must match on the SET clause rather than on the whole statement.
+  const set = sql.slice(sql.indexOf("SET"), sql.indexOf("WHERE"));
+  assert.match(set, /SET status = \?/);
+  // checked_at means "when did a PERSON last touch this". Overwriting it with the moment a sweep
+  // read a date would destroy the one fact #71's dashboard wants.
+  assert.ok(!set.includes("checked_at"), "the sweep is not a person and does not stamp one");
+  assert.ok(!set.includes("reference"), "nor does it touch what the candidate typed");
+});
+
+test("claimItemExpiry's own 400s all fire before any SQL runs", async () => {
+  const good = { id: 5, from: "submitted", to: "expiring", expiryDate: "2026-09-01" };
+  const cases = [
+    // A sweep that could write `verified` would let a clock mark a document as checked.
+    ["a state only a person may write", { ...good, to: "verified" }],
+    ["a state that is not a crossing", { ...good, to: "missing" }],
+    ["a state the sweep never writes", { ...good, to: "submitted" }],
+    ["a `from` outside the column's five", { ...good, from: "lapsed" }],
+    ["a blank expiry date", { ...good, expiryDate: "" }],
+    ["a missing expiry date", { ...good, expiryDate: undefined }],
+    // An undefined bind is a D1 error, and a text id would silently match nothing.
+    ["a text id", { ...good, id: "5" }],
+    ["a float id", { ...good, id: 5.5 }],
+    ["no arguments at all", {}],
+  ];
+
+  for (const [name, args] of cases) {
+    const db = fakeD1([]);
+    assert.equal(await codeOf(() => claimItemExpiry(db, args)), "missing_fields", `${name} must be the store's 400`);
+    assert.equal(db.calls.length, 0, `${name} must not reach the database`);
+  }
+
+  // And the vocabulary it checks `to` against is the narrow exported one, not the column's five.
+  assert.deepEqual(EXPIRY_STATES, ["expiring", "expired"]);
+  for (const state of EXPIRY_STATES) {
+    assert.ok(ITEM_STATUSES.includes(state), "a subset of the column's CHECK, never a sixth state");
+  }
 });

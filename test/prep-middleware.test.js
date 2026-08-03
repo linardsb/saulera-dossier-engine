@@ -12,13 +12,21 @@
 // RECRUITER_EMAIL in either env here) would make that assertion say nothing. The third test
 // makes the independence measurable — the middleware's two catch blocks exist so one broken or
 // unconfigured sweep cannot take the other, or the response, down with it.
+//
+// #70 puts one job in EACH tier, which is what this file's last test is for. Its MAIL half is
+// the third deferred sweep, registered last for the reason above, so the waitUntil count moves
+// from 2 to 3 — again deliberately and in the same PR. Its STATE half is AWAITED, beside the
+// two purges rather than beside the sends, because `compliance_item.status` is what the next
+// handler renders: a lapsed certificate must not draw as "Sent in" one last time, which is the
+// purge argument at the top of this file at a new root. That half is also the one sweep here
+// that depends on NO mail configuration at all, and the test proves both properties at once.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { onRequest } from "../functions/prep/_middleware.js";
 import { createInvite, hashToken } from "../src/portal/store.js";
-import { createAssignment, createCandidate } from "../src/compliance/store.js";
+import { createAssignment, createCandidate, setItemState } from "../src/compliance/store.js";
 import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
 
 // sent_at is backdated to yesterday because #39 made "sent today" mean "no reminder" — the
@@ -61,7 +69,11 @@ test("the response does not wait for the sends: the sweep rides waitUntil", { sk
       waitUntil: (promise) => captured.push(promise),
     });
     assert.equal(await response.text(), "page", "answered while the send is still in flight");
-    assert.equal(captured.length, 2, "both sweeps — reminder and extension radar — were handed to waitUntil");
+    assert.equal(
+      captured.length,
+      3,
+      "all three sends — reminder, extension radar and expiry mail — were handed to waitUntil",
+    );
 
     // The response beat the send to the point that fetch may not even have started yet —
     // let the deferred sweep reach it, then answer.
@@ -69,6 +81,13 @@ test("the response does not wait for the sends: the sweep rides waitUntil", { sk
     release();
     await captured[0];
     assert.equal(fetchCalls, 1, "and the deferred sweep did send the due reminder");
+
+    // captured[0] must STAY the reminder — this file awaits it to prove the deferred slot really
+    // delivers, and a sweep that bails instantly in that slot would make the assertion say
+    // nothing. #70's mail is registered last for that reason; with nothing claimed it settles
+    // without throwing and without spending a request.
+    await captured[2];
+    assert.equal(fetchCalls, 1, "the expiry mail had nothing to send, so the quiet day cost nothing");
   } finally {
     globalThis.fetch = original;
   }
@@ -118,7 +137,7 @@ test("one unconfigured sweep does not take the other, or the response, down (#69
       waitUntil: (promise) => captured.push(promise),
     });
     assert.equal(await response.text(), "page", "the response served regardless");
-    assert.equal(captured.length, 2, "both sweeps were still handed over");
+    assert.equal(captured.length, 3, "all three sends were still handed over");
 
     // Neither rejects. A sweep that throws past its own catch would reject here and take the
     // request's waitUntil with it on the real runtime.
@@ -135,4 +154,37 @@ test("one unconfigured sweep does not take the other, or the response, down (#69
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("the expiry STATE sweep is awaited, and needs no mail configuration (#70)", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+
+  // A certificate that lapsed yesterday. The date comes from SQLite's own clock, so the fixture
+  // and the sweep's comparison are the same arithmetic.
+  await createCandidate(d1, { id: "cand-1", fullName: "Priya Nair", email: "p@example.com" });
+  await setItemState(d1, {
+    candidateId: "cand-1",
+    itemKey: "immunisations",
+    status: "submitted",
+    reference: "IMM-2024-118",
+    expiryDate: db.prepare("SELECT date('now', '-1 days') AS d").get().d,
+  });
+
+  const statusIn = () =>
+    db.prepare("SELECT status FROM compliance_item WHERE candidate_id = 'cand-1' AND item_key = 'immunisations'")
+      .get().status;
+
+  // NO MAIL CONFIGURATION AT ALL — no RESEND_API_KEY, no PREP_BASE_URL, no RECRUITER_EMAIL. This
+  // asserts both halves of #70's one inversion of #69 at once: the state moves anyway (the claim
+  // IS the product state the passport renders, so refusing to claim would mean refusing to know),
+  // and it has already moved by the time next() runs (the purge argument at the top of this file
+  // — a lapsed certificate must not draw as "Sent in" one last time).
+  const response = await onRequest({
+    env: { DB: d1 },
+    next: async () => new Response(statusIn()),
+    waitUntil: () => {},
+  });
+  assert.equal(await response.text(), "expired", "swept before the request was served");
+  assert.equal(statusIn(), "expired");
 });

@@ -21,11 +21,45 @@
 // candidate's name) and that booking is simply skipped. Same knowing divergence from #22's
 // rollback-on-throw that reminders.js records — there the invite email IS the product; here the
 // nudge is a courtesy, and the screen still shows the amber row.
+//
+// #70 ADDS A SECOND RADAR TO THIS FILE, AND IT IS DELIBERATELY SPLIT IN TWO.
+//
+// `sendDueExtensionNudges` below takes `env` and refuses to claim anything unless it can also
+// send: it bails on a missing RECRUITER_EMAIL. That is right there, because the claim guards a
+// courtesy email and public/assignments.js computes the amber row at render time, so the screen
+// stays true whatever the mail configuration is.
+//
+// The expiry radar cannot inherit that rule, because for it the claim IS the product state.
+// `compliance_item.status` is what the passport renders — a deployment with no RECRUITER_EMAIL
+// that refused to claim would leave a candidate looking at a green "Sent in" chip over a
+// certificate that lapsed in June, which is the exact failure this epic exists to prevent.
+//
+// So: `sweepExpiryStates(db)` takes the DATABASE and nothing else, and always runs. Its cost,
+// stated rather than discovered: on a deployment with no mail configured the states move and no
+// email is ever sent for those transitions — and because the transition is the claim, they will
+// not be sent later either. The screen is right and the nudge is lost. `mailExpiryNudges(env,
+// claimed)` is the half that needs configuration, and it takes what the first half won rather
+// than re-reading the database, because after a successful claim there is nothing left to find.
+//
+// AT-MOST-ONCE, WITH ONE HONEST DIFFERENCE FROM #69. There the claim column recorded that a
+// nudge was SENT. Here the status records that the item CHANGED STATE, so a failed send leaves
+// the state moved with no message behind it and nothing to retry from. That is the same trade
+// #25 and #69 already took — a courtesy outranked by "exactly once" — but the operator's
+// assurance query is a count of states, not of sends, and DEPLOY.md says so.
 
-import { dueExtensionNudges, claimExtensionNudge } from "./store.js";
-import { EXTENSION_LEAD_DAYS } from "./catalogue.js";
+import {
+  claimItemExpiry,
+  claimExtensionNudge,
+  dueExpiryItems,
+  dueExtensionNudges,
+} from "./store.js";
+import { COMPLIANCE_CATALOGUE, EXTENSION_LEAD_DAYS, MAX_AMBER_DAYS } from "./catalogue.js";
 import { getAgency } from "../store.js";
-import { sendExtensionNudgeEmail } from "../prep/email.js";
+import {
+  sendExpiryDigestEmail,
+  sendExpiryNudgeEmail,
+  sendExtensionNudgeEmail,
+} from "../prep/email.js";
 
 /** send.js's PREP_BASE_URL discipline, mirrored from reminders.js: a bare https origin or nothing. */
 function baseUrl(env) {
@@ -102,6 +136,147 @@ export async function sendDueExtensionNudges(env) {
       // Claimed and NOT rolled back — see the header. Status only: never the recipient, never
       // the candidate's name.
       console.error("extension nudge send failed:", err?.code ?? err?.name ?? "unknown");
+    }
+  }
+}
+
+// ── the expiry radar (#70) ─────────────────────────────────────────────────────────────
+
+/** The catalogue as a lookup, built once: the sweep asks it per row. */
+const CATALOGUE_BY_KEY = new Map(COMPLIANCE_CATALOGUE.map((item) => [item.key, item]));
+
+/**
+ * Amber, red, or leave it alone — the whole radar rule, in three lines.
+ *
+ * RED IS TESTED FIRST. An item whose date passed a fortnight ago satisfies "inside the amber
+ * window" too (every negative number is <= amberDays), and answering `expiring` for it would
+ * tell a candidate their lapsed DBS "runs out soon". Order is the fix; there is no second
+ * condition to get wrong.
+ *
+ * `daysLeft === 0` — it runs out TODAY — is amber and not red, `isNotPast`'s argument
+ * (src/prep/dates.js): a certificate valid to the 3rd is valid all day on the 3rd.
+ *
+ * `daysLeft` is computed by SQLITE, never here. See dueExpiryItems for why that matters.
+ */
+function targetFor(daysLeft, amberDays) {
+  if (daysLeft < 0) return "expired";
+  if (daysLeft <= amberDays) return "expiring";
+  return null;
+}
+
+/**
+ * Move every checklist row that has crossed a line, and report what moved.
+ *
+ * Takes `db` and not `env` — see the header. This half must run on any deployment that has a
+ * database at all.
+ *
+ * The catalogue guard skips three classes of row the SQL cannot: an item_key retired from the
+ * catalogue (its rows survive; catalogue.js:18-19 says adding an item is an edit, and removing
+ * one leaves rows behind), an item marked `expires: false` that somehow holds a date, and a
+ * malformed amberDays. Each is a row we decline to reason about rather than one we guess at.
+ *
+ * `target === row.status` is the ordinary case, not an error: the query narrows to the WIDEST
+ * amber window, so a 30-day item sitting 45 days out comes back and is left alone, and a row
+ * already `expiring` and still inside its window comes back every sweep and is left alone every
+ * time. That is what makes the claim below fire exactly once per crossing.
+ *
+ * Sequential, `sendDueExtensionNudges`' reason: the due set is tiny and a Promise.all would
+ * race the claims for no gain. Two concurrent REQUESTS still cannot double-claim — the
+ * compare-and-swap has one winner per row.
+ */
+export async function sweepExpiryStates(db) {
+  if (!db) return [];
+  const rows = await dueExpiryItems(db, MAX_AMBER_DAYS);
+  const claimed = [];
+  for (const row of rows) {
+    const entry = CATALOGUE_BY_KEY.get(row.item_key);
+    if (!entry?.expires || !Number.isInteger(entry.amberDays)) continue;
+
+    const target = targetFor(row.days_left, entry.amberDays);
+    if (!target || target === row.status) continue;
+
+    // Both observed values travel back into the WHERE. Passing `row.expiry_date` is not
+    // bookkeeping — it is what makes a renewal that keeps the status (`submitted → submitted`
+    // with a new date, which is the ORDINARY renewal) invalidate this claim. See
+    // claimItemExpiry's comment for the failure it closes.
+    const won = await claimItemExpiry(db, {
+      id: row.id,
+      from: row.status,
+      to: target,
+      expiryDate: row.expiry_date,
+    });
+    if (!won) continue; // a renewal landed between the read and the write, and it wins
+
+    claimed.push({
+      candidateId: row.candidate_id,
+      candidateName: row.candidate_name,
+      candidateEmail: row.candidate_email,
+      label: entry.label,
+      expiryDate: row.expiry_date,
+      status: target,
+    });
+  }
+  return claimed;
+}
+
+/**
+ * The two messages, from what the sweep just won.
+ *
+ * TWO INDEPENDENT CONFIGURATION GUARDS, because these are two independent messages with two
+ * independent requirements. The candidate's nudge needs a base URL (it carries a link); the
+ * recruiter's digest needs a validated recipient (it carries none). A deployment with
+ * PREP_BASE_URL and no RECRUITER_EMAIL should still tell the candidates — refusing both because
+ * one is unset is the coupling `sendDueExtensionNudges` could afford and this cannot.
+ *
+ * Nothing is rolled back on a failure and nothing is retried: the states are already claimed,
+ * and the header says why. Each send has its own try/catch, so one candidate's bad address does
+ * not cost the rest of the batch its message.
+ *
+ * `getAgency` is fetched once, after the guards, and only if there is something to send —
+ * `sendDueExtensionNudges`' "due first, agency only if anything is" rule.
+ */
+export async function mailExpiryNudges(env, claimed = []) {
+  if (!Array.isArray(claimed) || claimed.length === 0) return;
+  if (!env?.RESEND_API_KEY) return;
+
+  const base = baseUrl(env);
+  const to = recipient(env);
+  if (!base && !to) return;
+
+  const agency = await getAgency(env.DB).catch(() => null);
+
+  if (base) {
+    // Grouped by candidate: one message listing everything of theirs that moved, never one per
+    // item. A Map keeps insertion order, so each candidate's list stays in the query's
+    // soonest-first order even though the rows arrive interleaved across candidates.
+    const byCandidate = new Map();
+    for (const row of claimed) {
+      if (!row.candidateEmail) continue;
+      if (!byCandidate.has(row.candidateId)) byCandidate.set(row.candidateId, []);
+      byCandidate.get(row.candidateId).push(row);
+    }
+    for (const items of byCandidate.values()) {
+      try {
+        await sendExpiryNudgeEmail(env, {
+          to: items[0].candidateEmail,
+          agencyName: agency?.name,
+          items,
+          // The candidate's own door, and the COMPLIANCE one: the two portals hold independent
+          // cookies and /prep/login would sign them in to the interview-prep product.
+          link: `${base}/prep/compliance/login`,
+        });
+      } catch (err) {
+        // Status only: never the recipient, never the candidate's name, never the item.
+        console.error("expiry nudge send failed:", err?.code ?? err?.name ?? "unknown");
+      }
+    }
+  }
+
+  if (to) {
+    try {
+      await sendExpiryDigestEmail(env, { to, agencyName: agency?.name, rows: claimed });
+    } catch (err) {
+      console.error("expiry digest send failed:", err?.code ?? err?.name ?? "unknown");
     }
   }
 }
