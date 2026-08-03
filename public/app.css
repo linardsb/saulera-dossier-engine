@@ -321,10 +321,12 @@ a {
 
 .journey li {
   display: flex;
-  align-items: center;
+  /* flex-start, not center: the explanations run to two or three lines, and a centred numeral
+     floats in the middle of a paragraph instead of marking where the step starts. */
+  align-items: flex-start;
   gap: var(--space-3);
   max-width: 100%;
-  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-1);
+  padding: var(--space-2) var(--space-6) var(--space-2) var(--space-2);
   background: var(--tint-guide-recruiter);
   color: var(--text-primary);
   border-radius: var(--radius-pill);
