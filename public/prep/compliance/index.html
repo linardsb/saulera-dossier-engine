@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Your compliance checklist</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
+</head>
+<body>
+
+<!-- A candidate-facing page: the topbar carries what this surface is and no recruiter
+     navigation. The recruiter screens are a different audience and a different door. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Compliance checklist</span>
+  </div>
+</header>
+
+<main class="passport">
+
+  <div class="page-head">
+    <h1>Your compliance checklist</h1>
+    <p class="page-sub">What the agency needs on file before you can be booked. Send us the
+      reference number and the date each one runs out — we never ask you to upload a document
+      here.</p>
+    <!-- The headline count. Honest placeholder copy: a page that never loads says something
+         true rather than showing "0 of 0" where a real count should be. -->
+    <p class="passport-count" id="count" role="status">Loading your checklist…</p>
+  </div>
+
+  <!-- One card per catalogue item, in the order the server sends them. Empty until the fetch
+       returns; public/prep/compliance/passport.js owns every element inside it. -->
+  <div id="items"></div>
+
+  <p class="save-state" id="state" role="status"></p>
+
+</main>
+
+<footer class="prep-footer passport-footer">
+  <p><a href="/prep/privacy">What we hold about you, and when it is deleted</a></p>
+  <!-- A BUTTON and never a link. A delete reachable by URL-click gets prefetched by mail
+       scanners and by browsers; the route behind it is POST-only for the same reason
+       (functions/prep/compliance/api/delete.js). Not inside a form either — a form here would
+       submit by GET on Enter and navigate away from the confirmation the script owns. -->
+  <p><button class="btn btn-danger" type="button" id="delete">Delete everything you hold about
+    me</button></p>
+</footer>
+
+<!-- A module script, so it is deferred by the platform. No ready-state wrapper is needed and
+     one would be misleading about when this runs. -->
+<script type="module" src="/prep/compliance/passport.js"></script>
+
+</body>
+</html>

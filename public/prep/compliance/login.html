@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Sign in · Compliance checklist</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
+<style>
+  /* ONE RULE, and it is here because it cannot be anywhere else. Every other page-scoped rule
+     this page needs — the measure, .act[hidden], .act-lede, .state, .notice, .actions, the code
+     field — lives in prep.css, where the colour, size and motion gates can see it. `.sr-only`
+     cannot: its inset values are raw lengths, which that file's token gate rejects outright and
+     which no custom property should carry — they are a clipping trick, not a design value.
+     login.html:29-33 made this call first and this page carries it for the same reason.
+
+     Because this block exists at all, "public/prep/compliance/login.html" is in
+     test/chrome.test.js's INLINE_STYLE_PAGES. That list is hardcoded: a page-scoped block
+     missing from it is silently ungated for raw hex and for motion outside the reduced-motion
+     guard, so test/compliance-pages.test.js asserts the list names this file. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<!-- A candidate-facing page: the topbar carries what this surface is and no recruiter
+     navigation. The recruiter screens are a different audience and a different door. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Compliance checklist</span>
+  </div>
+</header>
+
+<main class="passport-signin">
+
+  <div class="page-head">
+    <h1>Sign in to your compliance checklist</h1>
+    <p class="page-sub">See what the agency still needs from you, and hand it over from here.</p>
+  </div>
+
+  <!-- Filled in from ?e= by login.js, from a fixed list of messages. Empty and hidden until
+       then, so someone arriving at the sign-in page directly sees no stray alarm. -->
+  <div class="notice" id="notice" hidden>
+    <p id="notice-text"></p>
+  </div>
+
+  <!-- Act 1: ask for a code. -->
+  <section class="act" id="act-email" aria-labelledby="act-email-head">
+    <h2 class="sr-only" id="act-email-head">Ask for a sign-in code</h2>
+    <p class="act-lede">Enter the email address the agency has for you and we will send you a
+      6-digit code. We will not send you a link to click.</p>
+    <form id="form-email" novalidate>
+      <label class="field" for="email">Email address</label>
+      <input class="input" type="email" id="email" name="email" autocomplete="email"
+             inputmode="email" spellcheck="false" required>
+      <div class="actions">
+        <button class="btn btn-primary btn-block" type="submit" id="send">Send me a code</button>
+      </div>
+      <p class="state" id="email-state" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <!-- Act 2: spend it. Hidden until a code has been asked for, so the page shows one task at
+       a time. -->
+  <section class="act" id="act-code" aria-labelledby="act-code-head" hidden>
+    <h2 class="sr-only" id="act-code-head">Enter your sign-in code</h2>
+    <p class="act-lede" id="sent-note"></p>
+    <form id="form-code" novalidate>
+      <label class="field" for="code">6-digit code</label>
+      <!-- inputmode numeric and autocomplete one-time-code together are what make a phone offer
+           the code straight from the notification. maxlength 7 rather than 6 so a pasted
+           '123 456' survives long enough to be stripped to digits. -->
+      <input class="input code-input" type="text" id="code" name="code" inputmode="numeric"
+             autocomplete="one-time-code" maxlength="7" spellcheck="false" required>
+      <div class="actions">
+        <button class="btn btn-primary btn-block" type="submit" id="verify">Sign in</button>
+      </div>
+      <p class="state" id="code-state" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+</main>
+
+<!-- Outside <main>, and the same shape every other page in the portal ends with. -->
+<footer class="prep-footer passport-signin-footer">
+  <p>Not sure why you are here? <a href="/prep/privacy">Read what we hold about you and how to
+    delete it</a>.</p>
+</footer>
+
+<script src="/prep/compliance/login.js"></script>
+</body>
+</html>

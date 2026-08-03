@@ -16,12 +16,19 @@ import { SESSION_COOKIE, maxAgeFrom, readCookie } from "./tokens.js";
 
 /**
  * The /prep paths that must work with no session, and why each one is on the list:
- *   /prep/privacy      the retention notice — legally required to be readable
- *   /prep/login        where a candidate without a link asks for a code
- *   /prep/auth/enter   the magic link itself; the token IS the credential
- *   /prep/auth/otp     requesting that code
- *   /prep/auth/verify  spending it
- * Everything else under /prep is candidate content and calls requireSession.
+ *   /prep/privacy                 the retention notice — legally required to be readable
+ *   /prep/login                   where a candidate without a link asks for a code
+ *   /prep/auth/enter              the magic link itself; the token IS the credential
+ *   /prep/auth/otp                requesting that code
+ *   /prep/auth/verify             spending it
+ * And #68's compliance passport, which sits under /prep and reaches the same conclusion at its
+ * own door — the two sessions are independent (src/compliance/session.js) but "you cannot gate
+ * the way in" is not:
+ *   /prep/compliance/login        where a locum asks for a compliance sign-in code
+ *   /prep/compliance/auth/otp     requesting it
+ *   /prep/compliance/auth/verify  spending it
+ * Everything else under /prep is candidate content and calls requireSession — or, under
+ * /prep/compliance, requireCandidate.
  */
 export const PUBLIC_PREP_PATHS = [
   "/prep/privacy",
@@ -29,6 +36,9 @@ export const PUBLIC_PREP_PATHS = [
   "/prep/auth/enter",
   "/prep/auth/otp",
   "/prep/auth/verify",
+  "/prep/compliance/login",
+  "/prep/compliance/auth/otp",
+  "/prep/compliance/auth/verify",
 ];
 
 /**

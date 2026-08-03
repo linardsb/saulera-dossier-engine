@@ -16,11 +16,16 @@ import { StoreError } from "../src/store.js";
 import { ITEM_KEYS, ITEM_STATUSES } from "../src/compliance/catalogue.js";
 import {
   ASSIGNMENT_STATUSES,
+  candidateByEmail,
+  candidateBySessionHash,
+  consumeCandidateOtp,
   createAssignment,
   createCandidate,
   deleteCandidate,
+  issueCandidateOtp,
   itemsByCandidate,
   purgeDormant,
+  rotateCandidateSession,
   setItemState,
 } from "../src/compliance/store.js";
 
@@ -274,6 +279,154 @@ test("missing required fields are the store's own 400, and nothing is written", 
     ["createAssignment without a start date", (db) => createAssignment(db, { id: "a", candidateId: "c", clientId: "c-1" })],
     ["setItemState", (db) => setItemState(db)],
     ["setItemState with a blank status", (db) => setItemState(db, { candidateId: "c", itemKey: ITEM_KEYS[0], status: "  " })],
+  ];
+
+  for (const [name, call] of cases) {
+    const db = fakeD1([]);
+    assert.equal(await codeOf(() => call(db)), "missing_fields", `${name} must be the store's 400`);
+    assert.equal(db.calls.length, 0, `${name} must not reach the database`);
+  }
+});
+
+// ── the cage's own door, as SQL shapes (#68) ───────────────────────────────────────────
+//
+// These five duplicate src/portal/store.js's OTP and session statements at a new root, and the
+// duplication is deliberate (a table name cannot be a bound parameter — the reason is written
+// at the top of src/compliance/store.js). Duplicated SQL needs duplicated assertions: nothing
+// test/portal-store.test.js proves reaches these functions, and the pointer comment between the
+// two files is a note to a reader, not a test.
+
+test("candidateByEmail binds the address and does not filter on expiry", async () => {
+  const db = fakeD1([{ id: "cand-1", email: "priya@example.com" }]);
+  await candidateByEmail(db, "PRIYA@example.com");
+
+  const sql = db.calls[0].sql;
+  assert.match(sql, /lower\(email\) = lower\(\?\)/i, "a retyped address is the same person");
+  assert.ok(!sql.includes("PRIYA"), "the address travels as a bound parameter, never in the SQL");
+  assert.deepEqual(db.calls[0].args, ["PRIYA@example.com"]);
+  assert.match(sql, /SELECT id, email\b/i, "two columns and no third — a name here is a name in a log line");
+  // The whole difference from inviteByEmail. An invite dies and a stale one must not be a door;
+  // a compliance record is durable, and only the dormancy purge removes it.
+  assert.ok(!/expires_at|created_at.*<=|datetime\('now'\)/i.test(sql), "no expiry filter belongs here");
+  assert.match(sql, /ORDER BY created_at DESC LIMIT 1/i, "a duplicate is a re-registration; the newest is meant");
+});
+
+test("issueCandidateOtp deletes before it inserts, and binds the TTL rather than templating it", async () => {
+  const db = fakeD1([null, null, null]);
+  const result = await issueCandidateOtp(db, {
+    candidateId: "cand-1",
+    codeHash: "h",
+    ttlMinutes: 10,
+    cooldownMinutes: 1,
+  });
+
+  assert.deepEqual(result, { ok: true, issued: true });
+  assert.equal(db.calls.length, 3, "the freshness read, the DELETE, then the INSERT");
+
+  // The cooldown read: "minted within the cooldown" is derived from expires_at, so there is no
+  // second column to keep in step. The bound integer is TTL − cooldown.
+  assert.match(db.calls[0].sql, /FROM candidate_otp[\s\S]*datetime\(expires_at, '-' \|\| \? \|\| ' minutes'\)/i);
+  assert.deepEqual(db.calls[0].args, ["cand-1", 9]);
+
+  // THE RATE LIMIT: requesting a code invalidates the old one, so a candidate mashing the
+  // button ends with one usable code rather than forty.
+  assert.match(db.calls[1].sql, /^DELETE FROM candidate_otp WHERE candidate_id = \?$/i);
+  assert.deepEqual(db.calls[1].args, ["cand-1"]);
+
+  assert.match(db.calls[2].sql, /INSERT INTO candidate_otp \(candidate_id, code_hash, expires_at\)/i);
+  // The modifier is assembled by SQLite from a bound value. The number is ours, not a caller's,
+  // and it stays outside the SQL text all the same.
+  assert.match(db.calls[2].sql, /datetime\('now', '\+' \|\| \? \|\| ' minutes'\)/i);
+  assert.deepEqual(db.calls[2].args, ["cand-1", "h", 10]);
+  assert.ok(!db.calls[2].sql.includes("attempts"), "the counter opens at the DDL's own default");
+});
+
+test("issueCandidateOtp leaves a fresh code standing and writes nothing", async () => {
+  const db = fakeD1([{ fresh: 1 }]);
+  assert.deepEqual(
+    await issueCandidateOtp(db, { candidateId: "cand-1", codeHash: "h", ttlMinutes: 10, cooldownMinutes: 1 }),
+    { ok: true, issued: false },
+  );
+  assert.equal(db.calls.length, 1, "the row it leaves alone is the code the candidate is typing");
+});
+
+test("consumeCandidateOtp reads the newest row and never selects the hash into a wider shape", async () => {
+  const db = fakeD1([{ id: 7, code_hash: "h", attempts: 0, live: 1 }, null]);
+  assert.deepEqual(await consumeCandidateOtp(db, { candidateId: "cand-1", codeHash: "h", maxAttempts: 5 }), {
+    ok: true,
+  });
+
+  assert.match(db.calls[0].sql, /SELECT id, code_hash, attempts, datetime\('now'\) <= datetime\(expires_at\) AS live/i);
+  assert.match(db.calls[0].sql, /ORDER BY id DESC LIMIT 1/i);
+  assert.deepEqual(db.calls[0].args, ["cand-1"]);
+  // Single-use is the DELETE and never a `used` flag: a flag can be checked in the wrong order
+  // and a missing row cannot.
+  assert.match(db.calls[1].sql, /^DELETE FROM candidate_otp WHERE id = \?$/i);
+  assert.deepEqual(db.calls[1].args, [7]);
+});
+
+test("consumeCandidateOtp increments on a mismatch and deletes at the cap", async () => {
+  const wrong = fakeD1([{ id: 7, code_hash: "h", attempts: 2, live: 1 }, null]);
+  assert.deepEqual(await consumeCandidateOtp(wrong, { candidateId: "cand-1", codeHash: "other", maxAttempts: 5 }), {
+    ok: false,
+    reason: "invalid_code",
+  });
+  assert.match(wrong.calls[1].sql, /UPDATE candidate_otp SET attempts = attempts \+ 1 WHERE id = \?/i);
+
+  const capped = fakeD1([{ id: 7, code_hash: "h", attempts: 5, live: 1 }, null]);
+  assert.deepEqual(await consumeCandidateOtp(capped, { candidateId: "cand-1", codeHash: "h", maxAttempts: 5 }), {
+    ok: false,
+    reason: "too_many_attempts",
+  });
+  // The cap is checked BEFORE the comparison, so the sixth call refuses without comparing
+  // anything — and the row goes rather than merely being refused.
+  assert.match(capped.calls[1].sql, /^DELETE FROM candidate_otp WHERE id = \?$/i);
+
+  // No row at all: the same answer an expired one gets, and no second statement.
+  const none = fakeD1([null]);
+  assert.deepEqual(await consumeCandidateOtp(none, { candidateId: "cand-1", codeHash: "h", maxAttempts: 5 }), {
+    ok: false,
+    reason: "expired",
+  });
+  assert.equal(none.calls.length, 1);
+});
+
+test("rotateCandidateSession writes both columns in one statement and guards on nothing else", async () => {
+  const db = fakeD1([null]);
+  assert.deepEqual(
+    await rotateCandidateSession(db, { candidateId: "cand-1", newHash: "h", expiresAt: "2026-08-17 09:15:30" }),
+    { rotated: true }, // fake-d1 run() reports changes: 1
+  );
+
+  assert.equal(db.calls.length, 1, "a hash without an expiry is a session that never ends");
+  assert.match(db.calls[0].sql, /^UPDATE candidate SET session_hash = \?, session_expires_at = \? WHERE id = \?$/i);
+  assert.deepEqual(db.calls[0].args, ["h", "2026-08-17 09:15:30", "cand-1"]);
+  // Where this parts company with rotateSession: the portal guards on the invite's own
+  // lifetime, and `candidate` has none — the column being written IS the session's whole clock.
+  assert.ok(!/expires_at\)/i.test(db.calls[0].sql.replace(/session_expires_at/g, "")), "no lifetime guard to add");
+});
+
+test("candidateBySessionHash returns two columns, never the hash, and never filters expiry", async () => {
+  const db = fakeD1([{ id: "cand-1", session_expires_at: "2026-08-17 09:15:30" }]);
+  await candidateBySessionHash(db, "abc123");
+
+  const sql = db.calls[0].sql;
+  assert.match(sql, /^SELECT id, session_expires_at FROM candidate WHERE session_hash = \?$/i);
+  assert.ok(!/SELECT[^F]*session_hash/i.test(sql), "a hash that is never read cannot reach a log line");
+  assert.ok(!sql.includes("*"), "named columns, so a column added later reaches a screen only when someone names it");
+  assert.deepEqual(db.calls[0].args, ["abc123"]);
+});
+
+test("the door's own 400s fire before any SQL runs", async () => {
+  const cases = [
+    ["issueCandidateOtp without a hash", (db) => issueCandidateOtp(db, { candidateId: "c", ttlMinutes: 10 })],
+    ["issueCandidateOtp with a zero TTL", (db) => issueCandidateOtp(db, { candidateId: "c", codeHash: "h", ttlMinutes: 0 })],
+    [
+      "issueCandidateOtp with a cooldown at or past the TTL",
+      (db) => issueCandidateOtp(db, { candidateId: "c", codeHash: "h", ttlMinutes: 10, cooldownMinutes: 10 }),
+    ],
+    ["consumeCandidateOtp without a cap", (db) => consumeCandidateOtp(db, { candidateId: "c", codeHash: "h" })],
+    ["rotateCandidateSession without an expiry", (db) => rotateCandidateSession(db, { candidateId: "c", newHash: "h" })],
   ];
 
   for (const [name, call] of cases) {

@@ -3,8 +3,11 @@
 // immunisations, indemnity, references, WTR opt-out. That page today ends in "contact TTR for
 // forms"; this array is the same list with a state a candidate and a recruiter can both see.
 //
-// Pure data, no imports, and deliberately its OWN file rather than a section of store.js: the
-// passport UI (#68) imports it into the browser, and it must not drag D1 code along to do it.
+// Pure data, no imports, and deliberately its OWN file rather than a section of store.js — but
+// NOT because the browser imports it. It cannot: src/ is not in the Pages build output, so an
+// import from public/ would 404 at runtime. #68's passport reads this list through
+// GET /prep/compliance/api/items, which joins it server-side, which is why the browser needs no
+// copy of it and no drift test to keep one honest.
 //
 // `amberDays` is the lead-time at which an item stops being fine and starts being a warning —
 // the number #70's expiry radar reads. Thresholds live in the catalogue and not in code
