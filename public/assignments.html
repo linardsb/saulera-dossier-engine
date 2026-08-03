@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Bookings · saulera dossier engine</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<!-- The same chrome as the other three screens. Static aria-current, because each file knows
+     which screen it is. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Dossier engine</span>
+    <nav class="topbar-nav" aria-label="Screens">
+      <a href="/">Submission pack</a>
+      <a href="/clients">Client knowledge</a>
+      <a href="/counts">Prep sent</a>
+      <a href="/assignments" aria-current="page">Bookings</a>
+      <a href="/prep/demo" target="_blank" rel="noopener">Candidate portal ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-head">
+    <h1>Bookings</h1>
+    <!-- The promise and its mechanism in one sentence each, written for a recruiter reading
+         this screen for the first time. No jargon: the table is called `assignment` in the
+         code and that word appears nowhere a person can see it. -->
+    <p class="page-sub">Every booking you have recorded, soonest to end first. We will email you
+      fourteen days before one runs out, so you can extend it or redeploy them.</p>
+  </div>
+
+  <div class="assignments">
+
+    <!-- Record a booking. Every control labelled; nothing here is optional-by-implication —
+         the one genuinely optional field says so in its own label. -->
+    <form class="assignments-form" id="booking-form">
+      <h2 class="assignments-form-head">Record a booking</h2>
+
+      <div class="assignments-fields">
+        <div class="assignments-field">
+          <label class="field" for="candidate-name">Candidate name</label>
+          <input class="input" type="text" id="candidate-name" name="candidate-name" autocomplete="off" required>
+        </div>
+
+        <div class="assignments-field">
+          <label class="field" for="candidate-email">Candidate email</label>
+          <input class="input" type="email" id="candidate-email" name="candidate-email" autocomplete="off" required>
+        </div>
+
+        <div class="assignments-field">
+          <label class="field" for="booking-client">Client</label>
+          <select class="select" id="booking-client" name="booking-client" required></select>
+        </div>
+
+        <div class="assignments-field">
+          <label class="field" for="booking-start">Starts</label>
+          <input class="input" type="date" id="booking-start" name="booking-start" required>
+        </div>
+
+        <div class="assignments-field">
+          <label class="field" for="booking-end">Ends (leave empty if open-ended)</label>
+          <input class="input" type="date" id="booking-end" name="booking-end">
+        </div>
+      </div>
+
+      <button class="btn btn-primary" type="submit" id="booking-submit">Record booking</button>
+      <p class="save-state" id="form-state" role="status"></p>
+    </form>
+
+    <table class="assignments-table" id="assignments-table">
+      <caption class="assignments-caption">Bookings that are ending soonest come first. Ones you
+        have closed sit at the bottom.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Candidate</th>
+          <th scope="col">Client</th>
+          <th scope="col">Starts</th>
+          <th scope="col">Ends</th>
+          <th scope="col">State</th>
+          <th scope="col">Change</th>
+        </tr>
+      </thead>
+      <tbody id="assignments-body"></tbody>
+    </table>
+
+    <p class="save-state" id="list-state" role="status"></p>
+
+  </div>
+
+</main>
+<script src="/assignments.js"></script>
+</body>
+</html>

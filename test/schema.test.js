@@ -245,7 +245,15 @@ const EXPECTED_COLUMNS = {
   candidate_otp: ["attempts", "candidate_id", "code_hash", "expires_at", "id"],
   // #67. Dates and a booking state. It is the other half of the dormancy clock and all of
   // #69's extension radar, which is why end_date is a real column and not a derived guess.
-  assignment: ["candidate_id", "client_id", "created_at", "end_date", "id", "start_date", "status"],
+  // #69 adds nudge_sent_at: `invite.reminder_sent_at`'s nullable set-exactly-once stamp at the
+  // booking root, claimed with UPDATE ... WHERE nudge_sent_at IS NULL, so the column IS the
+  // idempotency. It is the ONLY record that a nudge was sent — this ticket writes no `events`
+  // row and does NOT widen events.kind (SQLite has no ALTER CONSTRAINT, and a nudge belongs to
+  // a booking that dies with its candidate while events rows deliberately outlive the purge).
+  // Unlike reminder_sent_at it is CLEARED when end_date moves: extending a booking re-arms the
+  // radar, which is src/compliance/store.js's updateAssignment and the one thing here with no
+  // precedent in #25.
+  assignment: ["candidate_id", "client_id", "created_at", "end_date", "id", "nudge_sent_at", "start_date", "status"],
   // #67, and metadata-only is exactly this lock. Spike #66's first decision was that no
   // document byte rests on our infrastructure: a `document_url`, an `evidence_blob` or a
   // `photo` column here is the descope this test exists to fail on, and it would put

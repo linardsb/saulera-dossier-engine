@@ -182,6 +182,195 @@ export async function createAssignment(
   return { ok: true };
 }
 
+// ── the extension radar (#69) ──────────────────────────────────────────────────────────
+//
+// Locum margin lives in extensions, and a contract that lapses because nobody noticed the end
+// date is the silent leak this epic's milestone B exists to close. `assignment.end_date` was
+// written by #67 with one reader (the purge, which reads it only to decide retention); these
+// four functions turn it into a clock.
+
+/**
+ * Every booking whose end date falls inside the next `leadDays` days and has not been nudged.
+ *
+ * Five clauses, and each of them is a decision rather than a filter:
+ *
+ *   1. `end_date IS NOT NULL` — an open booking has no deadline to warn about. `purgeDormant`
+ *      grants exactly that row's candidate immortality ("a booking with no end is a live one");
+ *      here it simply has nothing to say.
+ *   2. `nudge_sent_at IS NULL` — the claim column, read here and written by `claimExtensionNudge`
+ *      below. One booking, one nudge: decision 17's rule at a new root.
+ *   3. `status IN ('booked','active')` — THE DELIBERATE INVERSION of `purgeDormant`'s rule.
+ *      That function argues at length that dormancy is date-driven and NOT status-driven,
+ *      because `assignment.status` is human-maintained and "letting a stale status extend
+ *      retention would make a bookkeeping error into a privacy breach". The radar takes the
+ *      opposite call for the opposite stake: nudging about a booking already marked `cancelled`
+ *      is noise, and here a stale status costs one wrong email rather than a breach. Read this
+ *      as a difference in consequence, not as an inconsistency. The two literals are the first
+ *      two of `ASSIGNMENT_STATUSES` — traceable to that vocabulary, but written out here,
+ *      because a status list is not a bound value and must not be interpolated into SQL.
+ *   4. `date()` and not `datetime()` — DAY granularity, `isNotPast`'s argument
+ *      (src/prep/dates.js:127-136): a contract ending today is still a contract you can act on
+ *      at 14:00. UTC throughout, which is what SQLite's `now` already is.
+ *   5. `>= date('now')` — a booking whose end date has already passed is NOT nudged. The
+ *      radar's promise is fourteen days of warning; "your contract ended yesterday" is a
+ *      different message and #71's at-risk list is its surface. The cost, stated openly: on a
+ *      deployment with no portal traffic for three weeks a booking can pass its whole window
+ *      unnudged and never be emailed. The Bookings screen is the backstop (it computes state at
+ *      render time rather than reading a stamp) and scripts/remind.py is the assurance poke.
+ *
+ * `leadDays` is ours and never a caller's, and it is still bound rather than templated —
+ * `issueCandidateOtp`'s idiom, `Number.isInteger` guard included, because that guard is what
+ * makes SQLite's `'+' || ? || ' days'` produce a modifier it can read rather than a silent NULL.
+ */
+export async function dueExtensionNudges(db, leadDays) {
+  if (!Number.isInteger(leadDays) || leadDays <= 0) {
+    throw new StoreError("missing_fields", 400, "leadDays: must be a positive integer");
+  }
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.end_date, a.status,
+              candidate.full_name AS candidate_name,
+              clients.name        AS client_name
+         FROM assignment a
+         JOIN candidate ON candidate.id = a.candidate_id
+         JOIN clients   ON clients.id   = a.client_id
+        WHERE a.end_date IS NOT NULL
+          AND a.nudge_sent_at IS NULL
+          AND a.status IN ('booked', 'active')
+          AND date(a.end_date) >= date('now')
+          AND date(a.end_date) <= date('now', '+' || ? || ' days')
+        ORDER BY date(a.end_date), a.id`,
+    )
+    .bind(leadDays)
+    .all();
+  return results ?? [];
+}
+
+/**
+ * Claim one booking's single nudge. `claimReminder`'s move (src/portal/store.js:726-735) at the
+ * booking root, and the argument is that function's verbatim: exactly one caller finds the
+ * column still NULL, and the loser sees `changes === 0`. There is no read-then-write window to
+ * lose, which is what makes "one nudge per booking" structural on a database with no
+ * transaction rather than hopeful.
+ *
+ * AT-MOST-ONCE BY DESIGN: the caller never rolls this back on a failed send. src/compliance/
+ * nudges.js's header carries the full argument.
+ *
+ * `String(assignmentId ?? "")` is not decoration — an `undefined` bind is a D1 error, and the
+ * empty string matches nothing, which is the fail-closed answer.
+ */
+export async function claimExtensionNudge(db, assignmentId) {
+  const result = await db
+    .prepare(
+      `UPDATE assignment SET nudge_sent_at = datetime('now')
+        WHERE id = ? AND nudge_sent_at IS NULL`,
+    )
+    .bind(String(assignmentId ?? ""))
+    .run();
+  return (result.meta?.changes ?? 0) === 1;
+}
+
+/**
+ * Every booking, in the order the Bookings screen reads them.
+ *
+ * Named columns and never `SELECT *` (`itemsByCandidate`'s rule): the row's shape is decided
+ * here, so a column added later reaches a screen only when someone names it. Note what is
+ * deliberately NOT selected — no `candidate_id`, no email, and no compliance state at all. This
+ * screen shows bookings and dates; #71's dashboard owns the checklist column, and leaving it
+ * out is what keeps that a decision rather than a default.
+ *
+ * The ordering is three questions asked in priority order:
+ *   · is it resolved?      `ended` and `cancelled` sink to the bottom — they are history.
+ *   · does it have an end? open bookings sit below dated ones, because "ending soon first" has
+ *                          nothing to say about a booking that never ends.
+ *   · when does it end?    soonest first, then the start date to break a tie.
+ *
+ * `a.end_date IS NULL` in an ORDER BY evaluates to 0 or 1 in SQLite, and 0 — has a date — sorts
+ * first, which is what is wanted. Do not "fix" it to `IS NOT NULL`.
+ */
+export async function listAssignments(db) {
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.start_date, a.end_date, a.status, a.nudge_sent_at,
+              candidate.full_name AS candidate_name,
+              clients.name        AS client_name
+         FROM assignment a
+         JOIN candidate ON candidate.id = a.candidate_id
+         JOIN clients   ON clients.id   = a.client_id
+        ORDER BY CASE WHEN a.status IN ('ended', 'cancelled') THEN 1 ELSE 0 END,
+                 a.end_date IS NULL,
+                 date(a.end_date),
+                 a.start_date`,
+    )
+    .all();
+  return results ?? [];
+}
+
+/**
+ * Extend a booking, or resolve it. Two fields, both optional, at least one required.
+ *
+ * THE RE-ARM IS THE POINT OF THIS FUNCTION. When `end_date` moves, `nudge_sent_at` is set back
+ * to NULL in the same statement. This is the one place in the ticket with no precedent in #25,
+ * and a reviewer who has internalised `claimReminder` will read the clear as a mistake — so:
+ * `invite.reminder_sent_at` guards a deadline that CANNOT move (an interview date is set once
+ * and the invite dies after it), while `nudge_sent_at` guards one that EXISTS to move. Extending
+ * is the successful outcome of the nudge. Without the clear, extending a booking from September
+ * to December leaves the claim standing and the December deadline never nudges — the radar would
+ * succeed once per booking ever and go quiet exactly where it had just proved its value.
+ *
+ * A `status` change alone does NOT clear it: marking a booking `ended` resolves the nudge, it
+ * does not re-arm it.
+ *
+ * The known cost, accepted rather than engineered around: extending by four days while still
+ * inside the window re-arms and sends a second email. That email is TRUE — the booking still
+ * ends inside fourteen days and the recruiter has a new date — so one rule with no arithmetic
+ * beats a cleverer rule with a boundary nobody can hold in their head.
+ *
+ * One more consequence a reviewer of this repo will stop on. Clearing `end_date` (the route
+ * sends `null` for an empty value) makes the booking OPEN again, and `purgeDormant` grants an
+ * open booking's candidate indefinite retention (`"A booking with no end is a live one"`). That
+ * is inside the designed semantics, but it is now reachable from a recruiter control rather than
+ * only from a considered `createAssignment` call. The answer is the one the schema already gave:
+ * an open booking is a live one, and a live booking's compliance file is not dormant data.
+ *
+ * One statement even when both fields arrive: D1 has no transaction, and two statements would be
+ * a live half-state. `updateClient`'s allow-list shape verbatim (src/store.js:192-208) — a FIXED
+ * list checked with `Object.hasOwn`, pushing a LITERAL `column = ?` fragment written here and its
+ * bound value, so a caller-supplied key never reaches the SQL string. `Object.hasOwn` and not a
+ * truthiness check, because `endDate: null` is a meaningful patch and `if (patch.endDate)` would
+ * silently drop it.
+ *
+ * No 404-before-write (`updateClient` does one): there is no second statement here whose ordering
+ * could matter, so `changes === 0` carries not-found on its own.
+ */
+export async function updateAssignment(db, id, patch = {}) {
+  requireFields({ id });
+
+  const columns = [];
+  const values = [];
+  if (Object.hasOwn(patch, "endDate")) {
+    // `nudge_sent_at = NULL` is a literal fragment with NO placeholder — it binds nothing, so
+    // the ?-to-bind parity test/helpers/fake-d1.js enforces still holds. Do not "tidy" it into a
+    // bound `?` with a null value: the column is being cleared, not set to a caller's value.
+    columns.push("end_date = ?", "nudge_sent_at = NULL");
+    values.push(patch.endDate ?? null);
+  }
+  if (Object.hasOwn(patch, "status")) {
+    requireOneOf("status", patch.status, ASSIGNMENT_STATUSES);
+    columns.push("status = ?");
+    values.push(patch.status);
+  }
+  if (!columns.length) {
+    throw new StoreError("missing_fields", 400, "update: nothing to change");
+  }
+
+  const result = await db
+    .prepare(`UPDATE assignment SET ${columns.join(", ")} WHERE id = ?`)
+    .bind(...values, String(id))
+    .run();
+  return { updated: (result.meta?.changes ?? 0) === 1 };
+}
+
 /**
  * The state of one checklist item, written by whoever verified it (#68's recruiter action,
  * #70's expiry sweep).

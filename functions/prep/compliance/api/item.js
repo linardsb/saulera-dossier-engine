@@ -27,30 +27,13 @@
 import { COMPLIANCE_CATALOGUE, ITEM_KEYS } from "../../../../src/compliance/catalogue.js";
 import { setItemState } from "../../../../src/compliance/store.js";
 import { requireCandidate } from "../../../../src/compliance/session.js";
+// `isRealDate` lived here until #69 needed the same round trip on a booking's dates. It moved
+// to src/prep/dates.js — the module that already documents this exact V8 trap for interview_at —
+// rather than being copied a second and third time. Same function, same name, same comment.
+import { isRealDate } from "../../../../src/prep/dates.js";
 import { json, readJson, sameOrigin, errorResponse } from "../../../../src/http.js";
 
 const ALLOWED = new Set(["item_key", "reference", "expiry_date"]);
-
-/** Exactly what `<input type="date">` submits, whatever locale it displays in. */
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Is this a real calendar day, and not merely a well-shaped string?
- *
- * The regex alone is not enough. V8 refuses a bad month (`2026-13-01` does not parse) but
- * silently ROLLS a bad day: `Date.parse('2026-02-30')` lands on 2 March. Without the round trip
- * this route would answer 200 to a date the candidate did not choose, and #70's radar would
- * later chase the wrong one. src/prep/dates.js:63-70 records the same trap on `interview_at`.
- *
- * Parsed as UTC — `${raw}T00:00:00Z` — for the reason src/prep/tokens.js:113-119 gives: a
- * space- or zone-less string is read as LOCAL time, and in British Summer Time that is an hour
- * of drift, which across midnight is a whole day.
- */
-function isRealDate(raw) {
-  if (!DATE_ONLY.test(raw)) return false;
-  const ms = Date.parse(`${raw}T00:00:00Z`);
-  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === raw;
-}
 
 export async function onRequestPost(context) {
   const { request, env } = context;

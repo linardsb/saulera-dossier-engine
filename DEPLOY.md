@@ -449,6 +449,8 @@ the dashboard.
 | `503 {"error":"not_configured"}` from `/api/prep/send` **specifically** | the `RESEND_API_KEY` secret is not set in this environment | section 5b. Nothing was written and nothing was counted; the send is safe to retry once the key is set. Note this shares a code with the DB-binding row above — the difference is that only this route answers it while `/api/clients` is healthy |
 | `502 {"error":"mail_failed"}` from `/api/prep/send` | Resend rejected the message — **almost always an unverified sending domain (their 403)** | verify the domain in Resend and add its SPF and DKIM records (section 5b). The invite and the whole candidate scope were rolled back, so nothing is orphaned and the count did not move; the recruiter can retry without regenerating |
 | `503 {"error":"no_base_url"}` from `/api/prep/send` | `PREP_BASE_URL` is unset, or is not a bare `https://host` origin | set it in this environment (section 5b) and redeploy. It is REQUIRED as of 30 Jul 2026 — the route no longer falls back to the request's own origin, because that origin is the `Host` header the caller sent. Nothing was written, minted or counted, so the send is safe to retry |
+| no extension nudges are arriving | one of `DB`, `RESEND_API_KEY`, `PREP_BASE_URL` or `RECRUITER_EMAIL` is missing or malformed | set all four (section 5b) and redeploy. The sweep bails **before claiming**, so nothing has been burned — every due booking is still due and the radar recovers on its own. Check `SELECT count(*) FROM assignment WHERE nudge_sent_at IS NOT NULL` before and after a poke of `/prep/login` |
+| `500 {"error":"internal"}` from `/api/assignments` on a deployment where `/api/clients` is healthy | migration `0010` has not been applied to this environment's D1, so `assignment.nudge_sent_at` does not exist | `npm run db:remote` (production) or `npm run db:preview`. Every radar statement names that column |
 | a candidate's magic link points at a preview URL | an invite sent BEFORE 30 Jul 2026, when the link fell back to the origin the recruiter's browser used | links already sent cannot be repointed; the candidate can sign in at `<origin>/prep/login` with a code instead. New sends cannot reach this state — see the row above |
 | `400 {"error":"interview_too_far"}` from `/api/prep/prepare` or `/api/prep/send` | the interview date is more than 24 months ahead, which is a mistyped year essentially always | correct the year. The bound exists because `interview_at` is the clock the 30-day purge runs on: `2226` for `2026` keeps the candidate's CV and a live link in D1 for two centuries, silently |
 | `502 {"error":"bad_brief"}` from `/api/prep/prepare` | the model's answer was a valid JSON payload that broke a rule the schema cannot state — a competency with no questions, a non-core `axis`, or two competencies sharing an id | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis. This used to surface as `500 internal`, which sent you to the migration row below for a model output problem |
@@ -568,6 +570,30 @@ send. That is not a regression in what worked: local dev has no `RESEND_API_KEY`
 send already stopped one step further on. Every 400 gate on `/api/prep/send` and
 `/api/prep/prepare` is still exercisable locally, which is what the smoke-test sweep below uses.
 
+### `RECRUITER_EMAIL` — where the extension nudge goes (#69)
+
+A plain **Variable**, not a Secret (Settings → Variables and secrets → type *Variable*): it is
+an address, not a credential.
+
+```
+RECRUITER_EMAIL = desk@your-agency.example
+```
+
+It is the ONE address the extension radar mails when a booking is fourteen days from its end
+date. **A single address, with no comma in it.** `to` reaches a mail header, and a comma there
+is a second recipient nobody chose — on a message that names a candidate to a third party. The
+sweep validates it (single `@`, no comma, no control character) and refuses anything else.
+
+**Optional, and its absence is a designed no-op rather than a fault.** With it unset the
+extension radar bails *before claiming* and nothing is burned: no email goes out, no
+`nudge_sent_at` is stamped, and every due booking is still due the moment the variable is set
+and the deployment has rolled. The bookings screen at `/assignments` is unaffected — it computes
+its amber state at render time, so it is correct whether or not a nudge was ever sent.
+
+⚠ **Migration `0010` must be applied to this environment's D1 before the deploy** (`npm run
+db:remote` for production, `npm run db:preview` for previews). It adds
+`assignment.nudge_sent_at`, and every statement the radar issues names that column.
+
 ### The one reminder email (#25, decision 17)
 
 The deployment sends a third mail: **"Your interview is tomorrow"**, once per invite, ever.
@@ -595,6 +621,37 @@ rollback-and-retry could double-send when Resend accepted but the response read 
 sweep also bails **before claiming** unless `DB`, `RESEND_API_KEY` and a valid `PREP_BASE_URL`
 are all present, so a half-configured deployment cannot burn an invite's one reminder on
 nothing. The reminder links to `/prep/login` (the OTP way back in), never a tokenized link.
+
+### The extension nudge (#69) — the second sweep on the same lazy slot
+
+The deployment sends a **fourth** mail: *"Booking ending: <candidate> at <client>"*, once per
+booking per deadline, to `RECRUITER_EMAIL`. It is the only message this product sends to the
+agency rather than to a candidate.
+
+It rides the same lazy slot: `functions/prep/_middleware.js` runs `sendDueExtensionNudges` on
+every `/prep/*` request, beside `sendDueReminders`. Each has its own catch block, so one
+unconfigured sweep cannot take the other down. **`scripts/remind.py` now drives both** — one
+GET at `/prep/login` runs the middleware and therefore both sweeps, which is why there is no
+second script to remember.
+
+**The documented limitation is sharper here than for the reminder**, and it is an accepted
+trade rather than an oversight: the *recruiter* never visits `/prep/*`, so this radar's liveness
+depends entirely on candidate traffic or the daily poke. A deployment with neither can let a
+booking pass its whole fourteen-day window unnudged. The `/assignments` screen is the backstop.
+
+The operator's assurance query, beside the reminder's:
+
+```bash
+npx wrangler d1 execute dossier-engine --remote \
+  --command "SELECT count(*) FROM assignment WHERE nudge_sent_at IS NOT NULL"
+```
+
+**At-most-once, with one deliberate exception.** The claim is `assignment.nudge_sent_at`, set
+atomically before sending and never rolled back on a failed send — the reminder's rule
+unchanged. The exception is the point of the ticket: **changing a booking's end date clears the
+stamp**, so extending a booking re-arms the radar and the new deadline produces a new nudge.
+Marking a booking `ended` or `cancelled` does *not* clear it. If you see two nudges for one
+booking, look for an extension between them — that is the feature.
 
 ---
 

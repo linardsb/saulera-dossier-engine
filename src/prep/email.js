@@ -108,7 +108,7 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
 
 // ── the invite (#22, decision 10) ──────────────────────────────────────────────────────
 //
-// THREE EMAILS, THREE RULES, ON PURPOSE. `sendOtpEmail` above deliberately carries NO link,
+// FOUR EMAILS, FOUR RULES, ON PURPOSE. `sendOtpEmail` above deliberately carries NO link,
 // and test/prep-email.test.js asserts that absence for a stated anti-phishing reason. The
 // invite's tokenized link is its entire mechanism: it is the one click the whole portal
 // exists to make work, and it arrives unprompted rather than in answer to a code request.
@@ -116,11 +116,25 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
 // token exists to send (only its hash rests), and minting one would rotate `token_hash`
 // under a live session.
 //
-// The three are different BY DESIGN. None should be "harmonised" toward another —
+// The fourth is the extension nudge (#69, at the foot), and its rule is a different KIND of
+// rule: it is the first message this product sends to THE AGENCY rather than to a candidate.
+// The anti-phishing argument that forbids a link in `sendOtpEmail` does not apply — the
+// recipient is an operator-configured address (`RECRUITER_EMAIL`) and the link points at an
+// Access-gated recruiter screen, not at a candidate door. But it must be said out loud, because
+// the consequence runs the other way: this message NAMES A CANDIDATE TO A THIRD PARTY, so it
+// must never be sent to a candidate address. Its recipient is validated as a single address in
+// src/compliance/nudges.js before the sweep will claim anything.
+//
+// This module is prep-named and now carries a non-prep message. That cost was weighed: the
+// stronger invariant is that EVERY email this product sends is in this file, and this note says
+// why each is different. A fourth message in a second file would break that to gain tidiness.
+//
+// The four are different BY DESIGN. None should be "harmonised" toward another —
 // removing the invite's link breaks the product, adding one to the OTP mail teaches
 // candidates that a message asking them to click is normal (the lesson a phishing email
-// needs them to have already learned), and a tokenized reminder link would be a second
-// credential in flight for a message that only needs to say "it is ready".
+// needs them to have already learned), a tokenized reminder link would be a second
+// credential in flight for a message that only needs to say "it is ready", and pointing the
+// nudge at /prep/* would send the recruiter to the candidate's portal.
 
 /** How long an agency name may get before it stops being a display name. */
 const NAME_MAX = 120;
@@ -284,4 +298,69 @@ export async function sendReminderEmail(env, { to, agencyName, link } = {}) {
     html,
     from: mailFrom(env, agencyName),
   });
+}
+
+// ── the extension nudge (#69) ──────────────────────────────────────────────────────────
+
+/**
+ * The one nudge: a booking ends in a fortnight, extend it or redeploy them.
+ *
+ * THE ONLY MESSAGE IN THIS FILE ADDRESSED TO THE AGENCY. See the four-emails note above for
+ * what that changes and what it does not. The link is the recruiter's own `/assignments`
+ * screen — Access-gated, and never a `/prep/*` path, which would send them to the candidate's
+ * portal. test/prep-email.test.js asserts that.
+ *
+ * `candidateName` and `clientName` both reach a HEADER — they are the whole variable half of
+ * the subject — so both take `sendInviteEmail`'s treatment for `roleTitle`: the `CONTROLS` strip
+ * first, because a CR or LF in a header field IS the injection, then the `NAME_MAX` cap, which
+ * keeps a runaway value out of a Resend rejection nobody can diagnose.
+ *
+ * The date renders day-only, `sendInviteEmail`'s reason unchanged: a recruiter reading
+ * "2026-09-21 00:00:00" learns nothing from the zeros.
+ *
+ * The candidate's name is person data going into an email. It is never logged and never put in
+ * an error body — `sendEmail` logs the status alone and this adds nothing to that.
+ *
+ * Decision 17's tone rule holds here too: one nudge, calm, no deadline pressure. This is the
+ * only extension message that will ever be sent for a given deadline.
+ */
+export async function sendExtensionNudgeEmail(
+  env,
+  { to, agencyName, candidateName, clientName, endDate, link } = {},
+) {
+  const header = (value) =>
+    String(value ?? "")
+      .replace(CONTROLS, " ")
+      .trim()
+      .slice(0, NAME_MAX)
+      .trim();
+
+  const name = header(candidateName) || "A candidate";
+  const client = header(clientName) || "a client";
+  const when = String(endDate ?? "").slice(0, 10);
+  const url = String(link ?? "");
+
+  const subject = `Booking ending: ${name} at ${client}`;
+
+  const text = [
+    "Hello,",
+    "",
+    `${name}'s booking at ${client} ends on ${when}.`,
+    "",
+    "Extend it or redeploy them — whichever, it is easier to do now than after it lapses.",
+    "",
+    "Your bookings:",
+    url,
+  ].join("\n");
+
+  // Inline styles and literal colours, as ever: mail clients strip <style> blocks and resolve
+  // no custom property, so public/tokens.css cannot reach here (sendOtpEmail's note).
+  const html = [
+    `<p>Hello,</p>`,
+    `<p>${escapeHtml(name)}'s booking at ${escapeHtml(client)} ends on ${escapeHtml(when)}.</p>`,
+    `<p>Extend it or redeploy them — whichever, it is easier to do now than after it lapses.</p>`,
+    `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your bookings</a></p>`,
+  ].join("\n");
+
+  return sendEmail(env, { to, subject, text, html, from: mailFrom(env, agencyName) });
 }

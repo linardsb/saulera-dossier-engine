@@ -16,6 +16,7 @@ import {
   MAIL_FROM_DEFAULT,
   mailFrom,
   sendEmail,
+  sendExtensionNudgeEmail,
   sendInviteEmail,
   sendOtpEmail,
   sendReminderEmail,
@@ -408,5 +409,107 @@ test("the reminder's tone: no exclamation mark, no pressure, in either half", as
   for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
     assert.ok(!content.includes("!"), `no exclamation mark in the ${part} half`);
     assert.ok(!/streak|don't forget|good luck|you've got this/i.test(content), `no pressure in the ${part} half`);
+  }
+});
+
+// ── the extension nudge (#69), the one message addressed to the agency ─────────────────
+
+const NUDGE = {
+  to: "desk@ttrhealthcare.example",
+  agencyName: "TTR Healthcare",
+  candidateName: "Priya Nair",
+  clientName: "Ashdown Park Community Healthcare",
+  endDate: "2026-09-21",
+  link: "https://engine.pages.dev/assignments",
+};
+
+test("the nudge names the candidate, the client and the day in both halves", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  const body = bodyOf(calls);
+
+  assert.equal(body.subject, "Booking ending: Priya Nair at Ashdown Park Community Healthcare");
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(content.includes(NUDGE.candidateName), `the ${part} half names the candidate`);
+    assert.ok(content.includes(NUDGE.clientName), `the ${part} half names the client`);
+    assert.ok(content.includes("2026-09-21"), `the ${part} half carries the end date`);
+    // sendInviteEmail's treatment: a recruiter reading "2026-09-21 00:00:00" learns nothing
+    // from the zeros.
+    assert.ok(!content.includes("00:00:00"), `the ${part} half renders the date day-only`);
+  }
+});
+
+test("the nudge's link is the recruiter's screen, bare in the text half — and never a portal path", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  const body = bodyOf(calls);
+
+  assert.ok(body.text.split("\n").includes(NUDGE.link), "bare on its own line, for plain-text clients");
+  assert.ok(body.html.includes(`href="${NUDGE.link}"`), "the html half links it");
+  // The recipient is the recruiter. A /prep/* link would send them to the candidate's door, and
+  // /prep/* is the one tree the two Access bypass apps leave open.
+  assert.ok(!JSON.stringify(body).includes("/prep/"), "the nudge never points at the candidate portal");
+});
+
+test("R8 on the nudge's subject: neither name can open a second header", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExtensionNudgeEmail(ENV, {
+      ...NUDGE,
+      candidateName: "Priya\r\nBcc: someone@else.example",
+      clientName: "Ashdown\nX-Evil: yes",
+    }),
+  );
+  const { subject } = bodyOf(calls);
+  assert.ok(!subject.includes("\r"), "no carriage return survives");
+  assert.ok(!subject.includes("\n"), "no line feed survives");
+  assert.equal(subject.split(/\r?\n/).length, 1, "the subject is a single line");
+  // The smuggled words survive as TEXT, which is correct and is what sendInviteEmail does too:
+  // the injection is the line break, not the string "Bcc:". Stripping words would be a
+  // denylist, and a denylist is the wrong shape for a header-safety rule.
+  assert.ok(subject.includes("Bcc: someone@else.example"), "stripped to a space, not censored");
+
+  // A legitimate pair is untouched — the discipline must not cost the ordinary case.
+  const plain = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  assert.equal(
+    bodyOf(plain.calls).subject,
+    "Booking ending: Priya Nair at Ashdown Park Community Healthcare",
+  );
+});
+
+test("a name over the cap is sliced rather than rejected", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExtensionNudgeEmail(ENV, { ...NUDGE, clientName: "A".repeat(400) }),
+  );
+  // The cap keeps a runaway value out of a Resend rejection the recruiter cannot diagnose.
+  assert.ok(bodyOf(calls).subject.length < 300);
+});
+
+test("a candidate name containing markup is escaped in the html half", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExtensionNudgeEmail(ENV, { ...NUDGE, candidateName: "<script>alert(1)</script>" }),
+  );
+  const body = bodyOf(calls);
+  assert.ok(!body.html.includes("<script>"), "mail clients render whatever markup arrives");
+  assert.ok(body.html.includes("&lt;script&gt;"), "and it survives as text");
+});
+
+test("the nudge's From carries the agency name through mailFrom", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  assert.equal(bodyOf(calls).from, '"TTR Healthcare" <prep@saulera.com>');
+
+  const bare = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, { ...NUDGE, agencyName: "" }));
+  assert.equal(bodyOf(bare.calls).from, MAIL_FROM_DEFAULT, "a nameless agency falls back");
+});
+
+test("with no RESEND_API_KEY the nudge makes zero fetch calls", async () => {
+  const { calls, result } = await withFetch(ok, () => sendExtensionNudgeEmail({}, NUDGE));
+  assert.equal(calls.length, 0);
+  assert.equal(result.error?.code, "not_configured");
+});
+
+test("the nudge's tone: one calm ask, no pressure, in either half", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  const body = bodyOf(calls);
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(!content.includes("!"), `no exclamation mark in the ${part} half`);
+    assert.ok(!/urgent|act now|don't forget|last chance/i.test(content), `no pressure in the ${part} half`);
   }
 });

@@ -15,10 +15,20 @@
 // /prep this middleware already covers it. The two purges fail open independently — one
 // broken cage must not stop the other's clock, and two catch blocks mean the log line names
 // which one broke.
+//
+// #69's extension radar joins the same lazy slot for the same reason, and its own catch block
+// for the same reason again: one sweep bailing on a missing RECRUITER_EMAIL must not take the
+// reminder down with it. Say the cost plainly rather than leave it to be discovered — the
+// RECRUITER never visits /prep/*, so this radar's liveness depends entirely on candidate
+// traffic or scripts/remind.py's daily poke. That is an accepted trade, not an oversight: one
+// lazy slot is one place to reason about, a recruiter already looking at an amber row does not
+// need an email at that instant, and public/assignments.js computes its amber state at render
+// time so the screen is current whether or not a nudge ever went out.
 
 import { purgeExpired } from "../../src/portal/store.js";
 import { purgeDormant } from "../../src/compliance/store.js";
 import { sendDueReminders } from "../../src/prep/reminders.js";
+import { sendDueExtensionNudges } from "../../src/compliance/nudges.js";
 
 export async function onRequest(context) {
   const { env, next } = context;
@@ -36,6 +46,16 @@ export async function onRequest(context) {
     context.waitUntil(
       sendDueReminders(env).catch((err) => {
         console.error("reminder sweep failed:", err);
+      }),
+    );
+    // waitUntil and not await, the same argument as above: the response has no ordering
+    // dependency on the sends, so the one visitor who trips a due morning must not wait out N
+    // Resend calls. Registered AFTER the reminder deliberately — test/prep-middleware.test.js
+    // awaits captured[0] to prove the reminder actually sent, and prepending this would put a
+    // sweep that bails instantly in that slot.
+    context.waitUntil(
+      sendDueExtensionNudges(env).catch((err) => {
+        console.error("extension nudge sweep failed:", err);
       }),
     );
   }

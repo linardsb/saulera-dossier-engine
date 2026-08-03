@@ -1346,6 +1346,128 @@ a {
 
 .counts .save-state { margin-top: var(--space-4); }
 
+/* ── the bookings page (#69) ───────────────────────────────────────────────────────────── */
+
+/* Six columns of recruiter-authored names and dates, so the same rule the counts table takes:
+   wide content scrolls inside its own box rather than widening the page (CRAFT). Wider than
+   .counts' 65ch because this table carries two name columns and a control column — 65ch would
+   put it in a permanent horizontal scroll on a laptop, which is the failure the rule exists to
+   avoid rather than the one it causes. */
+.assignments {
+  max-width: 88ch;
+  overflow-x: auto;
+}
+
+/* The form is a zone above the list, and the gap between them has to read as a zone break —
+   .page-head's argument at a smaller scale. */
+.assignments-form { margin-bottom: var(--space-12); }
+
+.assignments-form-head {
+  font-size: var(--text-h4);
+  margin: 0 0 var(--space-4);
+}
+
+/* Auto-fit rather than a fixed column count: five fields at a readable minimum width settle to
+   three across on a laptop and one on a phone with no breakpoint of their own. `minmax(0, 1fr)`
+   and not `1fr` — a grid track's default min-content floor is what makes a long client name in
+   a <select> push the whole row wider than its container. */
+.assignments-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18ch, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.assignments-field { min-width: 0; }
+
+.assignments-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body);
+}
+
+.assignments-caption {
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  padding-bottom: var(--space-3);
+}
+
+/* One hairline under the head — the grouping whitespace cannot encode in a table, .counts-table's
+   rule unchanged. */
+.assignments-table thead th {
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+}
+
+.assignments-table tbody th,
+.assignments-table tbody td {
+  text-align: left;
+  font-weight: 400;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border-hairline);
+  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+}
+
+/* A candidate name and a client name are both typed by a person and need contain no spaces at
+   all — .counts-table tbody th's reasoning, and the same fix. */
+.assignments-table tbody th { overflow-wrap: anywhere; }
+
+/* Dates are data, so they take the mono face and tabular figures: two dates in a column are read
+   by comparing them, and that only works if the digits line up. nowrap because a date broken
+   across two lines is a date that can be misread. */
+.assignments-date-cell {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The state chip. It always carries the WORD — the colour ranks it and never says it on its own,
+   which is tokens.css's rule for every tint here and what keeps the screen readable to someone
+   who cannot separate the two grounds. */
+.assignments-chip {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+/* Inside the radar's window. --unverified on --tint-warn is 5.59:1, measured in tokens.css:76 and
+   gated by test/tokens.test.js — no new token, and an agency's branding swap reaches it. */
+.assignments-chip.is-amber {
+  background: var(--tint-warn);
+  color: var(--unverified);
+}
+
+/* Resolved sinks visually as well as in the sort order. --text-muted holds the 4.5:1 body floor,
+   so this quiets the row without dropping it below legibility. */
+.assignments-chip.is-resolved { color: var(--text-muted); }
+
+/* The per-row controls sit on one line and wrap as a group on a narrow viewport. The date input
+   is sized to its content rather than the .input default of 100%, which in a table cell would
+   take the whole column. */
+.assignments-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.assignments-date { width: auto; }
+
+/* --text-caption on a control, which is below the body size — allowed here because these are
+   two words on a button whose tap target is set by the padding, not by the type. Both stay at or
+   above the 12px floor. */
+.assignments-action {
+  font-size: var(--text-caption);
+  padding: var(--space-2) var(--space-3);
+}
+
+.assignments .save-state { margin-top: var(--space-4); }
+
 /* ── mobile density ────────────────────────────────────────────────────────────────────── */
 
 /* Under the one-column breakpoint the rail sits above the work, so every wasted pixel in it

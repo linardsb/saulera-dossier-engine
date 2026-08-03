@@ -62,6 +62,27 @@ radar is the same pattern applied to `assignment` end dates.
   missing/submitted/verified/expiring/expired, expiry_date). Thresholds live in the catalogue,
   not code. Telemetry stays in the closed `events.kind` vocabulary, widened in the open
   (`extension_nudge_sent`, `expiry_nudge_sent`) exactly as #17 widened it.
+
+  > **AMENDED 3 Aug 2026 by #69 (owner call).** The widening clause above is **not implemented,
+  > and the mechanism it names does not exist.** #17 widened `events.kind` with `ALTER TABLE
+  > events ADD COLUMN kind … CHECK (…)`; you cannot `ADD COLUMN` a second time to change one
+  > column's CHECK, and SQLite has no `ALTER CONSTRAINT`. Widening it needs the 12-step table
+  > rebuild, which would break three assertions in `test/schema.test.js` (the ALTER self-guard,
+  > because `RENAME TO` is not `ADD COLUMN`; the exact-tables lock, because `events_new` is a
+  > sixteenth name; and the kind-vocabulary test) — turning the product's strongest safety gate
+  > from an accumulative parser into a statement-order simulator, inside a ticket scoped as
+  > "extension radar".
+  >
+  > So **`assignment.nudge_sent_at` (migration 0010) is the sole record of a sent nudge**, and
+  > #69 writes no `events` row. The supporting argument is honest rather than merely convenient:
+  > an `events` row would be a *second* record of the same fact with a *different lifetime* —
+  > `events` rows are deliberately non-personal so they survive the cage's purge, while a nudge
+  > belongs to a booking that dies with its candidate. Nothing in #69's acceptance criteria
+  > needs a nudge count that outlives the cage.
+  >
+  > **#70 inherits the identical wall** for `expiry_nudge_sent`. If the vocabulary is to be
+  > widened, that deserves its own ticket — a schema-regime change with the lockfile rewrite as
+  > its actual body — not a rider on either radar.
 - **Boundaries.** Candidate auth reuses the magic-link + OTP pattern but binds to `candidate`,
   not the 30-day invite. Emails stay on the Resend seam, idempotent via the `reminder_sent_at` /
   `send_key` patterns. No new external services beyond the (pending) HCPC API. Prep-portal

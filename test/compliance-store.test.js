@@ -18,15 +18,19 @@ import {
   ASSIGNMENT_STATUSES,
   candidateByEmail,
   candidateBySessionHash,
+  claimExtensionNudge,
   consumeCandidateOtp,
   createAssignment,
   createCandidate,
   deleteCandidate,
+  dueExtensionNudges,
   issueCandidateOtp,
   itemsByCandidate,
+  listAssignments,
   purgeDormant,
   rotateCandidateSession,
   setItemState,
+  updateAssignment,
 } from "../src/compliance/store.js";
 
 /** The error code a call throws, or the string "did not throw". */
@@ -434,4 +438,140 @@ test("the door's own 400s fire before any SQL runs", async () => {
     assert.equal(await codeOf(() => call(db)), "missing_fields", `${name} must be the store's 400`);
     assert.equal(db.calls.length, 0, `${name} must not reach the database`);
   }
+});
+
+// ── the extension radar's four statements (#69) ────────────────────────────────────────
+//
+// STATEMENT SHAPE ONLY. The fake runs no SQL, so a `>` where the rule means `>=` is invisible
+// here — test/extension-radar.test.js owns the arithmetic, against real SQLite. The split is
+// deliberate: this file proves what was BUILT, that one proves what it DOES.
+
+test("dueExtensionNudges binds the lead time and interpolates nothing", async () => {
+  const db = fakeD1([[]]);
+  await dueExtensionNudges(db, 14);
+
+  assert.equal(db.calls.length, 1, "the radar's whole predicate is one statement");
+  const sql = db.calls[0].sql;
+  // The modifier is assembled by SQLite from a BOUND value — issueCandidateOtp's idiom — so the
+  // number stays outside the statement text even though it is ours and not a caller's.
+  assert.match(sql, /date\('now', '\+' \|\| \? \|\| ' days'\)/, "the bound-modifier idiom, not a template");
+  assert.ok(!sql.includes("14"), "the threshold is never written into the SQL");
+  assert.deepEqual(db.calls[0].args, [14]);
+
+  // The five clauses, each one a decision (read the function's comment for why).
+  assert.match(sql, /a\.end_date IS NOT NULL/, "an open booking has no deadline to warn about");
+  assert.match(sql, /a\.nudge_sent_at IS NULL/, "the claim column IS the idempotency");
+  assert.match(sql, /a\.status IN \('booked', 'active'\)/, "the deliberate inversion of purgeDormant's date-only rule");
+  assert.match(sql, /date\(a\.end_date\) >= date\('now'\)/, "a booking that already ended is a different message");
+  assert.ok(!/datetime\(a\.end_date\)/.test(sql), "day granularity, not instants");
+});
+
+test("dueExtensionNudges refuses a non-integer lead time BEFORE any SQL runs", async () => {
+  for (const bad of [0, -1, 14.5, "14", null, undefined]) {
+    const db = fakeD1([]);
+    assert.equal(await codeOf(() => dueExtensionNudges(db, bad)), "missing_fields", `leadDays ${bad}`);
+    assert.equal(db.calls.length, 0, "the guard is what makes the bound modifier readable, so it runs first");
+  }
+});
+
+test("the radar's projection names its columns and carries no email", async () => {
+  for (const [name, call] of [
+    ["dueExtensionNudges", (db) => dueExtensionNudges(db, 14)],
+    ["listAssignments", (db) => listAssignments(db)],
+  ]) {
+    const db = fakeD1([[]]);
+    await call(db);
+    const sql = db.calls[0].sql;
+    // The PROJECTION alone. `candidate_id` is legitimately in the JOIN condition — it is what
+    // makes the name reachable — and asserting over the whole statement would forbid the join
+    // rather than the leak.
+    const projection = sql.slice(0, sql.search(/\bFROM\b/));
+    assert.ok(!projection.includes("*"), `${name}: named columns, never SELECT *`);
+    assert.doesNotMatch(projection, /\bemail\b/, `${name}: the booking screens need no address`);
+    assert.doesNotMatch(projection, /candidate_id/, `${name}: the name is joined, the id is not returned`);
+    assert.doesNotMatch(sql, /compliance_item/, `${name}: #71's dashboard owns the checklist column`);
+  }
+});
+
+test("claimExtensionNudge is claimReminder's move: one winner, no read-then-write window", async () => {
+  const db = fakeD1([]);
+  assert.equal(await claimExtensionNudge(db, "asg-1"), true); // fake-d1 run() reports changes: 1
+
+  assert.equal(db.calls.length, 1);
+  assert.match(
+    db.calls[0].sql,
+    /^UPDATE assignment SET nudge_sent_at = datetime\('now'\)\s+WHERE id = \? AND nudge_sent_at IS NULL$/i,
+  );
+  assert.deepEqual(db.calls[0].args, ["asg-1"]);
+
+  // An undefined bind is a D1 error; the empty string matches nothing, which is fail-closed.
+  const absent = fakeD1([]);
+  await claimExtensionNudge(absent, undefined);
+  assert.deepEqual(absent.calls[0].args, [""]);
+});
+
+test("listAssignments sorts resolved last, open below dated, soonest first", async () => {
+  const db = fakeD1([[]]);
+  await listAssignments(db);
+
+  const sql = db.calls[0].sql;
+  assert.match(sql, /CASE WHEN a\.status IN \('ended', 'cancelled'\) THEN 1 ELSE 0 END/, "resolved sinks");
+  // 0 (false, i.e. HAS a date) sorts first in SQLite. Do not "fix" this to IS NOT NULL.
+  assert.match(sql, /a\.end_date IS NULL,/, "open sits below dated");
+  assert.match(sql, /date\(a\.end_date\),/, "then soonest first");
+  assert.deepEqual(db.calls[0].args, [], "the whole list, so nothing to bind");
+});
+
+test("updateAssignment builds its SET clause from a FIXED allow-list, never a caller's keys", async () => {
+  const db = fakeD1([]);
+  await updateAssignment(db, "asg-1", { endDate: "2026-12-01", status: "active" });
+
+  assert.equal(db.calls.length, 1, "D1 has no transaction; two statements would be a live half-state");
+  const sql = db.calls[0].sql;
+  assert.match(sql, /^UPDATE assignment SET end_date = \?, nudge_sent_at = NULL, status = \? WHERE id = \?$/i);
+  assert.deepEqual(db.calls[0].args, ["2026-12-01", "active", "asg-1"]);
+
+  // A caller-supplied key cannot reach the SQL string — the file's line-15 contract.
+  const injected = fakeD1([]);
+  await updateAssignment(injected, "asg-1", { "status = 'ended', id": "x", status: "ended" });
+  assert.match(injected.calls[0].sql, /^UPDATE assignment SET status = \? WHERE id = \?$/i);
+});
+
+test("THE RE-ARM: a new end date clears the claim; a status change alone does not", async () => {
+  // The one thing in #69 with no precedent in #25. invite.reminder_sent_at guards a deadline
+  // that CANNOT move; nudge_sent_at guards one that EXISTS to move, and extending is the
+  // successful outcome of the nudge. Without the clear the radar fires once per booking ever.
+  const extend = fakeD1([]);
+  await updateAssignment(extend, "asg-1", { endDate: "2026-12-01" });
+  assert.match(extend.calls[0].sql, /nudge_sent_at = NULL/);
+  // No placeholder for the clear, so the ?-to-bind parity this fake enforces still holds.
+  assert.deepEqual(extend.calls[0].args, ["2026-12-01", "asg-1"]);
+
+  const resolve = fakeD1([]);
+  await updateAssignment(resolve, "asg-1", { status: "ended" });
+  assert.doesNotMatch(resolve.calls[0].sql, /nudge_sent_at/, "resolving settles the nudge, it does not re-arm it");
+
+  // Object.hasOwn and not truthiness: clearing the end date is a meaningful patch that reopens
+  // the booking, and `if (patch.endDate)` would silently drop it.
+  const clear = fakeD1([]);
+  await updateAssignment(clear, "asg-1", { endDate: null });
+  assert.deepEqual(clear.calls[0].args, [null, "asg-1"]);
+});
+
+test("updateAssignment's own 400s fire before any SQL runs", async () => {
+  const cases = [
+    ["an unknown status", (db) => updateAssignment(db, "asg-1", { status: "extended" })],
+    ["a status the CHECK admits nowhere", (db) => updateAssignment(db, "asg-1", { status: "redeployed" })],
+    ["an empty patch", (db) => updateAssignment(db, "asg-1", {})],
+    ["a missing id", (db) => updateAssignment(db, "", { status: "ended" })],
+  ];
+
+  for (const [name, call] of cases) {
+    const db = fakeD1([]);
+    assert.equal(await codeOf(() => call(db)), "missing_fields", `${name} must be the store's 400`);
+    assert.equal(db.calls.length, 0, `${name} must not reach the database`);
+  }
+
+  // And the vocabulary it checks against is the exported one, not a second list.
+  assert.deepEqual(ASSIGNMENT_STATUSES, ["booked", "active", "ended", "cancelled"]);
 });

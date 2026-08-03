@@ -35,12 +35,16 @@ function declares(markup, id) {
   return markup.includes(`id="${id}"`);
 }
 
-// Scoped to the two recruiter screens on purpose. app.js queries ids that live on /prep pages
-// and on 404.html, so widening this scan would fail for reasons that have nothing to do with
-// either page below.
+// Scoped to the recruiter screens on purpose. app.js queries ids that live on /prep pages and on
+// 404.html, so widening this scan would fail for reasons that have nothing to do with the pages
+// below. #69 registers a third — the bookings screen — which resolves its elements the same way
+// and so is gated the same way. Its per-row controls are deliberately built with createElement
+// and reached through closures rather than by id, which is why this scan sees only the page's own
+// static markup and why that is the right amount for it to see.
 const SCREENS = [
   ["clients", "public/clients.js", "public/clients.html"],
   ["counts", "public/counts.js", "public/counts.html"],
+  ["assignments", "public/assignments.js", "public/assignments.html"],
 ];
 
 for (const [screen, script, page] of SCREENS) {

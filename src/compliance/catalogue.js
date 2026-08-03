@@ -37,3 +37,17 @@ export const ITEM_KEYS = COMPLIANCE_CATALOGUE.map((item) => item.key);
  * a sixth state the column would then reject at write time.
  */
 export const ITEM_STATUSES = ["missing", "submitted", "verified", "expiring", "expired"];
+
+/**
+ * How many days before a booking ends the recruiter is nudged to extend or redeploy (#69).
+ *
+ * It lives HERE for the same reason `amberDays` does: thresholds live in the catalogue and not
+ * in code (architecture, "Data model"), which is what makes a retune a one-line diff rather
+ * than a sweep through logic. Beside the array rather than inside it, because a booking has ONE
+ * lead time — it is not a per-item value, and there is no checklist row it belongs to.
+ *
+ * The browser cannot import this (see the header: src/ is not in the Pages build output), so
+ * public/assignments.js reads the number off GET /api/assignments rather than carrying a second
+ * copy that could drift from the sweep's.
+ */
+export const EXTENSION_LEAD_DAYS = 14;
