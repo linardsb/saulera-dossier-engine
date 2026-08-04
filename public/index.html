@@ -9,6 +9,9 @@
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
+<!-- TEMPORARY walkthrough layer — delete with public/guide.css, public/guide.js and
+     test/guide.test.js. See guide.css's header. -->
+<link rel="stylesheet" href="/guide.css">
 </head>
 <body>
 
@@ -36,8 +39,8 @@
 
   <div class="page-head">
     <h1>Submission pack</h1>
-    <p class="page-sub">Three steps, all on this page, and every claim in the finished pack
-      shows its source.</p>
+    <p class="page-sub">Four steps, all on this page. Every claim in the finished pack shows
+      where it came from.</p>
     <!-- The whole journey, visible before any of it happens. Acts 2 and 3 stay hidden until
          reached, so without this map a first-time reader sees one numbered step and a button.
          Same chip grammar as the acts, so the map and the flow read as one thing. The map
@@ -142,9 +145,8 @@
         <!-- Generating mode only. No progress invented: the model reports nothing until it
              answers, so the truthful things on screen are what is happening and the clock. -->
         <p class="act-note generating-only">
-          The pack is being written, and every claim in it will be checked word for word
-          against the CV and your note before you see it. This usually takes a minute or two.
-          Leave this page open.
+          We are writing the pack. Every claim in it gets checked word for word against the CV
+          and your note before you see it. This takes a minute or two, so leave this page open.
         </p>
 
         <!-- The link repeats what the button already did, because the tab gets closed, blocked,
@@ -162,7 +164,7 @@
                   placeholder="Paste the whole reply, including the JSON block."></textarea>
 
         <div class="act-row">
-          <button class="btn btn-primary manual-only" type="button" id="read-pack">Read the pack</button>
+          <button class="btn btn-primary manual-only" type="button" id="read-pack">Show the pack</button>
           <button class="btn" type="button" id="start-again">Start again</button>
           <span class="save-state" id="waiting-state" role="status"></span>
         </div>
@@ -196,7 +198,7 @@
 
         <p class="act-note">This sends the candidate a private preparation page of their own,
           built from the brief, their CV, and the parts of your client note you ticked as
-          shareable. It never sends the pack, and never anything you did not tick.</p>
+          shareable. It never sends the pack, and never anything you left unticked.</p>
 
         <!-- One question in two fields — when, and to whom — so they sit as one row rather than
              as two full-width inputs stacked down the stage. DOM order is unchanged, so the tab
@@ -245,6 +247,7 @@
 
 </main>
 <script src="/extract.js"></script>
+<script src="/guide.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

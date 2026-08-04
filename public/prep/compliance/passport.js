@@ -60,10 +60,10 @@ const COPY = {
   /* The same five states, said properly. */
   meaning: {
     missing: "We do not have this yet.",
-    submitted: "We have this — the agency is checking it.",
+    submitted: "We have this. The agency is checking it.",
     verified: "Checked and in order.",
-    expiring: "This runs out soon — send us the new one.",
-    expired: "This has run out — send us the new one.",
+    expiring: "This runs out soon. Send us the new one.",
+    expired: "This has run out. Send us the new one.",
   },
 
   referenceLabel: "Reference or certificate number",
@@ -76,7 +76,7 @@ const COPY = {
   saved: "Saved. Thank you.",
 
   noDocuments:
-    "We do not store your documents. Send those to the agency the way you always have — here we " +
+    "We do not store your documents. Send those to the agency the way you always have. Here we " +
     "keep only the reference number and the date it runs out.",
 
   held: (reference) => `Reference: ${reference}`,

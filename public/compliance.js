@@ -37,7 +37,7 @@
 
   var COPY = {
     loading: "Loading…",
-    empty: "No candidates yet. Record a booking on the Bookings screen — that is what starts a candidate's checklist.",
+    empty: "No candidates yet. Record a booking on the Bookings screen. That is what starts a candidate's checklist.",
     failed: "Could not load the compliance list. Reload the page.",
     sessionExpired: "Your sign-in has expired. Reload the page to sign in again.",
 
@@ -73,10 +73,10 @@
     updating: "Saving the change…",
     verified: "Marked as verified.",
     sentBack: "Sent back. We have emailed them the reason.",
-    sentBackNoEmail: "The item was sent back, but we could not email them — give them a call.",
+    sentBackNoEmail: "The item was sent back, but we could not email them. Give them a call.",
     needReason: "Type one line saying why, then press Send back.",
-    notSubmitted: "That item is not waiting for you any more — someone or something changed it. Reload the page.",
-    mailNotConfigured: "Nothing was changed. Email is not set up on this deployment, so they could not be told why.",
+    notSubmitted: "That item is not waiting for you any more. Something has changed it. Reload the page.",
+    mailNotConfigured: "Nothing was changed. This tool cannot send email yet, so they could not be told why.",
     candidateGone: "That candidate is no longer on file. Reload the page.",
     updateFailed: "Could not save that change. Reload the page and try again."
   };

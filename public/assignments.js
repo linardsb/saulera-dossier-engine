@@ -33,7 +33,7 @@
     empty: "No bookings recorded yet. Add the first one above and we will watch its end date.",
     failed: "Could not load the bookings. Reload the page.",
     sessionExpired: "Your sign-in has expired. Reload the page to sign in again.",
-    noClients: "Add a client on the Client knowledge screen first — a booking has to belong to one.",
+    noClients: "Add a client on the Client knowledge screen first. Every booking belongs to one.",
 
     saving: "Saving…",
     saved: "Booking recorded.",
@@ -53,7 +53,7 @@
 
     // The state cell, in the recruiter's words. `assignment.status` holds booked/active/ended/
     // cancelled; none of those four words is shown raw except where it is already plain English.
-    open: "Open — no end date",
+    open: "Open, no end date",
     lapsed: "End date has passed",
     endsToday: "Ends today",
     endsIn: function (days) { return "Ends in " + days + (days === 1 ? " day" : " days"); },

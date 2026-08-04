@@ -31,8 +31,8 @@
   var COPY = {
     // What a dead magic link lands on. Two messages, because there are two different things
     // worth telling someone: their prep has closed, or their link is spent.
-    invalid: "That link has already been used, or it is not valid any more. Enter your email " +
-             "below and we will send you a code.",
+    invalid: "That link has already been used, or it no longer works. Enter your email below " +
+             "and we will send you a code.",
     expired: "That link has expired. Your prep stays available until 14 days after your " +
              "interview.",
 
