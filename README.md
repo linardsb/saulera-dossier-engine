@@ -95,6 +95,34 @@ without the doc to hand.
 Recorded here so they don't get re-litigated per ticket. The architecture doc is the
 source for everything decided before the build; this covers what was decided during it.
 
+**The transcript is not the brief, and a card that is always tinted says nothing.** (2 Aug 2026,
+#63, epic #57.) `prep.css` tinted "the first block" with the signature surface and its comment
+claimed one per page by construction. `:first-of-type` matches the first sibling of an element's
+own type among its *own* siblings, and blocks are rendered into more than one parent: the drill
+builds a fresh wrapper div per turn, so every question card and every feedback note was
+first-of-type inside its own wrapper, and `CompetencyMap` nests its children inside its own body,
+so a nested card was tinted on the brief too. A ten-turn practice session was a page of
+alternating tinted cards. The rule is now scoped by a child combinator to the two mounts that
+always meant it — `#blocks` and `#prime-blocks` — and the drill says who is speaking with an
+accent edge on the interviewer's cards and a tone step on the feedback, which costs no width on a
+page whose prose column is 296px. A descendant combinator would not have been enough; the nested
+card is a descendant of the brief as well.
+
+*The answer box was never a `.textarea`.* The one control a candidate types into for ten minutes
+carried no class at all, so `app.css`'s field rules never reached it: it rendered in the user
+agent's monospace at about 13px, and iOS Safari zooms the viewport whenever a focused control
+computes below 16px. The same bug #62 fixed on sign-in, still live on the page that matters more,
+and invisible on every desktop browser — which is how it survived from #24. One attribute fixes
+it, and `test/prep-content.test.js` now holds it there.
+
+*`min-height` does not apply to an inline element.* `app.css` holds CRAFT's 44px tap floor with
+`min-height` on `.btn`, which lands on every `<button>` in the deployment and had never landed on
+an `<a class="btn">` — CSS 2.1 §10.7 exempts non-replaced inline elements. There are exactly two
+such anchors, both in the candidate portal, both on the phone surface, both rendering at about
+39px: they were the only controls in the product under the floor. `display: inline-flex` in
+`prep.css` is what makes the floor apply. If a recruiter screen ever grows an anchor-button, the
+rule should move to `app.css` and this one be deleted.
+
 **The candidate portal is one system, and it is designed for a phone.** (2 Aug 2026, #62, epic
 #57.) The portal used to be two half-systems: `brief.html` and `session.html` linked
 `public/prep/prep.css` and ended in a shared footer, while the three shell pages — sign-in, the

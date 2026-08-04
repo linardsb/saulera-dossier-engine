@@ -1,0 +1,20 @@
+-- #69: the extension radar's claim. 0006_reminder.sql's shape and 0006's exact argument —
+-- the claim is UPDATE ... WHERE nudge_sent_at IS NULL, so this column IS the idempotency, and
+-- "one nudge per booking" is structural on a database with no transaction rather than hopeful.
+-- Nullable with no default, because "never nudged" is the honest state of every existing row
+-- (0004's note: a nullable TEXT needs no default). It dies with the assignment, which dies with
+-- the candidate — 0008's cascade, proven table-by-table in test/schema.test.js.
+--
+-- NO CHECK on this column, which is the deliberate opposite of end_date one table over. A
+-- date a caller typed can be unparseable, so end_date moves that failure to write time; this
+-- column is only ever written by datetime('now') inside src/compliance/store.js and never by a
+-- caller, so there is no unparseable-string failure mode to move anywhere.
+--
+-- AND NO `events` ROW FOR A SENT NUDGE. events.kind's vocabulary is NOT widened by this ticket:
+-- #17 widened it by ADD COLUMN with a CHECK, and SQLite has no ALTER CONSTRAINT, so a second
+-- widening needs the 12-step table rebuild. Beyond the cost, an events row would be a second
+-- record of the same fact with a DIFFERENT LIFETIME — events rows are deliberately non-personal
+-- so they survive the cage's purge, while a nudge belongs to a booking that dies with its
+-- candidate. This column is the whole record of a sent nudge. The full argument, and the owner's
+-- call, are in .claude/plans/extension-rebooking-radar.md's Open Questions.
+ALTER TABLE assignment ADD COLUMN nudge_sent_at TEXT;

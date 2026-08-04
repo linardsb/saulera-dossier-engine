@@ -71,6 +71,11 @@ const INLINE_STYLE_PAGES = [
   // public/prep/login.html is absent on the showcase branch: the candidate sign-in is removed
   // there and the junction hands a visitor straight to the seeded demo session.
   "public/prep/privacy.html",
+  // #68's compliance sign-in. It carries one block holding `.sr-only` alone, for the reason
+  // login.html states — 1px inset values are a clipping trick that prep.css's token gate
+  // rejects. This list is hardcoded, so test/compliance-pages.test.js asserts that this line
+  // exists: a page-scoped block missing from here is silently ungated in both directions.
+  "public/prep/compliance/login.html",
 ];
 
 test("every transition in app.css sits behind the reduced-motion guard", () => {

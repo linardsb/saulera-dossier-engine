@@ -51,10 +51,9 @@
     waitHeadManual: "In Claude",
     // Model-side failures name the other route, because the other route is the remedy that
     // always exists: it needs no key and it is one button to the left.
-    noModelKey: "This deployment has no model key yet, so it cannot write the pack here. " +
-                "Copy the prompt and run it in your own Claude instead, and ask whoever set " +
-                "this up to add the key.",
-    modelRefused: "The model declined to write this pack. Try again, or copy the prompt and " +
+    noModelKey: "This tool cannot write packs here yet. Copy the prompt and run it in your " +
+                "own Claude instead, then ask whoever set the tool up to finish setting it up.",
+    modelRefused: "Claude would not write this pack. Try again, or copy the prompt and " +
                   "run it in your own Claude.",
     truncated: "The pack came back cut off. Try again, or copy the prompt and run it in " +
                "your own Claude.",
@@ -146,6 +145,12 @@
       gaps: "Where they do not meet the brief"
     },
 
+    // The label on every claim's evidence expander. Fixed, never toggled: the disclosure marker
+    // the browser draws carries the open/closed state, so the label never has to be kept in sync
+    // with it — which is the whole reason this is a <details> and not a button wired to
+    // aria-expanded. Recruiter words, so not "source" and not "provenance".
+    evidenceToggle: "Where this came from",
+
     questionsHead: "Before you send this",
     renderers: {
       appendix: "Sources go in an appendix.",
@@ -170,8 +175,8 @@
     // Already unticked when this shows, and deliberately NOT an invitation to tick it back
     // on: the server refuses any send that includes an unsourced line, so offering that would
     // be a control that cannot be confirmed. It says what happened and stops.
-    sendPreviewUnverified: "Anything ticked below was found in the brief. One or more lines " +
-                           "could not be, so they are not being sent.",
+    sendPreviewUnverified: "Everything ticked below was found in the brief. Some lines were " +
+                           "not, so we are leaving those out.",
     sendAllUnverified: "None of these could be found in the brief, so there is nothing to " +
                        "send. Generate the pack again, or check the brief you pasted.",
     // The empty preview used to lock "Send it" and say NOTHING at all — a disabled button over
@@ -203,7 +208,7 @@
     // timeout. Success wording, because from the recruiter's side it is: the candidate has
     // their email, and nothing was sent or counted twice.
     sendAlreadyDone: function (email) {
-      return "Already sent to " + email + " — your earlier try went through. They have " +
+      return "Already sent to " + email + ". Your earlier try went through, so they have " +
         "their email with the link. To send another, press Start again.";
     },
 
@@ -213,13 +218,13 @@
     sendFailed: "Could not send that. Nothing was sent and nothing was saved. Try again.",
     sendMailFailed: "The email was not accepted, so nothing was sent and nothing was saved. " +
                     "Try again. You do not need to prepare it a second time.",
-    sendNoMail: "This deployment cannot send email yet. Ask whoever set it up to add the " +
-                "email key, then try again.",
+    sendNoMail: "This tool cannot send email yet. Ask whoever set it up to finish setting up " +
+                "email, then try again.",
     // Refused before anything is minted or written, so "nothing was sent" is a fact, not a
     // hope — and without this string a misconfigured deployment read as a transient failure.
-    sendNoBaseUrl: "This deployment does not know the web address candidate pages live at, " +
-                   "so the link cannot be built. Nothing was sent. Ask whoever set it up to " +
-                   "add the page address, then try again.",
+    sendNoBaseUrl: "This tool does not know the web address candidate pages sit at, so it " +
+                   "cannot build the link. Nothing was sent. Ask whoever set it up to add " +
+                   "that address, then try again.",
     sendNotSendable: function (labels) {
       return "These lines could not be found in the brief, so they cannot be sent: " +
         labels + ". Untick them, or generate the pack again.";
@@ -1037,12 +1042,30 @@
     // copying source_quote into failed_quote and leaving source_quote where it was, so rendering
     // both prints the same sentence twice — once looking like evidence and once as the thing
     // that is not evidence, which is the opposite of what the mark is telling the recruiter.
+    // The quote sits behind a native disclosure rather than under the claim: the CHIP is the
+    // provenance and it is always on screen, the quote is the evidence behind it and evidence is
+    // the thing you go and look at. <details> because the platform already ships the keyboard and
+    // screen-reader behaviour correctly, with no state of ours to keep in sync.
+    //
+    // Never expanded by default, and note which claims reach here at all: a failed check has no
+    // .claim-source to hide, so it builds no expander and its failure line below stays as visible
+    // as it is today. The disclosure only ever hides a quote that PASSED.
     var quote = claim.failed_quote ? "" : displayQuote(claim.source_quote);
     if (quote) {
+      var evidence = document.createElement("details");
+      evidence.className = "claim-evidence";
+
+      var toggle = document.createElement("summary");
+      toggle.className = "claim-evidence-toggle";
+      toggle.textContent = COPY.evidenceToggle;
+      evidence.appendChild(toggle);
+
       var source = document.createElement("p");
       source.className = "claim-source";
       source.textContent = "“" + quote + "”";
-      block.appendChild(source);
+      evidence.appendChild(source);
+
+      block.appendChild(evidence);
     }
 
     // What the model thought it was citing, kept so a bad pack is diagnosable rather than
@@ -1097,7 +1120,9 @@
 
     if (pack.open_questions && pack.open_questions.length) {
       var questions = document.createElement("section");
-      questions.className = "pack-section";
+      // The one block of the pack that is neither sourced nor unsourced — it is the recruiter's
+      // own list of things to confirm — so it gets the info tint rather than a provenance one.
+      questions.className = "pack-section pack-questions-panel";
 
       var head = document.createElement("h3");
       head.className = "pack-section-head";
@@ -1115,9 +1140,12 @@
       el.packBody.appendChild(questions);
     }
 
-    // The headline number, worn in the marks' own colours — word plus colour, never colour
-    // alone, same rule as the marks. Built element by element: model-adjacent numbers still
-    // go nowhere near an HTML-parsing assignment.
+    // The headline number, worn in the marks' own colours and now on the marks' own grounds —
+    // word plus colour plus ground, never colour alone, same rule as the marks. Built element by
+    // element: model-adjacent numbers still go nowhere near an HTML-parsing assignment.
+    //
+    // The middle dot between the two counts is gone: the gap and the two grounds separate them
+    // now, and a separator between two chips reads as punctuation inside one of them.
     var sourced = body.provenance.cv + body.provenance.client_note;
     var unverified = body.provenance.unverified;
     el.provenanceSummary.textContent = "";
@@ -1125,9 +1153,10 @@
     sourcedNode.className = "summary-sourced";
     sourcedNode.textContent = sourced + " sourced";
     el.provenanceSummary.appendChild(sourcedNode);
-    el.provenanceSummary.appendChild(document.createTextNode(" · "));
     var unverifiedNode = document.createElement("span");
-    if (unverified > 0) unverifiedNode.className = "summary-unverified";
+    // A pack with nothing unverified must not wear a warning chip saying so. It keeps the chip's
+    // box and loses the ground, so the two counts still sit on one baseline.
+    unverifiedNode.className = unverified > 0 ? "summary-unverified" : "summary-unverified-none";
     unverifiedNode.textContent = unverified + " unverified";
     el.provenanceSummary.appendChild(unverifiedNode);
 

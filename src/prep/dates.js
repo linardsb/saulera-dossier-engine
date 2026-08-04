@@ -24,6 +24,33 @@ const SQLITE_STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * Is this a real calendar day, and not merely a well-shaped string?
+ *
+ * The regex alone is not enough. V8 refuses a bad month (`2026-13-01` does not parse) but
+ * silently ROLLS a bad day: `Date.parse('2026-02-30')` lands on 2 March. The round trip is the
+ * check — the same trap `toSqliteUtc` below records for `interview_at`, which is why this is
+ * that function's neighbour rather than a copy in a route.
+ *
+ * Parsed as UTC — `${raw}T00:00:00Z` — for the reason the header gives: a space- or zone-less
+ * string is read as LOCAL time, and in British Summer Time that is an hour of drift, which
+ * across midnight is a whole day.
+ *
+ * Callers use it to refuse a caller-fixable date at the DOOR. Both `compliance_item.expiry_date`
+ * and `assignment.end_date` carry `CHECK (datetime(...) IS NOT NULL)`, so a malformed string
+ * reaching the column is an ERR_SQLITE_ERROR and a 500 — which on this deployment means
+ * "deployment fault" (DEPLOY.md's triage table), a signal a bad input must not pollute.
+ *
+ * #69 moved this here from functions/prep/compliance/api/item.js, where #68 wrote it: the
+ * bookings routes needed the same check, and three copies of a round-trip date test is where one
+ * of them quietly loses the round trip.
+ */
+export function isRealDate(raw) {
+  if (!DATE_ONLY.test(raw)) return false;
+  const ms = Date.parse(`${raw}T00:00:00Z`);
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === raw;
+}
+
+/**
  * Parse a stamp as UTC, whatever separator and zone it arrived with.
  *
  * The `T` and the `Z` are the load-bearing part, for the reason in the header. A value that

@@ -16,8 +16,12 @@ import {
   MAIL_FROM_DEFAULT,
   mailFrom,
   sendEmail,
+  sendExpiryDigestEmail,
+  sendExpiryNudgeEmail,
+  sendExtensionNudgeEmail,
   sendInviteEmail,
   sendOtpEmail,
+  sendRejectionEmail,
   sendReminderEmail,
 } from "../src/prep/email.js";
 
@@ -409,4 +413,459 @@ test("the reminder's tone: no exclamation mark, no pressure, in either half", as
     assert.ok(!content.includes("!"), `no exclamation mark in the ${part} half`);
     assert.ok(!/streak|don't forget|good luck|you've got this/i.test(content), `no pressure in the ${part} half`);
   }
+});
+
+// ── the extension nudge (#69), the one message addressed to the agency ─────────────────
+
+const NUDGE = {
+  to: "desk@ttrhealthcare.example",
+  agencyName: "TTR Healthcare",
+  candidateName: "Priya Nair",
+  clientName: "Ashdown Park Community Healthcare",
+  endDate: "2026-09-21",
+  link: "https://engine.pages.dev/assignments",
+};
+
+test("the nudge names the candidate, the client and the day in both halves", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  const body = bodyOf(calls);
+
+  assert.equal(body.subject, "Booking ending: Priya Nair at Ashdown Park Community Healthcare");
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(content.includes(NUDGE.candidateName), `the ${part} half names the candidate`);
+    assert.ok(content.includes(NUDGE.clientName), `the ${part} half names the client`);
+    assert.ok(content.includes("2026-09-21"), `the ${part} half carries the end date`);
+    // sendInviteEmail's treatment: a recruiter reading "2026-09-21 00:00:00" learns nothing
+    // from the zeros.
+    assert.ok(!content.includes("00:00:00"), `the ${part} half renders the date day-only`);
+  }
+});
+
+test("the nudge's link is the recruiter's screen, bare in the text half — and never a portal path", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  const body = bodyOf(calls);
+
+  assert.ok(body.text.split("\n").includes(NUDGE.link), "bare on its own line, for plain-text clients");
+  assert.ok(body.html.includes(`href="${NUDGE.link}"`), "the html half links it");
+  // The recipient is the recruiter. A /prep/* link would send them to the candidate's door, and
+  // /prep/* is the one tree the two Access bypass apps leave open.
+  assert.ok(!JSON.stringify(body).includes("/prep/"), "the nudge never points at the candidate portal");
+});
+
+test("R8 on the nudge's subject: neither name can open a second header", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExtensionNudgeEmail(ENV, {
+      ...NUDGE,
+      candidateName: "Priya\r\nBcc: someone@else.example",
+      clientName: "Ashdown\nX-Evil: yes",
+    }),
+  );
+  const { subject } = bodyOf(calls);
+  assert.ok(!subject.includes("\r"), "no carriage return survives");
+  assert.ok(!subject.includes("\n"), "no line feed survives");
+  assert.equal(subject.split(/\r?\n/).length, 1, "the subject is a single line");
+  // The smuggled words survive as TEXT, which is correct and is what sendInviteEmail does too:
+  // the injection is the line break, not the string "Bcc:". Stripping words would be a
+  // denylist, and a denylist is the wrong shape for a header-safety rule.
+  assert.ok(subject.includes("Bcc: someone@else.example"), "stripped to a space, not censored");
+
+  // A legitimate pair is untouched — the discipline must not cost the ordinary case.
+  const plain = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  assert.equal(
+    bodyOf(plain.calls).subject,
+    "Booking ending: Priya Nair at Ashdown Park Community Healthcare",
+  );
+});
+
+test("a name over the cap is sliced rather than rejected", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExtensionNudgeEmail(ENV, { ...NUDGE, clientName: "A".repeat(400) }),
+  );
+  // The cap keeps a runaway value out of a Resend rejection the recruiter cannot diagnose.
+  assert.ok(bodyOf(calls).subject.length < 300);
+});
+
+test("a candidate name containing markup is escaped in the html half", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExtensionNudgeEmail(ENV, { ...NUDGE, candidateName: "<script>alert(1)</script>" }),
+  );
+  const body = bodyOf(calls);
+  assert.ok(!body.html.includes("<script>"), "mail clients render whatever markup arrives");
+  assert.ok(body.html.includes("&lt;script&gt;"), "and it survives as text");
+});
+
+test("the nudge's From carries the agency name through mailFrom", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  assert.equal(bodyOf(calls).from, '"TTR Healthcare" <prep@saulera.com>');
+
+  const bare = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, { ...NUDGE, agencyName: "" }));
+  assert.equal(bodyOf(bare.calls).from, MAIL_FROM_DEFAULT, "a nameless agency falls back");
+});
+
+test("with no RESEND_API_KEY the nudge makes zero fetch calls", async () => {
+  const { calls, result } = await withFetch(ok, () => sendExtensionNudgeEmail({}, NUDGE));
+  assert.equal(calls.length, 0);
+  assert.equal(result.error?.code, "not_configured");
+});
+
+test("the nudge's tone: one calm ask, no pressure, in either half", async () => {
+  const { calls } = await withFetch(ok, () => sendExtensionNudgeEmail(ENV, NUDGE));
+  const body = bodyOf(calls);
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(!content.includes("!"), `no exclamation mark in the ${part} half`);
+    assert.ok(!/urgent|act now|don't forget|last chance/i.test(content), `no pressure in the ${part} half`);
+  }
+});
+
+// ── the expiry pair (#70) ──────────────────────────────────────────────────────────────
+
+const EXPIRY_LINK = "https://engine.pages.dev/prep/compliance/login";
+
+const EXPIRING = {
+  to: "locum@example.com",
+  agencyName: "TTR Healthcare",
+  link: EXPIRY_LINK,
+  items: [
+    { label: "Immunisation record", status: "expiring", expiryDate: "2026-09-02" },
+    { label: "HCPC registration", status: "expiring", expiryDate: "2026-09-30" },
+  ],
+};
+
+test("the candidate's nudge lists every item that crossed, in one message", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryNudgeEmail(ENV, EXPIRING));
+  const body = bodyOf(calls);
+
+  // ONE message per sweep, not one per item: a locum whose DBS and immunisations lapse the same
+  // week gets one email and not two.
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(content.includes("Immunisation record"), `the ${part} half names the first item`);
+    assert.ok(content.includes("HCPC registration"), `the ${part} half names the second`);
+    assert.ok(content.includes("2026-09-02"), `the ${part} half carries the date`);
+    assert.ok(!content.includes("00:00:00"), `the ${part} half renders the date day-only`);
+  }
+  // Three items, three lines — the batch is a list rather than a sentence that grows. The item
+  // lines are the indented ones; matching on "runs out" would also catch the closing sentence
+  // about what we do and do not store.
+  const itemLines = (text) => text.split("\n").filter((line) => line.startsWith("  "));
+  assert.equal(itemLines(body.text).length, 2);
+  const three = await withFetch(ok, () =>
+    sendExpiryNudgeEmail(ENV, {
+      ...EXPIRING,
+      items: [...EXPIRING.items, { label: "Fit-to-work check", status: "expiring", expiryDate: "2026-10-01" }],
+    }),
+  );
+  assert.equal(itemLines(bodyOf(three.calls).text).length, 3);
+});
+
+test("the nudge's subject turns on the WORST state in the batch", async () => {
+  const soon = await withFetch(ok, () => sendExpiryNudgeEmail(ENV, EXPIRING));
+  assert.equal(bodyOf(soon.calls).subject, "Something we hold for you runs out soon");
+
+  // "has run out" and "runs out soon" are different problems, and an inbox preview is the first
+  // surface either one reaches.
+  const lapsed = await withFetch(ok, () =>
+    sendExpiryNudgeEmail(ENV, {
+      ...EXPIRING,
+      items: [EXPIRING.items[0], { label: "HCPC registration", status: "expired", expiryDate: "2026-07-01" }],
+    }),
+  );
+  const body = bodyOf(lapsed.calls);
+  assert.equal(body.subject, "Something we hold for you has run out");
+  assert.ok(body.text.includes("ran out 2026-07-01"), "and the per-item tense is per item");
+  assert.ok(body.text.includes("runs out 2026-09-02"), "the amber one still reads as amber");
+});
+
+test("the nudge's link is the COMPLIANCE door, bare in the text half — never /prep/login", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryNudgeEmail(ENV, EXPIRING));
+  const body = bodyOf(calls);
+
+  assert.ok(body.text.split("\n").includes(EXPIRY_LINK), "bare on its own line, for plain-text clients");
+  assert.ok(body.html.includes(`href="${EXPIRY_LINK}"`), "the html half links it");
+  // The two portals hold independent cookies: a candidate sent to /prep/login would sign in to
+  // the interview-prep product instead of their checklist.
+  assert.ok(!/\/prep\/login/.test(JSON.stringify(body)), "never the interview-prep door");
+  // sendReminderEmail's rule: no raw token exists to send, and minting one would rotate
+  // session_hash under a live session.
+  assert.ok(!/\/prep\/auth\/enter/.test(JSON.stringify(body)), "and never a tokenized path");
+});
+
+test("the nudge never reads the candidate's own reference number back to them", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExpiryNudgeEmail(ENV, {
+      ...EXPIRING,
+      items: [{ ...EXPIRING.items[0], reference: "IMM-2024-118" }],
+    }),
+  );
+  // It is theirs, they typed it, and this message could sit in an inbox for years. It has to say
+  // what to renew, not recite their paperwork.
+  assert.ok(!JSON.stringify(bodyOf(calls)).includes("IMM-2024-118"));
+});
+
+test("the nudge's From carries the agency name, and its body escapes it", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryNudgeEmail(ENV, EXPIRING));
+  const body = bodyOf(calls);
+  assert.equal(body.from, '"TTR Healthcare" <prep@saulera.com>');
+  assert.ok(body.text.includes("TTR Healthcare"));
+
+  const evil = await withFetch(ok, () =>
+    sendExpiryNudgeEmail(ENV, { ...EXPIRING, agencyName: "<script>alert(1)</script>" }),
+  );
+  assert.ok(!bodyOf(evil.calls).html.includes("<script>"), "mail clients render whatever markup arrives");
+
+  const bare = await withFetch(ok, () => sendExpiryNudgeEmail(ENV, { ...EXPIRING, agencyName: "" }));
+  assert.ok(bodyOf(bare.calls).text.includes("your recruitment agency"), "a nameless agency still parses");
+});
+
+test("the nudge's tone: calm, no pressure, no consequence we cannot know", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryNudgeEmail(ENV, EXPIRING));
+  const body = bodyOf(calls);
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(!content.includes("!"), `no exclamation mark in the ${part} half`);
+    assert.ok(
+      !/urgent|act now|don't forget|last chance|immediately/i.test(content),
+      `no pressure in the ${part} half`,
+    );
+  }
+});
+
+test("with no RESEND_API_KEY the nudge makes zero fetch calls", async () => {
+  const { calls, result } = await withFetch(ok, () => sendExpiryNudgeEmail({}, EXPIRING));
+  assert.equal(calls.length, 0);
+  assert.equal(result.error?.code, "not_configured");
+});
+
+const DIGEST = {
+  to: "desk@ttrhealthcare.example",
+  agencyName: "TTR Healthcare",
+  rows: [
+    { candidateName: "Priya Nair", label: "Immunisation record", status: "expiring", expiryDate: "2026-09-02" },
+    { candidateName: "Tom Okafor", label: "Enhanced DBS check", status: "expired", expiryDate: "2026-07-14" },
+  ],
+};
+
+test("the digest names every candidate and item, with each one's own tense", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryDigestEmail(ENV, DIGEST));
+  const body = bodyOf(calls);
+
+  for (const [part, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(content.includes("Priya Nair"), `the ${part} half names the first candidate`);
+    assert.ok(content.includes("Tom Okafor"), `the ${part} half names the second`);
+    assert.ok(content.includes("Immunisation record"), `the ${part} half names the first item`);
+    assert.ok(content.includes("Enhanced DBS check"), `the ${part} half names the second`);
+  }
+  assert.ok(body.text.includes("runs out 2026-09-02"), "amber reads as amber");
+  assert.ok(body.text.includes("ran out 2026-07-14"), "and red reads as red");
+});
+
+test("WITH NO LINK THE DIGEST IS #70'S MESSAGE, UNCHANGED", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryDigestEmail(ENV, DIGEST));
+  const body = bodyOf(calls);
+
+  // #71 gave this message an OPTIONAL link. Optional is the whole point: the caller's two
+  // configuration guards are independent, so a deployment carrying RECRUITER_EMAIL and no
+  // PREP_BASE_URL must keep receiving exactly the digest it receives today. This is that
+  // guarantee, and it is what stops the link becoming a precondition by accident.
+  assert.doesNotMatch(body.text, /https?:\/\//, "no URL in the text half");
+  assert.doesNotMatch(body.html, /https?:\/\//, "nor in the html half");
+  assert.ok(!body.html.includes("<a "), "and no anchor at all");
+  assert.ok(!JSON.stringify({ text: body.text, html: body.html }).includes("/prep/"));
+});
+
+test("with a link the digest points at the recruiter's screen, never at a candidate door", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExpiryDigestEmail(ENV, { ...DIGEST, link: "https://engine.pages.dev/compliance" }),
+  );
+  const body = bodyOf(calls);
+
+  for (const [half, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(content.includes("https://engine.pages.dev/compliance"), `the ${half} half carries it`);
+    // The rule #70 asserted for the extension nudge, at a second root: a /prep/* link would send
+    // the recruiter to the candidate's portal, which holds a different product's cookies.
+    assert.ok(!content.includes("/prep/"), `the ${half} half points at no portal path`);
+  }
+  // The TEXT half carries it as bare text on its own line — a plain-text client shows exactly
+  // what the text half says, and a link that exists only as an <a> href cannot be followed.
+  assert.ok(body.text.split("\n").includes("https://engine.pages.dev/compliance"));
+});
+
+test("the digest's subject carries a COUNT and no name", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryDigestEmail(ENV, DIGEST));
+  const { subject } = bodyOf(calls);
+
+  // An inbox preview naming a locum's compliance problem on a shared desk is a disclosure
+  // nobody chose.
+  assert.equal(subject, "Compliance expiries — 2 to chase");
+  assert.ok(!subject.includes("Priya"));
+  assert.ok(!subject.includes("Nair"));
+});
+
+test("R8 on the digest: a candidate name cannot open a second header, and a runaway one is capped", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExpiryDigestEmail(ENV, {
+      ...DIGEST,
+      rows: [
+        { ...DIGEST.rows[0], candidateName: "Priya\r\nBcc: someone@else.example" },
+        { ...DIGEST.rows[1], candidateName: "A".repeat(400) },
+      ],
+    }),
+  );
+  const body = bodyOf(calls);
+
+  const stripped = body.text.split("\n").find((line) => line.includes("Priya"));
+  assert.ok(!stripped.includes("\r"), "no carriage return survives");
+  // The smuggled words survive as TEXT, exactly as sendExtensionNudgeEmail's do: the injection
+  // is the line break, not the string "Bcc:". Stripping words would be a denylist.
+  assert.ok(stripped.includes("Bcc: someone@else.example"), "stripped to a space, not censored");
+  assert.ok(!body.text.includes("A".repeat(200)), "and a runaway name is capped");
+});
+
+test("a candidate name containing markup is escaped in the digest's html half", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendExpiryDigestEmail(ENV, {
+      ...DIGEST,
+      rows: [{ ...DIGEST.rows[0], candidateName: "<script>alert(1)</script>" }],
+    }),
+  );
+  const body = bodyOf(calls);
+  assert.ok(!body.html.includes("<script>"), "mail clients render whatever markup arrives");
+  assert.ok(body.html.includes("&lt;script&gt;"), "and it survives as text");
+});
+
+test("the digest's From carries the agency name through mailFrom", async () => {
+  const { calls } = await withFetch(ok, () => sendExpiryDigestEmail(ENV, DIGEST));
+  assert.equal(bodyOf(calls).from, '"TTR Healthcare" <prep@saulera.com>');
+
+  const bare = await withFetch(ok, () => sendExpiryDigestEmail(ENV, { ...DIGEST, agencyName: "" }));
+  assert.equal(bodyOf(bare.calls).from, MAIL_FROM_DEFAULT, "a nameless agency falls back");
+});
+
+test("with no RESEND_API_KEY the digest makes zero fetch calls", async () => {
+  const { calls, result } = await withFetch(ok, () => sendExpiryDigestEmail({}, DIGEST));
+  assert.equal(calls.length, 0);
+  assert.equal(result.error?.code, "not_configured");
+});
+
+// ── the rejection (#71) ────────────────────────────────────────────────────────────────
+//
+// The seventh message, and the only one in this file whose CONTENT exists nowhere else: the
+// reason is not stored (src/compliance/store.js's rejectItem writes no note and this ticket adds
+// no column), which is why functions/api/compliance/[id].js refuses to write the reset unless it
+// can send this. These assertions are what that refusal is protecting.
+
+const REJECTION = {
+  to: "priya@example.com",
+  agencyName: "TTR Healthcare",
+  label: "Enhanced DBS check",
+  reason: "the certificate is in a different name from your right to work",
+  link: "https://engine.pages.dev/prep/compliance/login",
+};
+
+test("the rejection's subject carries the ITEM and never the reason", async () => {
+  const { calls } = await withFetch(ok, () => sendRejectionEmail(ENV, REJECTION));
+  const { subject } = bodyOf(calls);
+
+  // An inbox preview is the first surface this reaches, and a preview reading why a locum's DBS
+  // was refused — on a shared phone, on a ward desk — is a disclosure nobody chose. The digest's
+  // argument at a message that names one person instead of N.
+  assert.ok(subject.includes("Enhanced DBS check"), "the label, so it is openable");
+  assert.ok(!subject.includes("different name"), "and not a word of the reason");
+  assert.ok(!subject.includes("right to work"));
+});
+
+test("the reason is in BOTH halves of the body, and nowhere else", async () => {
+  const { calls } = await withFetch(ok, () => sendRejectionEmail(ENV, REJECTION));
+  const body = bodyOf(calls);
+
+  assert.ok(body.text.includes(REJECTION.reason), "the text half");
+  assert.ok(body.html.includes(REJECTION.reason), "and the html half — a plain-text client sees only the first");
+  // NO REFERENCE NUMBER anywhere: the item was just cleared, so there is nothing valid to quote,
+  // and reading their own paperwork back to them is what sendExpiryNudgeEmail refuses.
+  assert.ok(!body.text.includes("reference number is"), "no paperwork read back at them");
+});
+
+test("a reason containing markup is escaped in the html half", async () => {
+  const { calls } = await withFetch(ok, () =>
+    sendRejectionEmail(ENV, { ...REJECTION, reason: "<script>alert(1)</script>" }),
+  );
+  const body = bodyOf(calls);
+
+  assert.ok(!body.html.includes("<script>"), "mail clients render whatever markup arrives");
+  assert.ok(body.html.includes("&lt;script&gt;"), "and it survives as text");
+  assert.ok(body.text.includes("<script>"), "the text half is text and needs no escape");
+});
+
+test("R8 on the rejection: a label cannot open a second header, and a runaway one is capped", async () => {
+  // The label is OURS — it comes from COMPLIANCE_CATALOGUE — and that is not a reason to skip
+  // the treatment. A catalogue edit is one careless paste away from carrying a newline, and this
+  // value reaches a Subject header.
+  const { calls } = await withFetch(ok, () =>
+    sendRejectionEmail(ENV, { ...REJECTION, label: "DBS\r\nBcc: someone@else.example" }),
+  );
+  const { subject } = bodyOf(calls);
+  assert.ok(!subject.includes("\r"), "no carriage return survives");
+  assert.ok(!subject.includes("\n"), "nor a line feed");
+  // The smuggled words survive as TEXT, exactly as the digest's do: the injection is the line
+  // break, not the string "Bcc:". Stripping words would be a denylist.
+  assert.ok(subject.includes("Bcc: someone@else.example"), "stripped to a space, not censored");
+
+  const runaway = await withFetch(ok, () => sendRejectionEmail(ENV, { ...REJECTION, label: "A".repeat(400) }));
+  assert.ok(!bodyOf(runaway.calls).subject.includes("A".repeat(200)), "and a runaway label is capped");
+});
+
+test("the reason is NOT capped here — the route owns that number", async () => {
+  // Capping twice with two different numbers is how a message ends up truncated at a length
+  // nobody chose. functions/api/compliance/[id].js's REASON_MAX is the one bound on this value.
+  const long = "z".repeat(400);
+  const { calls } = await withFetch(ok, () => sendRejectionEmail(ENV, { ...REJECTION, reason: long }));
+  assert.ok(bodyOf(calls).text.includes(long), "whatever the route allowed through, arrives whole");
+});
+
+test("a reason with a line break in it is put back on one line", async () => {
+  // "One line" is the ticket's word. A newline inside it would break the quoted block in the
+  // text half into something that reads as two separate remarks.
+  const { calls } = await withFetch(ok, () =>
+    sendRejectionEmail(ENV, { ...REJECTION, reason: "wrong name\r\nand it has expired" }),
+  );
+  const body = bodyOf(calls);
+  const quoted = body.text.split("\n").find((line) => line.includes("wrong name"));
+  assert.ok(quoted.includes("and it has expired"), "both clauses on one line");
+});
+
+test("the rejection points at the COMPLIANCE door and never the interview-prep one", async () => {
+  const { calls } = await withFetch(ok, () => sendRejectionEmail(ENV, REJECTION));
+  const body = bodyOf(calls);
+
+  for (const [half, content] of Object.entries({ text: body.text, html: body.html })) {
+    assert.ok(content.includes("/prep/compliance/login"), `the ${half} half opens the checklist`);
+  }
+  // The two portals hold independent cookies: a candidate sent to /prep/login signs in to the
+  // interview-prep product and never finds the item they were asked to replace.
+  assert.ok(!body.text.includes("https://engine.pages.dev/prep/login"));
+  // The text half carries the URL as bare text on its own line — sendInviteEmail's rule.
+  assert.ok(body.text.split("\n").includes(REJECTION.link));
+});
+
+test("the rejection's From carries the agency name through mailFrom", async () => {
+  const { calls } = await withFetch(ok, () => sendRejectionEmail(ENV, REJECTION));
+  assert.equal(bodyOf(calls).from, '"TTR Healthcare" <prep@saulera.com>');
+
+  const bare = await withFetch(ok, () => sendRejectionEmail(ENV, { ...REJECTION, agencyName: "" }));
+  assert.equal(bodyOf(bare.calls).from, MAIL_FROM_DEFAULT, "a nameless agency falls back");
+  assert.ok(bodyOf(bare.calls).text.includes("your recruitment agency"), "and so does the body");
+});
+
+test("decision 17's tone rule holds on the hardest message to hold it on", async () => {
+  const { calls } = await withFetch(ok, () => sendRejectionEmail(ENV, REJECTION));
+  const body = bodyOf(calls);
+
+  // Calm, no deadline pressure, no exclamation mark, nothing implying a consequence we cannot
+  // know. This is the message most likely to acquire "or you cannot be booked" in a later edit.
+  assert.ok(!body.text.includes("!"), "no exclamation mark");
+  assert.doesNotMatch(body.text, /urgent|immediately|as soon as possible|at risk|booking/i);
+});
+
+test("with no RESEND_API_KEY the rejection makes zero fetch calls", async () => {
+  const { calls, result } = await withFetch(ok, () => sendRejectionEmail({}, REJECTION));
+  assert.equal(calls.length, 0);
+  assert.equal(result.error?.code, "not_configured");
 });

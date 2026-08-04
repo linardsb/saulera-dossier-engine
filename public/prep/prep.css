@@ -44,6 +44,30 @@
 /* The one action on the page, held clear of the copy above it. */
 .brief-cta { margin: var(--space-6) 0 0; }
 
+/* app.css:166 holds CRAFT's 44px floor with `min-height`, and min-height does not apply to a
+   non-replaced inline element (CSS 2.1 §10.7) — so the floor was silently ignored on the only
+   two anchors in the deployment styled as buttons: brief.html's "Practise for it" and
+   session.html's "Back to your prep". Both render at about 39px, both are on the phone surface,
+   and they were the only controls in the product under the floor. `inline-flex` is what makes
+   min-height apply; the centring keeps the label in the middle once .btn-block stretches it at
+   narrow widths. The underline goes because app.css:66-70 gives every anchor one and a control
+   shaped like a button should not carry it.
+
+   A compound selector, so app.css's `.btn` is extended rather than restated — a bare `.btn` or
+   `a` here fails prep-registry.test.js's no-restatement gate, and rightly: it would be this file
+   fighting the shared button rather than completing it.
+
+   Neither anchor carries `hidden` today. If one ever does, this `display` beats the user agent's
+   `[hidden] { display: none }` at any specificity and needs the counter-rule the help panel
+   carries at the bottom of this file. And if a recruiter screen ever grows an anchor-button,
+   this belongs in app.css instead and this rule should be deleted. */
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 /* ── the block landmark ────────────────────────────────────────────────────────────────── */
 
 /* Each block is a `<section>` named by its own heading, so it is a region in a landmark list.
@@ -57,21 +81,57 @@
   border: var(--hairline) solid var(--border-hairline);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
+  /* app.css:21's base is 1.5, which is right for UI chrome and tight for a screen of prose read
+     end to end on a phone — at 360px this column is about 37 characters, so leading is where
+     reading comfort is won rather than at the measure. Set on the card so one declaration covers
+     everything the twelve constructors can emit inside a block; the headings are unaffected
+     because h1/h2 carry their own 1.2 (app.css:36-52). A unitless literal rather than a token
+     because tokens.css belongs to #59 this wave, and this file already carries letter-spacing
+     literals for the same reason. If #59 lands a leading token, this is one line to converge. */
+  line-height: 1.6;
 }
 .block:last-child { margin-bottom: 0; }
 
-/* The signature card. The FIRST block is always the stage-setter — the primer on the brief,
-   the question in the drill — and it is the one place the page spends its boldness: the
-   accent-tinted surface with the accent's own edge, everything else stays quiet. One per
-   page by construction. Every text token already holds its contrast floor on this surface
-   (measured in tokens.css), so nothing inside needs recolouring. */
-.block:first-of-type {
+/* The signature card: the stage-setter at the top of a mount, and the one place the page spends
+   its boldness — the accent-tinted surface with the accent's own edge, everything else quiet.
+   Every text token already holds its contrast floor on this surface (measured in tokens.css),
+   so nothing inside needs recolouring.
+
+   This rule used to read `.block:first-of-type` and claim "one per page by construction". That
+   was never true of any page here. `:first-of-type` matches the first sibling of an element's
+   own TYPE among its OWN siblings, not the first in the document, and blocks are rendered into
+   more than one parent:
+
+     · the drill builds a fresh wrapper div per turn — `log-entry log-interviewer` at
+       session.js:412, `log-entry log-feedback` at :589 — so every question card and every
+       feedback note was first-of-type inside its own wrapper and came up tinted. A ten-turn
+       transcript was a page of alternating tinted cards, and the tint stopped meaning
+       "the stage-setter" and started meaning "a card".
+     · CompetencyMap nests its children inside its own body (registry.js:297), and
+       brief.fixture.json:22 nests two, so the first nested StoryBankCard was tinted on the
+       brief as well.
+
+   Hence the CHILD combinator rather than a descendant one: `#blocks .block:first-of-type` would
+   still tint the nested card, because that card is a descendant of `.brief` too. Only "the first
+   block of the mount itself" says what this rule has always meant.
+
+   Ids rather than classes on purpose: both mounts are gated — `#blocks` by
+   test/prep-content.test.js (brief.js reaches it by literal getElementById) and `#prime-blocks`
+   by prep-session-ui.test.js's SHELL_IDS — so scoping to them cannot silently rot. A class added
+   for this would be ungated and could be dropped in a later redesign with no test noticing. The
+   cost is a high-specificity rule, which is why the drill's own transcript treatments in
+   session.css are written as separate selectors rather than as overrides of this one. */
+#blocks > .block:first-of-type,
+#prime-blocks > .block:first-of-type {
   background: var(--surface-signature);
   border-color: var(--border-signature);
   border-left: var(--space-1) solid var(--accent);
 }
 
-.block:first-of-type .block-head { border-bottom-color: var(--border-signature); }
+#blocks > .block:first-of-type > .block-head,
+#prime-blocks > .block:first-of-type > .block-head {
+  border-bottom-color: var(--border-signature);
+}
 
 /* One authored entrance: the cards rise into place once, on the discrete render after the
    fetch (the drill re-renders per turn, which is a new question arriving — a designed moment,
@@ -88,6 +148,32 @@
   .block:nth-of-type(4) { animation-delay: 180ms; }
   .block:nth-of-type(5) { animation-delay: 240ms; }
   .block:nth-of-type(n+6) { animation-delay: 300ms; }
+
+  /* The drill's one reveal. A rung's panel is display:none until its button opens it, so this is
+     an entrance rather than a transition: a transition cannot animate `display`, and the panel is
+     unhidden by a property write (registry.js:468) that CSS never sees as a state change.
+     Compositor properties only, ends at rest, no fill mode because there is no delay.
+
+     `:not([hidden])` and NOT a bare `.help-panel`: unscoped, this would declare an animation on
+     two panels that exist from the moment a question renders — layering a second entrance onto
+     children of a card already rising in via block-in, and leaving whether it runs at all to how
+     an engine treats display:none → displayed. The revealed state is the moment being animated,
+     so the revealed state is what carries the rule.
+
+     This lives here rather than in session.css deliberately: `.help-panel` is this file's
+     selector, so a rule over there would have to be a compound restatement, and session.css is
+     gated at exactly one @keyframes with a bare ban on `transition`. Motion there means rewriting
+     a gate; motion here is four lines inside a guard that already exists, with no test edit
+     anywhere. The ticket's other motion ask — question flow — is already satisfied by block-in
+     above, because a freshly rendered question card is a .block.
+
+     No `display` here: prep.css's counter-rule below exists because an author display beats
+     [hidden], and the rungs would never close again. */
+  @keyframes panel-in {
+    from { opacity: 0; transform: translateY(var(--space-1)); }
+  }
+
+  .help-panel:not([hidden]) { animation: panel-in var(--duration-2) var(--ease-out); }
 }
 
 .block-head {
@@ -111,16 +197,21 @@
 
 /* ── the shared vocabulary the constructors build from ─────────────────────────────────── */
 
-/* The opening line of a block: the model's own framing, at reading size. */
+/* The opening line of a block: the model's own framing, at reading size. `text-wrap: pretty`
+   takes the last-line orphan off a paragraph of model prose in a 37-character column, where a
+   single trailing word reads as a mistake. Progressive: ignored where unsupported, and line 41
+   already uses `text-wrap: balance` on the role title. */
 .prep-lede {
   margin: 0 0 var(--space-4);
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
-/* Body prose inside a block. */
+/* Body prose inside a block. Same orphan treatment, same reason. */
 .prep-body {
   margin: var(--space-2) 0 0;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 /* A labelled line: the label above its value rather than beside it, so a long value wraps
@@ -246,4 +337,168 @@
      Shared rather than page-scoped because the brief's "Practise for it" is the same kind of
      control on the same kind of screen. */
   .btn-block { width: 100%; }
+
+  /* The same reasoning, for the two controls that cannot take the utility. The help ladder's
+     rungs are the drill's only in-card controls and registry.js:448 emits them as
+     `btn help-rung-toggle` — adding btn-block there would be an edit to a twelve-constructor
+     contract for a purely narrow-screen concern, so the class hook it already emits is styled
+     instead. */
+  .help-rung-toggle { width: 100%; }
+}
+
+/* ── the compliance passport (#68) ─────────────────────────────────────────────────────── */
+
+/* The candidate-facing compliance checklist and its own sign-in page. Two pages, and their
+   page-scoped rules live HERE rather than in a <style> block for the reason
+   test/chrome.test.js:66-74 records: INLINE_STYLE_PAGES is a hardcoded list, so a page-scoped
+   block missing from it is silently ungated for raw hex and for motion outside the
+   reduced-motion guard. The one rule that cannot come here is `.sr-only` — its 1px inset values
+   are a clipping trick rather than a design value, and this file's token gate
+   (test/prep-registry.test.js) rejects a raw length outright. login.html:29-33 made that call
+   first and wrote down the reason; the compliance sign-in page carries the same block for the
+   same rule and nothing else.
+
+   Several rules below are also written in login.html's page-scoped block. That is a duplication
+   with its eyes open: the values are identical, the inline block wins there on source order, and
+   the alternative — deleting them from a page that shipped in #62 — is a change to a working
+   page for the benefit of a new one. */
+
+/* A checklist is SCANNED, not read end to end, so it takes a tighter measure than .brief's 72ch
+   prose column. The footer shares it: both are centred on the same axis, and the shared 72ch cap
+   would hang the footer line out past the left edge of everything above it. */
+.passport,
+.passport-footer { max-width: 60ch; }
+
+.passport { min-width: 0; }
+
+/* The sign-in page is a form, not a list, and takes the 52ch the prep portal's own sign-in
+   settled on — same audience, same task, same one field at a time. */
+.passport-signin,
+.passport-signin-footer { max-width: 52ch; }
+
+/* THE iOS ZOOM FIX, and it is not app.css's `.input` doing it. That rule sizes a field at
+   --text-body (14px); iOS Safari zooms the whole viewport whenever a focused control computes
+   below 16px, so a locum's first tap on a reference field would jump the page under their thumb
+   and leave them scrolling back to find it. Raising the control is the whole fix — the
+   alternative, maximum-scale on the viewport meta, stops the zoom by disabling pinch zoom for
+   everyone and fails WCAG 1.4.4. `.textarea` already carries --text-note for this reason and
+   login.html scopes the same rule to `.signin`; these two pages are phone-first, so every field
+   on them takes it. */
+.passport .input,
+.passport-signin .input { font-size: var(--text-note); }
+
+/* The headline count — "3 of 8 done". After the h1 it is the largest thing on the page, because
+   it is the one fact a candidate opened the page to read. */
+.passport-count {
+  font-family: var(--font-ui);
+  font-size: var(--text-h2);
+  margin: 0 0 var(--space-8);
+}
+
+/* One checklist item. `.block` from app.css already gives the card its ground, edge and padding;
+   this adds only the rhythm inside it. Prefixed rather than a bare `.item`, which in a
+   stylesheet every portal page links would be a name the next ticket collides with — the file's
+   own convention (.prep-list, .prep-field, .help-rung) is a prefix for exactly that reason. */
+.passport-item { min-width: 0; }
+
+/* The label and its status chip on one line, the chip pushed to the end and never shrinking.
+   A long item label wraps under itself rather than squeezing the chip, which is why the text
+   side gets the wrap guard and the chip keeps app.css's flex-shrink: 0. */
+.passport-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+/* What we already hold for an item: the reference number and the date it runs out. Quiet, under
+   the head, and never the only carrier of the item's state — the chip's WORD is. */
+.passport-item-meta {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* THE STATUS CHIPS, extending app.css's `.mark` atom. Its rule is the grammar: FOUR signals,
+   never colour alone — the WORD, the colour, the ground, and the shape. A candidate who cannot
+   tell the colours apart still reads "Not started".
+
+   Every pairing below is already measured by test/tokens.test.js's TINTS table and clears 4.5:1,
+   so this section adds no token and needs no new assertion. --text-muted is 3.75:1 on --tint-info
+   and must never appear on a chip.
+
+   `missing` and `submitted` share the powder tint deliberately: they are told apart by their
+   words, which is the grammar rather than a shortcut, and inventing a fourth tint for a state
+   that means "we have it, nobody has looked yet" would be a colour with nothing to say.
+
+   `.mark-expiring` and `.mark-expired` CANNOT RENDER IN THIS TICKET — nothing writes those two
+   statuses until #70's expiry sweep. They ship anyway because the store's five-state vocabulary
+   is the contract (src/compliance/catalogue.js:31-36) and a passport that met one of them with
+   an unstyled chip would be the sweep's first bug. They are not dead CSS; do not delete them. */
+.mark-missing,
+.mark-submitted { color: var(--text-primary); background: var(--tint-info); }
+.mark-verified  { color: var(--verified);     background: var(--tint-verified); }
+.mark-expiring  { color: var(--unverified);   background: var(--tint-warn); }
+.mark-expired   { color: var(--danger);       background: var(--tint-warn); }
+
+/* ── the two-act sign-in, shared with the prep portal's own ────────────────────────────── */
+
+/* An AUTHOR `display` on .act would beat the user agent's `[hidden] { display: none }` whatever
+   the specificity, and both acts would show at once on first paint. app.css:461 and prep.css's
+   .help-panel record the same bug shipping twice already; this is the guard written before the
+   third time rather than after it. */
+.act[hidden] { display: none; }
+
+/* The line under each act heading: what this step is, in one sentence. */
+.act-lede { margin: 0 0 var(--space-6); color: var(--text-muted); }
+
+/* The state line under each act: what just happened, and what to do about it. Reserved by
+   min-height so the layout does not jump when a message arrives. */
+.state {
+  margin: var(--space-3) 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  color: var(--text-muted);
+  min-height: var(--space-5);
+}
+
+.state[data-tone="error"] { color: var(--danger); }
+
+.actions { margin-top: var(--space-6); }
+
+/* The panel an explanatory message lands on, on the palette's info tint. It carries
+   --text-primary (8.21:1 there) and never --text-muted (3.75:1, under the body-text floor). No
+   border: --border is 2.53:1 on this tint, so an edge drawn in it would sit under the 3:1
+   non-text floor — a panel carrying a full sentence is found by its tone without one. */
+.notice {
+  background: var(--tint-info);
+  color: var(--text-primary);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  margin: 0 0 var(--space-8);
+}
+
+.notice p { margin: 0; }
+
+/* The signature element of act 2. Six digits is the whole task, so the field is the largest
+   thing on the page — a step above the h1, which is the only way it reads as the thing to do
+   rather than as another field. Mono so the columns line up, tracked wide so a candidate reading
+   from their phone can check digit by digit against the email. Sized in em so the box fits its
+   content at any root size rather than at a guessed pixel width.
+
+   SCOPED, and it has to be. The iOS rule above is `.passport-signin .input`, and the code field
+   carries both classes — at a bare `.code-input` the two-class selector would win and quietly
+   drag this field back down to reading size, taking its em-based width with it. login.html:60-63
+   records the same trap against `.signin .input`. */
+.passport-signin .code-input {
+  font-family: var(--font-mono);
+  font-size: var(--text-h1);
+  letter-spacing: 0.4em;
+  /* 6 digits plus the trailing letter-space, and the padding the shared .input rule adds. */
+  width: calc(7.4em + var(--space-6));
+  /* Right padding cancels the trailing letter-space so the digits sit centred in the box. */
+  padding-right: 0;
+  text-align: center;
 }

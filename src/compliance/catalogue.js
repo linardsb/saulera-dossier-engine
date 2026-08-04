@@ -1,0 +1,107 @@
+// The compliance checklist, as data (#67). Seeded from TTR's own `/compliance` page — the
+// friction inventory the dossier records at §2 and §4-A: HCPC, enhanced DBS, right to work,
+// immunisations, indemnity, references, WTR opt-out. That page today ends in "contact TTR for
+// forms"; this array is the same list with a state a candidate and a recruiter can both see.
+//
+// Pure data and two pure functions over it, no imports, and deliberately its OWN file rather
+// than a section of store.js — but NOT because the browser imports it. It cannot: src/ is not in
+// the Pages build output, so an import from public/ would 404 at runtime. #68's passport reads
+// this list through
+// GET /prep/compliance/api/items, which joins it server-side, which is why the browser needs no
+// copy of it and no drift test to keep one honest.
+//
+// `amberDays` is the lead-time at which an item stops being fine and starts being a warning —
+// the number #70's expiry radar reads. Thresholds live in the catalogue and not in code
+// (architecture, "Data model"), which is what makes a retune a one-line diff instead of a
+// sweep through logic. `expires: false` items still get a checklist row; they simply never
+// enter 'expiring'.
+//
+// Adding an item is an edit HERE plus a re-seed, never a migration: `compliance_item.item_key`
+// carries no CHECK, and src/compliance/store.js validates against ITEM_KEYS instead.
+export const COMPLIANCE_CATALOGUE = [
+  { key: "hcpc_registration", label: "HCPC registration", expires: true, amberDays: 60 },
+  { key: "dbs_enhanced", label: "Enhanced DBS check", expires: true, amberDays: 60 },
+  { key: "right_to_work", label: "Right to work", expires: true, amberDays: 60 },
+  { key: "immunisations", label: "Immunisation record", expires: true, amberDays: 30 },
+  { key: "indemnity", label: "Professional indemnity insurance", expires: true, amberDays: 30 },
+  { key: "references", label: "References", expires: false, amberDays: null },
+  { key: "wtr_choice", label: "48-hour week choice (working time rules)", expires: false, amberDays: null },
+  { key: "fit_to_work", label: "Fit-to-work check", expires: true, amberDays: 30 },
+];
+
+/** The keys the store will accept, in catalogue order. */
+export const ITEM_KEYS = COMPLIANCE_CATALOGUE.map((item) => item.key);
+
+/**
+ * The five states a checklist row can hold, as `compliance_item.status`'s CHECK declares
+ * them. Exported so #68's passport and #70's sweep read this list rather than each inventing
+ * a sixth state the column would then reject at write time.
+ */
+export const ITEM_STATUSES = ["missing", "submitted", "verified", "expiring", "expired"];
+
+/**
+ * How many days before a booking ends the recruiter is nudged to extend or redeploy (#69).
+ *
+ * It lives HERE for the same reason `amberDays` does: thresholds live in the catalogue and not
+ * in code (architecture, "Data model"), which is what makes a retune a one-line diff rather
+ * than a sweep through logic. Beside the array rather than inside it, because a booking has ONE
+ * lead time — it is not a per-item value, and there is no checklist row it belongs to.
+ *
+ * The browser cannot import this (see the header: src/ is not in the Pages build output), so
+ * public/assignments.js reads the number off GET /api/assignments rather than carrying a second
+ * copy that could drift from the sweep's.
+ */
+export const EXTENSION_LEAD_DAYS = 14;
+
+/**
+ * The two states the expiry sweep is allowed to write (#70).
+ *
+ * A subset of ITEM_STATUSES rather than a second list: `missing` is the candidate's starting
+ * state, `submitted` is theirs to write and `verified` is the recruiter's (#71). A sweep that
+ * could write `verified` would let a clock mark a document as checked, which is the one thing
+ * in this epic that has to mean a person looked. src/compliance/store.js validates against
+ * this, so that is structural rather than a convention.
+ */
+export const EXPIRY_STATES = ["expiring", "expired"];
+
+/**
+ * The widest amber window any item declares — the sweep's narrowing bound.
+ *
+ * DERIVED, never typed. A literal 60 here would mean retuning `hcpc_registration` to 90 days
+ * silently drops it out of the query's window and the radar goes quiet for that item with no
+ * error anywhere: exactly the failure "thresholds live in the catalogue, not code"
+ * (architecture, "Data model") exists to prevent. `?? 0` covers the `expires: false` rows,
+ * whose amberDays is null.
+ */
+export const MAX_AMBER_DAYS = Math.max(...COMPLIANCE_CATALOGUE.map((item) => item.amberDays ?? 0));
+
+/** The catalogue as a lookup, built once: a caller with a row in hand asks it per item_key. */
+export const CATALOGUE_BY_KEY = new Map(COMPLIANCE_CATALOGUE.map((item) => [item.key, item]));
+
+/**
+ * Amber, red, or leave it alone — the whole radar rule, in three lines.
+ *
+ * RED IS TESTED FIRST. An item whose date passed a fortnight ago satisfies "inside the amber
+ * window" too (every negative number is <= amberDays), and answering `expiring` for it would
+ * tell a candidate their lapsed DBS "runs out soon". Order is the fix; there is no second
+ * condition to get wrong.
+ *
+ * `daysLeft === 0` — it runs out TODAY — is amber and not red, `isNotPast`'s argument
+ * (src/prep/dates.js): a certificate valid to the 3rd is valid all day on the 3rd.
+ *
+ * `daysLeft` is computed by SQLITE, never here. See dueExpiryItems for why that matters.
+ *
+ * IT LIVES IN THE CATALOGUE AND NOT IN nudges.js, WHICH IS WHERE #70 WROTE IT. Two callers now
+ * ask this question and they ask it at different moments: `sweepExpiryStates` asks it to WRITE
+ * the state, and functions/api/compliance.js asks it at RENDER time because the sweep runs only
+ * on /prep/* and a recruiter opening the dashboard triggers none of it. Two homes for the
+ * amber/red rule would be two answers to "is this red" on two screens describing the same
+ * certificate — and the one that drifted would be the recruiter's, because nothing writes to
+ * their screen for them to notice. A route importing nudges.js to reach it would also drag
+ * src/prep/email.js and getAgency into a read that sends no mail.
+ */
+export function targetFor(daysLeft, amberDays) {
+  if (daysLeft < 0) return "expired";
+  if (daysLeft <= amberDays) return "expiring";
+  return null;
+}

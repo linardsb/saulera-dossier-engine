@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Purge expired invite scopes from a remote D1, by hand (#17).
+"""Purge expired invite scopes and dormant compliance cages from a remote D1, by hand (#17, #67).
 
-Why this exists. Pages has no cron, so the 30-day retention rule (architecture decision 13)
-runs lazily in functions/prep/_middleware.js on every portal request. A portal nobody visits
-therefore never purges on its own, and "we delete 30 days after the interview" must not
-depend on traffic. This script is the assurance path: run it on a calendar reminder against
-preview and production, and the promise holds through a quiet month.
+Why this exists. Pages has no cron, so both retention rules — the portal's 30 days after the
+interview (architecture decision 13) and the compliance cage's 12 months of dormancy (spike
+#66) — run lazily in functions/prep/_middleware.js on every portal request. A portal nobody
+visits therefore never purges on its own, and neither promise may depend on traffic. This
+script is the assurance path: run it on a calendar reminder against preview and production,
+and both promises hold through a quiet month.
 
-One statement plus a count. The DELETE targets `invite` alone; the schema's ON DELETE
-CASCADE chain (proven by test/schema.test.js and test/portal-purge.test.js) takes each
-expired invite's whole scope with it. `SELECT changes()` rides in the same --command so the
-operator sees the purged count in wrangler's output rather than trusting a silent exit 0.
+One DELETE per cage, each with its count. Each DELETE targets a ROOT alone — `invite` and
+`candidate` — and the schema's ON DELETE CASCADE chains (proven by test/schema.test.js,
+test/portal-purge.test.js and test/compliance-purge.test.js) take each scope's children with
+it. `SELECT changes()` rides in the same --command after each, so the operator sees the
+purged counts in wrangler's output rather than trusting a silent exit 0.
 
 `d1 execute --remote` resolves the database by NAME against the account API (verified
 27 Jul 2026, scripts/dev.py header), so no throwaway config is needed here.
@@ -35,11 +37,25 @@ DATABASES = {
     "production": D1_NAME,
 }
 
-# The identical statement the lazy purge runs, so the two paths cannot drift apart, plus the
-# count the operator came for.
+# The identical statements the lazy purge runs, so the two paths cannot drift apart, plus the
+# counts the operator came for. One --command, statements separated by `;` — wrangler runs
+# them in order and returns a result set per SELECT, so `purged_invites` and
+# `purged_candidates` arrive as two labelled answers rather than one ambiguous number.
+#
+# changes() counts rows the statement itself deleted, never the rows ON DELETE CASCADE took
+# with them — which is why each number reads as "scopes purged" and not "rows deleted", and
+# why it matches the {purged} the store functions return.
 PURGE_SQL = (
     "DELETE FROM invite WHERE datetime(interview_at, '+30 days') <= datetime('now'); "
-    "SELECT changes() AS purged;"
+    "SELECT changes() AS purged_invites; "
+    "DELETE FROM candidate "
+    "WHERE datetime(created_at, '+12 months') <= datetime('now') "
+    "AND NOT EXISTS ("
+    "SELECT 1 FROM assignment "
+    "WHERE assignment.candidate_id = candidate.id "
+    "AND (assignment.end_date IS NULL "
+    "OR datetime(assignment.end_date, '+12 months') > datetime('now'))); "
+    "SELECT changes() AS purged_candidates;"
 )
 
 
@@ -75,14 +91,18 @@ def main():
     env = {**os.environ, "PATH": node22_path()}
 
     # flush=True for the same reason as dev.py: output nobody sees closes nothing.
-    print(f"purging expired invite scopes from {name} ({args[0]}, remote)", flush=True)
+    print(
+        f"purging expired invite scopes and dormant compliance cages from {name} "
+        f"({args[0]}, remote)",
+        flush=True,
+    )
     ran = subprocess.run(
         ["npx", WRANGLER, "d1", "execute", name, "--remote", "--command", PURGE_SQL],
         env=env,
     )
     if ran.returncode != 0:
         sys.exit(f"✗ purge failed against {name} — see the wrangler output above")
-    print(f"✓ purge ran against {name} — the purged count is in the result above", flush=True)
+    print(f"✓ purge ran against {name} — both purged counts are in the results above", flush=True)
 
 
 if __name__ == "__main__":

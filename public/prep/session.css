@@ -1,9 +1,17 @@
 /* The drill shell's own vocabulary (#24).
 
-   This file SUPPLEMENTS app.css and prep.css exactly as prep.css supplements app.css, and it is
-   a SEPARATE file for one reason: prep.css sits behind a test gate that forbids animation, and
-   the typing indicator below is the one animated thing on the candidate surface. Everything
-   else about the contract is inherited rather than restated: every colour and size resolves
+   This file SUPPLEMENTS app.css and prep.css exactly as prep.css supplements app.css. It used to
+   say it was a SEPARATE file for one reason — that prep.css sat behind a test gate forbidding
+   animation — and that stopped being true at #58: the owner's 31 Jul call added the block
+   entrance, so prep-registry.test.js now requires a GUARD rather than abstinence and prep.css has
+   carried an animation since. #63's `panel-in` is the second.
+
+   What remains is this: the file holds the drill's own vocabulary, and it carries the one
+   INFINITE animation in the product, which is why its gate is stricter than prep.css's — no
+   transition at all, guarded or not, and exactly one @keyframes. That is a real invariant worth
+   keeping in its own file with its own gate. The two files being separate is now a judgment
+   rather than a constraint; merging them would mean reconciling two gate suites and is its own
+   ticket. Everything else about the contract is inherited rather than restated: every colour and size resolves
    through a custom property in tokens.css and app.css owns the single focus rule. The
    reduced-motion guard is NOT inherited — since #58 app.css's motion is opt-in behind
    `prefers-reduced-motion: no-preference` rather than a blanket override, so the typing
@@ -29,25 +37,51 @@
 
 /* ── the drill log ─────────────────────────────────────────────────────────────────────── */
 
-/* A transcript. Who is speaking is carried by the label line and the indent, never by colour
-   alone; everything inside can hold long unbroken model or candidate text. */
+/* A transcript. Who is speaking is carried by the label line and an edge, never by colour alone;
+   everything inside can hold long unbroken model or candidate text. */
 .log-entry {
   margin-bottom: var(--space-8);
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-/* The candidate's own entries step in from the interviewer's. */
-.log-you { padding-left: var(--space-6); }
+/* Who is speaking, said with an edge rather than with indentation — width is the scarcest thing
+   on this page, about 296px of prose column at 360px. The interviewer's cards take the accent
+   edge the signature card uses on the brief (prep.css). A non-text use of --accent, which needs
+   the 3:1 floor rather than 4.5:1 and clears it at 3.88.
+
+   The tint itself stays on the brief and the prime, and does not come here: prep.css's signature
+   rule was unscoped until this ticket, so every question card and every feedback note was
+   first-of-type inside its own per-turn wrapper and came up tinted. A ten-turn transcript was a
+   page of alternating tinted cards. The edge is what replaces it, and it says one thing. */
+.log-interviewer .block { border-left: var(--space-1) solid var(--accent); }
+
+/* The feedback note is a reply, not a question: one warm step down from the ground rather than a
+   second edge. --surface is 1.10:1 off --background — a tone, not a boundary — and every text
+   token holds its floor on it (tokens.css:24-31, the second column of every ratio).
+
+   A DELIBERATE override of prep.css's `.block { background: var(--background) }`, and it wins
+   twice over: a descendant compound beats a single class, and session.html loads this file after
+   prep.css. Said out loud because #62's whole `.act + .act` story was a rule decided by link
+   order rather than by anyone's intent — this one is decided here, on purpose. */
+.log-feedback .block { background: var(--surface); }
+
+/* The candidate's own entries. The 24px indent this replaced cost a tenth of the column at 360px
+   to say something the "You" label already says; a hairline says it for 12px. Decorative by
+   licence (tokens.css:49-55): the label carries the meaning, so the line never has to. */
+.log-you {
+  padding-left: var(--space-3);
+  border-left: var(--hairline) solid var(--border-hairline);
+}
 
 /* ── the answer form ───────────────────────────────────────────────────────────────────── */
 
 .answer-form { margin-top: var(--space-8); }
 
-.answer-form textarea {
-  width: 100%;
-  min-width: 0;
-}
+/* Only the wrap guard. #answer carries the textarea class since #63, so app.css:237 supplies the
+   width and :249 the 16px size that stops iOS zooming on focus; restating either here would be
+   the fork this file's header forbids, and would be the copy that rots. */
+.answer-form textarea { min-width: 0; }
 
 /* ── the typing indicator: the one animated thing ──────────────────────────────────────── */
 
