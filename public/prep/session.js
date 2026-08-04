@@ -61,19 +61,19 @@ export const COPY = {
     "Type your answer first. If you have opened the structure, you can send without typing " +
     "and move on.",
   tooLongGuard:
-    "That answer is longer than we can take — around 20,000 characters is the most. An " +
+    "That answer is too long. Around 20,000 characters is the most we can take, and an " +
     "interview answer is a few minutes of speech, so trim it to the part that matters.",
   turnFailed:
     "That did not go through. Your answer is back in the box below, so you can send it again.",
   turnUnclear:
     "We could not read what came back. Reload the page and it will bring you back to the " +
-    "right place — your answer is below in case you need it.",
+    "right place. Your answer is below in case you need it.",
   noFeedback: "Nothing to look at this time. The next question is below.",
   habitLine: "A pattern worth knowing about: ",
   coveredPrefix: "Covered so far: ",
 
   dayBeforeIntro:
-    "Your interview is tomorrow. This is a short run through what you already have — not new " +
+    "Your interview is tomorrow. This is a short run through what you already have, not new " +
     "practice.",
   dayBeforeNote:
     "Keep it brief and stop when the page suggests it. What you have is enough to work from.",
@@ -87,8 +87,8 @@ export const COPY = {
 
   closeImproved: "What improved today",
   closeHonest:
-    "Rates move over several attempts, and today's attempts are what move them. It will not " +
-    "always feel like progress while it happens.",
+    "This gets better over several sessions, and today's is one of them. It will not always " +
+    "feel like progress while you are doing it.",
   closeNext: "Queued for next time",
 };
 

@@ -51,10 +51,9 @@
     waitHeadManual: "In Claude",
     // Model-side failures name the other route, because the other route is the remedy that
     // always exists: it needs no key and it is one button to the left.
-    noModelKey: "This deployment has no model key yet, so it cannot write the pack here. " +
-                "Copy the prompt and run it in your own Claude instead, and ask whoever set " +
-                "this up to add the key.",
-    modelRefused: "The model declined to write this pack. Try again, or copy the prompt and " +
+    noModelKey: "This tool cannot write packs here yet. Copy the prompt and run it in your " +
+                "own Claude instead, then ask whoever set the tool up to finish setting it up.",
+    modelRefused: "Claude would not write this pack. Try again, or copy the prompt and " +
                   "run it in your own Claude.",
     truncated: "The pack came back cut off. Try again, or copy the prompt and run it in " +
                "your own Claude.",
@@ -176,8 +175,8 @@
     // Already unticked when this shows, and deliberately NOT an invitation to tick it back
     // on: the server refuses any send that includes an unsourced line, so offering that would
     // be a control that cannot be confirmed. It says what happened and stops.
-    sendPreviewUnverified: "Anything ticked below was found in the brief. One or more lines " +
-                           "could not be, so they are not being sent.",
+    sendPreviewUnverified: "Everything ticked below was found in the brief. Some lines were " +
+                           "not, so we are leaving those out.",
     sendAllUnverified: "None of these could be found in the brief, so there is nothing to " +
                        "send. Generate the pack again, or check the brief you pasted.",
     // The empty preview used to lock "Send it" and say NOTHING at all — a disabled button over
@@ -209,7 +208,7 @@
     // timeout. Success wording, because from the recruiter's side it is: the candidate has
     // their email, and nothing was sent or counted twice.
     sendAlreadyDone: function (email) {
-      return "Already sent to " + email + " — your earlier try went through. They have " +
+      return "Already sent to " + email + ". Your earlier try went through, so they have " +
         "their email with the link. To send another, press Start again.";
     },
 
@@ -219,13 +218,13 @@
     sendFailed: "Could not send that. Nothing was sent and nothing was saved. Try again.",
     sendMailFailed: "The email was not accepted, so nothing was sent and nothing was saved. " +
                     "Try again. You do not need to prepare it a second time.",
-    sendNoMail: "This deployment cannot send email yet. Ask whoever set it up to add the " +
-                "email key, then try again.",
+    sendNoMail: "This tool cannot send email yet. Ask whoever set it up to finish setting up " +
+                "email, then try again.",
     // Refused before anything is minted or written, so "nothing was sent" is a fact, not a
     // hope — and without this string a misconfigured deployment read as a transient failure.
-    sendNoBaseUrl: "This deployment does not know the web address candidate pages live at, " +
-                   "so the link cannot be built. Nothing was sent. Ask whoever set it up to " +
-                   "add the page address, then try again.",
+    sendNoBaseUrl: "This tool does not know the web address candidate pages sit at, so it " +
+                   "cannot build the link. Nothing was sent. Ask whoever set it up to add " +
+                   "that address, then try again.",
     sendNotSendable: function (labels) {
       return "These lines could not be found in the brief, so they cannot be sent: " +
         labels + ". Untick them, or generate the pack again.";

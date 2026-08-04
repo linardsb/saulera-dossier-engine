@@ -9,6 +9,9 @@
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/app.css">
+<!-- TEMPORARY walkthrough layer — delete with public/guide.css, public/guide.js and
+     test/guide.test.js. See guide.css's header. -->
+<link rel="stylesheet" href="/guide.css">
 </head>
 <body>
 
@@ -22,6 +25,8 @@
       <a href="/">Submission pack</a>
       <a href="/clients" aria-current="page">Client knowledge</a>
       <a href="/counts">Prep sent</a>
+      <a href="/assignments">Bookings</a>
+      <a href="/compliance">Compliance</a>
       <a href="/prep/demo" target="_blank" rel="noopener">Candidate portal ↗</a>
     </nav>
   </div>
@@ -79,7 +84,7 @@
              one job — staying visible while writing. One line, above the box, does. -->
         <p class="scaffold-line">Their process and stages · who sits on the panel · what each
           stage tests · why candidates were turned down</p>
-        <p class="scaffold-line">For locum supply: credentialing quirks · VMS or portal ·
+        <p class="scaffold-line">For locum work: credentialing quirks · VMS or portal ·
           protocol expectations · site access and parking · extension habits</p>
         <textarea class="textarea" id="note" name="note" rows="16" spellcheck="true"
                   placeholder="Write it as you would tell a colleague. Plain notes beat blank perfection."></textarea>
@@ -122,9 +127,9 @@
                API's locum_fields readout. Shown for every client — role shape is a property of
                a brief, not a client, so the title is what lets a perm-desk reader skip it. -->
           <fieldset class="visibility locum" id="locum" aria-describedby="locum-hint">
-            <legend class="zone-head">For locum supply</legend>
+            <legend class="zone-head">For locum work</legend>
             <p class="field-hint" id="locum-hint">Bookings move faster when the note records these.
-              Add a missing one and write what you know, then save.</p>
+              Add a missing one, write what you know, then save.</p>
             <ul class="visibility-list" id="locum-list"></ul>
             <p class="save-state" id="locum-state" role="status"></p>
           </fieldset>
@@ -180,5 +185,6 @@
 
 </main>
 <script src="/clients.js"></script>
+<script src="/guide.js"></script>
 </body>
 </html>

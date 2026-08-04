@@ -152,15 +152,22 @@ const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invi
 // engine regime below, which is the whole point of naming the regimes separately: the engine
 // pipeline writes no candidate data anywhere, and this cage is the second place — after the
 // portal's — where a decision moved that line on purpose.
-const COMPLIANCE_TABLES = ["assignment", "candidate", "compliance_item"];
+//
+// `candidate_otp` (#68) joins THIS regime and not the portal's, even though it is the `otp`
+// table's exact shape. A regime is decided by the root a row cascades from, not by the shape
+// of its columns: this one hangs off `candidate`, so it dies with the compliance cage's
+// delete-now and its 12-month dormancy purge, and it would outlive an invite's 30-day one.
+// Filing it with the portal's seven would put a live credential inside a retention promise
+// that does not govern it.
+const COMPLIANCE_TABLES = ["assignment", "candidate", "candidate_otp", "compliance_item"];
 
-test("the schema declares exactly the engine's four, the portal's seven and the compliance cage's three", () => {
+test("the schema declares exactly the engine's four, the portal's seven and the compliance cage's four", () => {
   assert.deepEqual(
     [...byName.keys()].sort(),
     [...ENGINE_TABLES, ...PORTAL_TABLES, ...COMPLIANCE_TABLES].sort(),
-    "a fifteenth table means a boundary moved without a decision. The engine's four carry " +
+    "a sixteenth table means a boundary moved without a decision. The engine's four carry " +
       "no candidate data (architecture §5.6); the portal's seven are candidate data inside " +
-      "decision 13's retention cage; the compliance cage's three are durable candidate " +
+      "decision 13's retention cage; the compliance cage's four are durable candidate " +
       "metadata inside spike #66's. A new table must pick a regime, in the open.",
   );
 });
@@ -225,10 +232,28 @@ const EXPECTED_COLUMNS = {
   // right to work or criminal record — those live one table down as a status word. created_at
   // is load-bearing, not bookkeeping: it is the dormancy clock for a candidate who never
   // gained an assignment.
-  candidate: ["created_at", "email", "full_name", "id", "phone"],
+  // #68 adds the two session columns, by the sanctioned ADD COLUMN form. `session_hash` is
+  // `invite.token_hash` at a second root — one credential column, so a second device signing
+  // in rotates the first out — and `session_expires_at` is the cookie's Max-Age written down
+  // where the guard can fail closed on it. Still no plaintext token: the "only hashes rest"
+  // test below now names both credential columns.
+  candidate: ["created_at", "email", "full_name", "id", "phone", "session_expires_at", "session_hash"],
+  // #68, and `otp`'s comment restated for the new parent: `attempts` is the cap's whole
+  // storage — the counter rides the row it caps and dies with it. Still no `code` column and
+  // still no email; the candidate the row hangs off owns the identity, and this table owns
+  // only the guess count.
+  candidate_otp: ["attempts", "candidate_id", "code_hash", "expires_at", "id"],
   // #67. Dates and a booking state. It is the other half of the dormancy clock and all of
   // #69's extension radar, which is why end_date is a real column and not a derived guess.
-  assignment: ["candidate_id", "client_id", "created_at", "end_date", "id", "start_date", "status"],
+  // #69 adds nudge_sent_at: `invite.reminder_sent_at`'s nullable set-exactly-once stamp at the
+  // booking root, claimed with UPDATE ... WHERE nudge_sent_at IS NULL, so the column IS the
+  // idempotency. It is the ONLY record that a nudge was sent — this ticket writes no `events`
+  // row and does NOT widen events.kind (SQLite has no ALTER CONSTRAINT, and a nudge belongs to
+  // a booking that dies with its candidate while events rows deliberately outlive the purge).
+  // Unlike reminder_sent_at it is CLEARED when end_date moves: extending a booking re-arms the
+  // radar, which is src/compliance/store.js's updateAssignment and the one thing here with no
+  // precedent in #25.
+  assignment: ["candidate_id", "client_id", "created_at", "end_date", "id", "nudge_sent_at", "start_date", "status"],
   // #67, and metadata-only is exactly this lock. Spike #66's first decision was that no
   // document byte rests on our infrastructure: a `document_url`, an `evidence_blob` or a
   // `photo` column here is the descope this test exists to fail on, and it would put
@@ -279,6 +304,10 @@ const CASCADE_CHAIN = {
   otp: { invite_id: "invite" },
   assignment: { candidate_id: "candidate", client_id: "clients" },
   compliance_item: { candidate_id: "candidate" },
+  // #68. A live sign-in code is the one row in the cage that is a credential, so it is the one
+  // the cascade matters most for: delete-now and the dormancy purge must take it with the
+  // candidate rather than leave a usable code pointing at a row that no longer exists.
+  candidate_otp: { candidate_id: "candidate" },
 };
 
 test("every foreign key in the chain declares ON DELETE CASCADE toward its parent", () => {
@@ -340,7 +369,7 @@ test("the events kind vocabulary is closed to exactly the three kinds", () => {
   );
 });
 
-test("only hashes rest: invite carries token_hash, otp carries code_hash, never the secret", () => {
+test("only hashes rest: every credential column in both cages holds a digest, never the secret", () => {
   // The columns are already locked exactly above; this names the property so a future rename
   // cannot trade the hash for the plaintext without reading why. A stored raw token or code
   // is a credential at rest — anyone with database access could impersonate a candidate.
@@ -350,6 +379,16 @@ test("only hashes rest: invite carries token_hash, otp carries code_hash, never 
   const otp = byName.get("otp") ?? [];
   assert.ok(otp.includes("code_hash"), "otp holds the code's hash");
   assert.ok(!otp.includes("code"), "the raw one-time code must never rest");
+
+  // #68's cage door, held to the identical rule. The property is the point rather than the
+  // table: a second regime with its own session is a second chance to rest a plaintext.
+  const candidate = byName.get("candidate") ?? [];
+  assert.ok(candidate.includes("session_hash"), "candidate holds the session token's hash");
+  assert.ok(!candidate.includes("session_token"), "the raw compliance session token must never rest");
+  assert.ok(!candidate.includes("session"), "the raw compliance session token must never rest");
+  const candidateOtp = byName.get("candidate_otp") ?? [];
+  assert.ok(candidateOtp.includes("code_hash"), "candidate_otp holds the code's hash");
+  assert.ok(!candidateOtp.includes("code"), "the raw one-time code must never rest");
 });
 
 test("note_visibility holds exactly {client, field, timestamp} and nothing else", () => {

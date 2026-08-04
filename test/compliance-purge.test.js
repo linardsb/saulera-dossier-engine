@@ -25,6 +25,7 @@ import {
   createAssignment,
   createCandidate,
   deleteCandidate,
+  issueCandidateOtp,
   itemsByCandidate,
   purgeDormant,
 } from "../src/compliance/store.js";
@@ -88,7 +89,12 @@ async function seedCandidate(db, d1, letter, { created, assignments = [] }) {
 
 // ── the migration applies, and the third regime exists ─────────────────────────────────
 
-test("0008 applies clean after 0001–0007 and the compliance cage's three tables exist", { skip }, () => {
+// #68 widens this deliberately: 0009 adds `candidate_otp`, the cage's own sign-in code, and
+// two columns to `candidate`. Unlike test/schema.test.js — which parses the migration FILES —
+// this one asks a real SQLite what it ended up with after applying every one of them in
+// wrangler's order, so it is the assertion that would catch a 0009 that parses but does not
+// apply (an ALTER SQLite rejects, an index name already taken).
+test("0009 applies clean after 0001–0008 and the compliance cage's four tables exist", { skip }, () => {
   const db = openMigrated();
 
   const names = db
@@ -100,6 +106,7 @@ test("0008 applies clean after 0001–0007 and the compliance cage's three table
     "assignment",
     "attempt",
     "candidate",
+    "candidate_otp",
     "candidate_role",
     "clients",
     "competency",
@@ -191,6 +198,26 @@ test("purgeDormant takes exactly the dormant cages, including the exact 12-month
 
   // A second pass finds nothing: {purged: 0}, no error, the portal serves normally.
   assert.deepEqual(await purgeDormant(d1), { purged: 0 });
+});
+
+test("the purge takes a live sign-in code with the cage (#68)", { skip }, async () => {
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  await seedCandidate(db, d1, "D", { created: "-13 months" });
+  await seedCandidate(db, d1, "E", { created: "-2 months" });
+  await issueCandidateOtp(d1, { candidateId: "cand-D", codeHash: "h-D", ttlMinutes: 10 });
+  await issueCandidateOtp(d1, { candidateId: "cand-E", codeHash: "h-E", ttlMinutes: 10 });
+
+  // `candidate_otp` arrived with #68 and joined a retention promise made in #67, which is
+  // exactly the kind of edge that gets added without anyone re-checking the sweep. It is also
+  // the one row in the cage that is a CREDENTIAL: a live code left behind by the purge would
+  // still be spendable against a candidate the purge claims to have erased.
+  assert.deepEqual(await purgeDormant(d1), { purged: 1 });
+  assert.deepEqual(
+    rowsOf(db, "candidate_otp").map((row) => row.candidate_id),
+    ["cand-E"],
+    "the cascade took D's code with D, and left E's alone",
+  );
 });
 
 // ── delete-now returns the candidate to a clean state, idempotently ────────────────────

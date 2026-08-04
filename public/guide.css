@@ -1,0 +1,276 @@
+/* ── THE WALKTHROUGH LAYER · TEMPORARY, AND DELIBERATELY OFF-SYSTEM ────────────────────────
+ *
+ * ⚠ THIS FILE IS SCHEDULED FOR DELETION. It puts a pill beside each step of each recruiter
+ * screen; pressing one opens a card explaining that step. It is here while the pilot agency
+ * learns the tool. When they no longer need it, delete ALL of these together —
+ * test/guide.test.js names them and fails if one is left behind:
+ *
+ *     public/guide.css · public/guide.js · test/guide.test.js
+ *     the <link> and <script> lines on the five recruiter pages
+ *
+ * WHY IT BREAKS THE HOUSE RULES ON PURPOSE. Every other stylesheet on this deployment spends
+ * tokens.css and nothing else, so an agency's branding swap reaches every screen. This one
+ * declares raw colours and a serif stack, because the walkthrough has to read as a LAYER ON TOP
+ * of the tool rather than as part of it. A recruiter who cannot tell the instructions from the
+ * thing being instructed will follow the wrong one — and worse, will not know which of the two
+ * they are allowed to ignore once they have learned it.
+ *
+ * Consequently it is UNGATED. test/chrome.test.js reads app.css and a hardcoded list of
+ * page-scoped <style> blocks; a separate stylesheet is outside both. Nothing here is checked for
+ * contrast, for motion, or for raw hex. The pairings were measured by hand against the 4.5:1
+ * body floor and are recorded so a reader can re-check rather than trust:
+ *
+ *     ink    #16181c on paper #faf8f4   15.9:1
+ *     quiet  #57534d on paper #faf8f4    6.7:1
+ *     rust   #93361a on paper #faf8f4    6.5:1
+ *     paper  #faf8f4 on rust  #93361a    6.5:1   (the pill, once pressed)
+ *     navy   #16395e on paper #faf8f4   10.4:1
+ *
+ * EVERY SELECTOR IS SCOPED UNDER `.guide`. These rules load after app.css on live product
+ * screens, so an unscoped `button`, `p` or `h3` here would restyle the real interface. A test
+ * asserts the scoping rather than trusting it.
+ *
+ * NO MOTION AT ALL, anywhere in this file. app.css inverted its reduced-motion guard to opt-in
+ * (#58), so a transition declared outside that guard animates FOR the person who asked for no
+ * motion. Rather than reproduce the guard in a temporary file, this one simply never animates.
+ */
+
+/* ── the pill ─────────────────────────────────────────────────────────────────────────── */
+
+/* The row a pill sits in, injected directly above the thing it explains. `gap` so several pills
+   on one anchor read as a set rather than as a run-on. */
+.guide-pins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+/* Rounded, which is the one place this file borrows a shape rather than refusing one: the
+   product rounds every corner by 4px and this rounds fully, so a pill reads as something stuck
+   ON the interface rather than built into it. The card it opens is square, for the opposite
+   reason — that is a document, not a control. */
+.guide-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 28px is under the 44px tap floor the product holds itself to, and that is a deliberate
+     trade for an annotation that sits beside real controls: a walkthrough pill big enough to
+     obey the floor would be big enough to be pressed INSTEAD of the button it annotates. It is
+     never the only route to anything — every card explains a control that is right there. */
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1.5px solid #93361a;
+  border-radius: 999px;
+  background: #faf8f4;
+  color: #93361a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.guide-pill:hover {
+  background: #f1e7e0;
+}
+
+/* The open pill inverts, so which card is showing is never in doubt on a screen with five of
+   them — and it is told by fill AND by the mark below, never by colour alone. */
+.guide-pill[aria-expanded="true"] {
+  background: #93361a;
+  color: #faf8f4;
+}
+
+/* The step number, in its own disc. */
+.guide-pill-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #93361a;
+  color: #faf8f4;
+  font-size: 10px;
+  padding: 0 4px;
+}
+
+.guide-pill[aria-expanded="true"] .guide-pill-mark {
+  background: #faf8f4;
+  color: #93361a;
+}
+
+/* ── the card ─────────────────────────────────────────────────────────────────────────── */
+
+/* FIXED, and appended to <body> rather than beside its pill. Two of the containers this layer
+   annotates carry `overflow-x: auto` (.assignments and .compliance), which would clip an
+   absolutely-positioned card to the scroll box — the card would be cut off exactly on the two
+   screens with the most to explain. Fixed to the viewport escapes every ancestor's clipping,
+   and guide.js does the position arithmetic against the pill's own rect. */
+.guide-card {
+  position: fixed;
+  z-index: 60;
+  width: min(380px, calc(100vw - 24px));
+  /* Kept well short of the viewport on purpose. A card tall enough to fill the screen stops
+     being a card and becomes a curtain over the interface it is annotating — it scrolls
+     internally instead, which is the cheaper cost. */
+  max-height: min(58vh, 500px);
+  /* A column whose MIDDLE scrolls, rather than a box that scrolls as a whole. The difference is
+     the footer: when the card scrolled entirely, the standing "this is temporary" line was the
+     part that fell below the fold and rendered as a half-cut sentence at the border — which
+     reads as a broken card rather than as an affordance. Head and footer are pinned; only the
+     prose moves. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #faf8f4;
+  border: 2px solid #16181c;
+  /* A hard offset shadow, no blur: a printed sticker rather than a soft UI popover. */
+  box-shadow: 6px 6px 0 rgba(22, 24, 28, 0.16);
+  color: #16181c;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  font-size: 15.5px;
+  line-height: 1.58;
+  padding: 16px 18px 18px;
+}
+
+.guide-card[hidden] {
+  display: none;
+}
+
+.guide-card-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/* The only part that moves. `min-height: 0` is not decoration — a flex child's default
+   min-content floor would let the prose push the card past its max-height instead of scrolling,
+   which is the whole failure this column exists to fix. */
+.guide-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.guide-card-eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #93361a;
+  margin: 0 0 3px;
+}
+
+.guide-card-title {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  font-size: 19px;
+  line-height: 1.25;
+  font-weight: 400;
+  margin: 0;
+}
+
+/* Square, and sized for a finger — this one IS the only way to do its job, so it holds the
+   floor the pill trades away. */
+.guide-card-close {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -10px -10px 0 0;
+  border: 0;
+  background: none;
+  color: #57534d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.guide-card-close:hover {
+  color: #16181c;
+}
+
+.guide-card p {
+  margin: 0 0 10px;
+}
+
+.guide-card p:last-child {
+  margin-bottom: 0;
+}
+
+/* Anything the recruiter will literally see or type on the screen behind this card. Boxed so
+   the walkthrough's own prose can never be mistaken for a label on the interface. */
+.guide-card-ui {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  background: #efe9df;
+  border: 1px solid #d8d2c8;
+  padding: 1px 5px;
+}
+
+/* What the candidate sees at this point — the other half of the story, told on the recruiter's
+   own screen rather than by annotating a locum's portal. Navy, because it is a different
+   subject rather than a warning. */
+.guide-card-their-side {
+  border-left: 3px solid #16395e;
+  padding-left: 12px;
+  margin: 0 0 10px;
+  font-size: 14.5px;
+  color: #16395e;
+}
+
+/* The thing that will catch them out. Its label carries the word, so the colour ranks it and
+   never says it alone. */
+.guide-card-watch {
+  border-left: 3px solid #93361a;
+  background: #f4ede6;
+  padding: 9px 12px;
+  margin: 12px 0 0;
+  font-size: 14.5px;
+}
+
+.guide-card-watch-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #93361a;
+  margin: 0 0 3px;
+}
+
+/* The standing reminder that this layer is not part of the tool, on every card, because a
+   temporary thing that never says so becomes permanent. */
+.guide-card-footer {
+  flex: 0 0 auto;
+  margin: 14px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #d8d2c8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: #57534d;
+}
+
+/* ── narrow viewports ─────────────────────────────────────────────────────────────────── */
+
+/* Under 560px the card stops trying to sit beside its pill and becomes a sheet across the foot
+   of the screen: at that width a 380px card anchored to a rect is mostly off-screen or covering
+   the control it is describing. guide.js knows about this breakpoint and skips its positioning
+   arithmetic below it. */
+@media (max-width: 559px) {
+  .guide-card {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 62vh;
+    border-width: 2px 0 0;
+    box-shadow: 0 -4px 0 rgba(22, 24, 28, 0.16);
+  }
+}

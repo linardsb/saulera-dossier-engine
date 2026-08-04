@@ -901,15 +901,36 @@ test("prep.css restates no selector app.css already owns", () => {
   assert.deepEqual(clashes, [], `prep.css restates app.css: ${clashes.join(", ")}`);
 });
 
+/**
+ * Every file under public/prep, at any depth, relative to it.
+ *
+ * RECURSIVE, and that is the decision rather than the implementation. This walk read one flat
+ * directory until #68 put the compliance passport in public/prep/compliance/ — at which point
+ * `readFileSync` on the subdirectory threw EISDIR and the sweep below died rather than failing
+ * an assertion. The cheap fix is to skip directories; it is also the wrong one, because the
+ * gate would then silently stop covering every page the portal grows from here, which is
+ * exactly the class of failure this suite writes tests about. Recursing keeps the coverage.
+ */
+function portalFiles(dir, prefix = "") {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory()
+      ? portalFiles(join(dir, entry.name), `${prefix}${entry.name}/`)
+      : [{ name: `${prefix}${entry.name}`, path: join(dir, entry.name) }],
+  );
+}
+
 test("nothing in the portal forces a tab order", () => {
   // A positive tabindex overrides the document order for the WHOLE page, which is how a
   // keyboard path that reads fine in the markup becomes unusable in the browser.
-  const dir = join(root, "public/prep");
-  for (const file of readdirSync(dir)) {
+  const files = portalFiles(join(root, "public/prep"));
+  // A guard on the guard: a walk that returned nothing would pass while checking nothing, and
+  // the recursion above is new enough to be worth pinning.
+  assert.ok(files.length >= 12, `walked ${files.length} portal files, expected at least 12`);
+  for (const file of files) {
     assert.doesNotMatch(
-      readFileSync(join(dir, file), "utf8"),
+      readFileSync(file.path, "utf8"),
       /tabindex\s*=\s*["']?[1-9]/,
-      `${file} sets a positive tabindex`,
+      `${file.name} sets a positive tabindex`,
     );
   }
 });

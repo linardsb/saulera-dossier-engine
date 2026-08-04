@@ -449,8 +449,13 @@ the dashboard.
 | `503 {"error":"not_configured"}` from `/api/prep/send` **specifically** | the `RESEND_API_KEY` secret is not set in this environment | section 5b. Nothing was written and nothing was counted; the send is safe to retry once the key is set. Note this shares a code with the DB-binding row above — the difference is that only this route answers it while `/api/clients` is healthy |
 | `502 {"error":"mail_failed"}` from `/api/prep/send` | Resend rejected the message — **almost always an unverified sending domain (their 403)** | verify the domain in Resend and add its SPF and DKIM records (section 5b). The invite and the whole candidate scope were rolled back, so nothing is orphaned and the count did not move; the recruiter can retry without regenerating |
 | `503 {"error":"no_base_url"}` from `/api/prep/send` | `PREP_BASE_URL` is unset, or is not a bare `https://host` origin | set it in this environment (section 5b) and redeploy. It is REQUIRED as of 30 Jul 2026 — the route no longer falls back to the request's own origin, because that origin is the `Host` header the caller sent. Nothing was written, minted or counted, so the send is safe to retry |
+| no extension nudges are arriving | one of `DB`, `RESEND_API_KEY`, `PREP_BASE_URL` or `RECRUITER_EMAIL` is missing or malformed | set all four (section 5b) and redeploy. The sweep bails **before claiming**, so nothing has been burned — every due booking is still due and the radar recovers on its own. Check `SELECT count(*) FROM assignment WHERE nudge_sent_at IS NOT NULL` before and after a poke of `/prep/login` |
+| `500 {"error":"internal"}` from `/api/assignments` on a deployment where `/api/clients` is healthy | migration `0010` has not been applied to this environment's D1, so `assignment.nudge_sent_at` does not exist | `npm run db:remote` (production) or `npm run db:preview`. Every radar statement names that column |
+| items are turning amber/red on the passport but no expiry emails arrive | `RESEND_API_KEY`, `PREP_BASE_URL` or `RECRUITER_EMAIL` is missing or malformed | set them (section 5b) and redeploy. **Unlike the extension radar, the state transitions have already happened and will not be re-sent** — the status change *is* the claim. Check `SELECT status, count(*) FROM compliance_item GROUP BY status`. Newly-crossing items will nudge normally once the config is right |
 | a candidate's magic link points at a preview URL | an invite sent BEFORE 30 Jul 2026, when the link fell back to the origin the recruiter's browser used | links already sent cannot be repointed; the candidate can sign in at `<origin>/prep/login` with a code instead. New sends cannot reach this state — see the row above |
 | `400 {"error":"interview_too_far"}` from `/api/prep/prepare` or `/api/prep/send` | the interview date is more than 24 months ahead, which is a mistyped year essentially always | correct the year. The bound exists because `interview_at` is the clock the 30-day purge runs on: `2226` for `2026` keeps the candidate's CV and a live link in D1 for two centuries, silently |
+| `503 {"error":"mail_not_configured"}` from `PUT /api/compliance/:id` on a **send-back** | `RESEND_API_KEY` or `PREP_BASE_URL` is unset or malformed in this environment, or that candidate's row carries no email address | set the secrets (section 5b) and redeploy, or fix the candidate's address. **Nothing was written** — the item is still awaiting review and the send-back is safe to retry. The reason exists only in the email, which is why this route refuses to reset an item it cannot explain. **Verify** is unaffected: it sends no mail |
+| `409 {"error":"not_submitted"}` from `PUT /api/compliance/:id` | the item is no longer `submitted`, so the compare-and-swap matched nothing. Most often it turned amber while it sat on the desk; sometimes the candidate re-submitted first | reload `/compliance`. **An item that has gone amber cannot be verified** and the candidate has to re-submit it — a known trade against the re-nudge loop, not a fault. Nothing was written |
 | `502 {"error":"bad_brief"}` from `/api/prep/prepare` | the model's answer was a valid JSON payload that broke a rule the schema cannot state — a competency with no questions, a non-core `axis`, or two competencies sharing an id | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis. This used to surface as `500 internal`, which sent you to the migration row below for a model output problem |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
@@ -568,6 +573,43 @@ send. That is not a regression in what worked: local dev has no `RESEND_API_KEY`
 send already stopped one step further on. Every 400 gate on `/api/prep/send` and
 `/api/prep/prepare` is still exercisable locally, which is what the smoke-test sweep below uses.
 
+### `RECRUITER_EMAIL` — where the extension nudge and the expiry digest go (#69, #70)
+
+A plain **Variable**, not a Secret (Settings → Variables and secrets → type *Variable*): it is
+an address, not a credential.
+
+```
+RECRUITER_EMAIL = desk@your-agency.example
+```
+
+It is the ONE address the extension radar mails when a booking is fourteen days from its end
+date, and the same address #70's expiry digest goes to. **A single address, with no comma in
+it.** `to` reaches a mail header, and a comma there is a second recipient nobody chose — on
+messages that name candidates to a third party. The sweep validates it (single `@`, no comma, no
+control character) and refuses anything else. The digest names N candidates at once rather than
+one, so the check matters more there, not less.
+
+**Optional, and its absence is a designed no-op rather than a fault.** With it unset the
+extension radar bails *before claiming* and nothing is burned: no email goes out, no
+`nudge_sent_at` is stamped, and every due booking is still due the moment the variable is set
+and the deployment has rolled. The bookings screen at `/assignments` is unaffected — it computes
+its amber state at render time, so it is correct whether or not a nudge was ever sent.
+
+⚠ **#70's expiry radar does NOT inherit that reading, and this is the one place the two sweeps
+differ.** Its *state* half does not depend on `RECRUITER_EMAIL` — or on any mail configuration
+at all. Compliance items still move to `expiring` and `expired` on a deployment with no
+recruiter address, no `PREP_BASE_URL` and no Resend key, because `compliance_item.status` is
+what the candidate's passport renders: a sweep that refused to claim would leave a locum looking
+at a green "Sent in" chip over a certificate that lapsed in June, which is the failure the whole
+epic exists to prevent. What is lost without the configuration is the **messages**, and because
+the transition *is* the claim they are not sent later either. The screen is right; the nudge is
+gone. The two messages also have independent guards: `PREP_BASE_URL` alone still nudges the
+candidates, `RECRUITER_EMAIL` alone still sends the digest.
+
+⚠ **Migration `0010` must be applied to this environment's D1 before the deploy** (`npm run
+db:remote` for production, `npm run db:preview` for previews). It adds
+`assignment.nudge_sent_at`, and every statement the radar issues names that column.
+
 ### The one reminder email (#25, decision 17)
 
 The deployment sends a third mail: **"Your interview is tomorrow"**, once per invite, ever.
@@ -596,6 +638,130 @@ sweep also bails **before claiming** unless `DB`, `RESEND_API_KEY` and a valid `
 are all present, so a half-configured deployment cannot burn an invite's one reminder on
 nothing. The reminder links to `/prep/login` (the OTP way back in), never a tokenized link.
 
+### The extension nudge (#69) — the second sweep on the same lazy slot
+
+The deployment sends a **fourth** mail: *"Booking ending: <candidate> at <client>"*, once per
+booking per deadline, to `RECRUITER_EMAIL`. It is the only message this product sends to the
+agency rather than to a candidate.
+
+It rides the same lazy slot: `functions/prep/_middleware.js` runs `sendDueExtensionNudges` on
+every `/prep/*` request, beside `sendDueReminders` and (since #70) `mailExpiryNudges`. Each has
+its own catch block, so one unconfigured sweep cannot take the others down. **`scripts/remind.py`
+drives all three** — one GET at `/prep/login` runs the middleware and therefore every sweep on
+the slot, which is why there is no second script to remember.
+
+**The documented limitation is sharper here than for the reminder**, and it is an accepted
+trade rather than an oversight: the *recruiter* never visits `/prep/*`, so this radar's liveness
+depends entirely on candidate traffic or the daily poke. A deployment with neither can let a
+booking pass its whole fourteen-day window unnudged. The `/assignments` screen is the backstop.
+
+The operator's assurance query, beside the reminder's:
+
+```bash
+npx wrangler d1 execute dossier-engine --remote \
+  --command "SELECT count(*) FROM assignment WHERE nudge_sent_at IS NOT NULL"
+```
+
+**At-most-once, with one deliberate exception.** The claim is `assignment.nudge_sent_at`, set
+atomically before sending and never rolled back on a failed send — the reminder's rule
+unchanged. The exception is the point of the ticket: **changing a booking's end date clears the
+stamp**, so extending a booking re-arms the radar and the new deadline produces a new nudge.
+Marking a booking `ended` or `cancelled` does *not* clear it. If you see two nudges for one
+booking, look for an extension between them — that is the feature.
+
+### The expiry radar (#70) — the third sweep, and the one that is half-awaited
+
+The deployment sends a **fifth and a sixth** mail: *"Something we hold for you runs out soon"* to
+the **candidate**, and *"Compliance expiries — N to chase"* to `RECRUITER_EMAIL`. Both come out
+of one sweep, which reads every checklist row carrying an expiry date, compares it against that
+item type's own lead time in `src/compliance/catalogue.js` (60 days for registration, DBS and
+right to work; 30 for immunisations, indemnity and fit-to-work), and moves it to `expiring` or
+`expired`.
+
+**It is the only job on this slot that is split across both tiers, and that is the design.**
+
+- The **state** half (`sweepExpiryStates`) is **awaited**, beside the two retention purges rather
+  than beside the sends. `compliance_item.status` is what `/prep/compliance` draws, and there is
+  no render-time fallback the way `/assignments` has one — so a deferred version would show a
+  lapsed certificate as "Sent in" for one request longer. It runs after both purges, so a
+  candidate the dormancy rule just erased has no rows left to sweep.
+- The **mail** half (`mailExpiryNudges`) rides `waitUntil` with the other two sends, registered
+  third. It takes what the state half won rather than re-reading the database — after a
+  successful claim there is nothing left to find.
+
+**No migration.** This is the first nudge in the product that needed no new column: the status
+transition *is* the claim. `UPDATE compliance_item SET status = ? WHERE id = ? AND status = ? AND
+expiry_date = ?` has exactly one winner, and both bound values matter — the date is what makes a
+renewal landing mid-sweep win the race, because a renewal always writes a new date.
+
+**Three configuration guards, and they are independent of one another:**
+
+| unset | what still happens | what is lost |
+|---|---|---|
+| nothing at all | states move, both messages send | — |
+| `RECRUITER_EMAIL` | states move, candidates are nudged | the digest |
+| `PREP_BASE_URL` | states move, the digest sends | the candidates' nudges |
+| `RESEND_API_KEY` | states move | both messages |
+
+The operator's assurance query, beside the other two:
+
+```bash
+npx wrangler d1 execute dossier-engine --remote \
+  --command "SELECT status, count(*) FROM compliance_item GROUP BY status"
+```
+
+**Read that query honestly: it counts STATES, not SENDS.** This is the one place this radar's
+assurance is weaker than #69's, and it follows directly from having no migration. An item sitting
+in `expiring` is one that was nudged **or** one whose nudge failed, and nothing distinguishes
+them — there is no `nudge_sent_at` here to count, because the status is doing that column's job.
+A failed send is logged (status code only, never the recipient, never the candidate's name) and
+that item is skipped; the claim is **not** rolled back, because "exactly one message per state
+change" outranks delivery, exactly as it does for the reminder and the extension nudge.
+
+**One message per state change, and no re-nudge.** An item that sits amber for six weeks is not
+chased again. An item can produce at most two candidate emails in its whole life per expiry date
+— one when it goes amber, one when it goes red — and a renewal through the passport re-arms it on
+the new date. That is decision 17's ethos: a courtesy, not a campaign.
+
+The candidate's message links to `/prep/compliance/login` (the compliance door, never
+`/prep/login` — the two portals hold independent cookies) and carries no token and no reference
+number. The recruiter's digest links to **`/compliance`** — #71's dashboard, added after this
+radar shipped — whenever `PREP_BASE_URL` is set, and to nothing when it is not. The link is an
+**enrichment, not a precondition**: the digest's guard is still `RECRUITER_EMAIL` alone, so a
+deployment carrying a recipient and no base URL keeps receiving exactly the message it received
+before. `/assignments` still shows no compliance state at all, and that half stays deliberate —
+bookings and dates on one screen, checklists on the other.
+
+### The recruiter dashboard (#71) — a screen, not a sweep
+
+`/compliance` lists every candidate with their whole checklist: how many items are verified, how
+many are waiting for the recruiter, and how many are at risk. Two controls per submitted item —
+**Verify**, which is the only thing in the product that ever writes `verified`, and **Send back**,
+which resets the item to `missing` with its reference and date cleared and emails the candidate a
+one-line reason.
+
+**It runs no sweep, and it does not need one.** The at-risk flags are computed from
+`compliance_item.expiry_date` on every request, against that item's own lead time in the
+catalogue. That is the whole reason this screen is trustworthy on a deployment where nobody has
+visited `/prep/*` for a fortnight: the sweep in the section above only fires on candidate traffic,
+so a screen reading `status` alone would under-report exactly when it matters. Each row therefore
+shows **two** chips — the chase state (from the column) and the risk (from the date) — and
+"Waiting for you" beside "Ran out four days ago" is not a contradiction, it is the row to act on.
+
+**No new Access application, and `scripts/setup-access.py` is unchanged by this ticket.**
+`/compliance` and `/api/compliance` are gated by the ordinary production application, because the
+portal's two bypass apps are scoped to the `/prep` path **segment** (section 3b). Adding a bypass
+here would open a screen listing every candidate's compliance state to the internet.
+
+**The send-back refuses to write when it cannot send**, unlike either radar above. The reason
+exists only in the email — nothing stores it — so a reset with no message leaves a locum staring
+at an item that has emptied itself with no way to learn why. If `RESEND_API_KEY` or
+`PREP_BASE_URL` is unset, or the candidate's row has no address, the route answers 503 and the
+item stays exactly where it was. **Verify** has no such requirement: it sends no mail.
+
+**No migration.** This screen reads and writes `compliance_item` and creates nothing;
+`migrations/` and `test/schema.test.js` are untouched.
+
 ---
 
 ## 6. Smoke-test checklist
@@ -620,6 +786,10 @@ page and tells you nothing about the site itself. Log in in a browser first.
 - [ ] `curl -s $P/api/events` shows the event landed, with the round-trip `duration_ms`
 - [ ] A client whose note is empty answers `note_empty` and offers a link to `/clients`
 - [ ] `curl -sI $P/ | grep -i x-content-type-options` returns the header from `public/_headers`
+- [ ] `/compliance` loads with **Compliance** current in the nav, lists every candidate
+      worst-first, and shows two chips on a row whose date has passed. **Verify** a submitted item
+      and check the reference number and the date are still on screen afterwards; **Send back**
+      one and check the candidate's inbox has the reason and the subject does not
 - [ ] Mobile: 375px width, no horizontal scroll, through all three acts
 
 Unauthenticated, the only thing any of these tells you is that the door is shut — Access

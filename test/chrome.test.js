@@ -70,6 +70,11 @@ const INLINE_STYLE_PAGES = [
   "public/prep/index.html",
   "public/prep/login.html",
   "public/prep/privacy.html",
+  // #68's compliance sign-in. It carries one block holding `.sr-only` alone, for the reason
+  // login.html states — 1px inset values are a clipping trick that prep.css's token gate
+  // rejects. This list is hardcoded, so test/compliance-pages.test.js asserts that this line
+  // exists: a page-scoped block missing from here is silently ungated in both directions.
+  "public/prep/compliance/login.html",
 ];
 
 test("every transition in app.css sits behind the reduced-motion guard", () => {

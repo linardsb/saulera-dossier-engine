@@ -91,8 +91,14 @@ function requireFields(values) {
  * A plain `===` on the hex of a HASH leaks nothing an attacker can use — they would be
  * timing their way toward a digest they cannot invert. This costs one loop over 64
  * characters and removes the argument, which is cheaper than having it again in review.
+ *
+ * Exported for #68's `consumeCandidateOtp`, which duplicates this file's OTP SQL deliberately
+ * (a table name cannot be a bound parameter) but must NOT duplicate this: a second copy of a
+ * constant-time comparison is a second place for someone to "simplify" it back to `===`. The
+ * precedent is src/prep/tokens.js importing `hashToken` from here — pure helpers cross the
+ * regime boundary, SQL does not.
  */
-function equalHex(a, b) {
+export function equalHex(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
