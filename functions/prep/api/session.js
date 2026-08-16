@@ -26,6 +26,7 @@ import {
   questionsByRole,
   attemptsByRole,
   habitsByRole,
+  shakyCompetencyIds,
 } from "../../../src/portal/store.js";
 import { requireSession } from "../../../src/prep/session.js";
 import {
@@ -62,12 +63,17 @@ export async function onRequestGet(context) {
     const questions = await questionsByRole(env.DB, role.role_id);
     const attempts = await attemptsByRole(env.DB, role.role_id);
     const habitRows = await habitsByRole(env.DB, role.role_id);
+    // The candidate's own debrief ticks (#77). Ids only — a shaky competency ranks as though it
+    // were a stage lower, and NOTHING about it is shown: the flag stays inside targeting, and the
+    // competency literals below name four fields, none of them this one.
+    const shakyIds = await shakyCompetencyIds(env.DB, role.role_id);
 
-    const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now });
+    const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now, shakyIds });
 
     // Day-before is DERIVED, never stored (#25): the same route `now`, the same stamp the
     // spacing already reads. Day-of counts; post-interview does not.
-    const dayBefore = isDayBefore(daysToInterview(role.interview_at, now));
+    const days = daysToInterview(role.interview_at, now);
+    const dayBefore = isDayBefore(days);
 
     // The session boundary is derived, never stored: the last block of attempts is the
     // CURRENT session only while its last attempt is under 30 minutes old.
@@ -143,6 +149,11 @@ export async function onRequestGet(context) {
       // Labels in RANK order, because `competencies` above is store order (by id) — the
       // DayBeforeMode focus list must name the top-ranked ones. Labels only, never a rank.
       day_before_focus: dayBefore ? state.ranked.slice(0, 3).map((c) => c.label) : [],
+      // Whether the debrief page has anything to offer (#77) — the same day-granularity gate
+      // /prep/api/debrief applies, off the `days` already computed above rather than a second
+      // reading of the stamp. Not candidate data worth withholding: it is derived from a date
+      // the candidate already knows.
+      debrief_available: days <= 0,
     });
   } catch (err) {
     return errorResponse(err);

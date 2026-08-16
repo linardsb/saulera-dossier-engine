@@ -144,7 +144,26 @@ test("every ALTER TABLE in the migrations is an ADD COLUMN this test could read"
 // which is why the column is `field_key` and not `candidate_visible`. Presence is permission,
 // so an empty table is the fail-closed default for every note that already exists.
 const ENGINE_TABLES = ["agency", "clients", "events", "note_visibility"];
-const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invite", "otp", "question"];
+//
+// `debrief` and `debrief_competency` (#77) join THIS regime, and the reason is the one
+// `candidate_otp` states below in the other direction: a regime is decided by the root a row
+// cascades from, not by what the table is about. Both hang off `candidate_role`, which hangs off
+// `invite`, so the 30-day post-interview purge and delete-now govern them — not the compliance
+// cage's 12-month dormancy one. That matters here more than most: a debrief is the candidate's
+// private account of an interview that has already happened, and filing it under a retention
+// promise that outlives the invite would keep it long after the sentence on /prep/privacy says
+// it is gone.
+const PORTAL_TABLES = [
+  "attempt",
+  "candidate_role",
+  "competency",
+  "debrief",
+  "debrief_competency",
+  "habit",
+  "invite",
+  "otp",
+  "question",
+];
 
 // The third regime (#67, decided by spike #66): durable compliance METADATA, caged to a
 // `candidate` root with its own retention — a 12-month dormancy purge and delete-now, both
@@ -161,14 +180,16 @@ const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invi
 // that does not govern it.
 const COMPLIANCE_TABLES = ["assignment", "candidate", "candidate_otp", "compliance_item"];
 
-test("the schema declares exactly the engine's four, the portal's seven and the compliance cage's four", () => {
+test("the schema declares exactly the engine's four, the portal's nine and the compliance cage's four", () => {
   assert.deepEqual(
     [...byName.keys()].sort(),
     [...ENGINE_TABLES, ...PORTAL_TABLES, ...COMPLIANCE_TABLES].sort(),
-    "a sixteenth table means a boundary moved without a decision. The engine's four carry " +
-      "no candidate data (architecture §5.6); the portal's seven are candidate data inside " +
-      "decision 13's retention cage; the compliance cage's four are durable candidate " +
-      "metadata inside spike #66's. A new table must pick a regime, in the open.",
+    "an eighteenth table means a boundary moved without a decision. The engine's four carry " +
+      "no candidate data (architecture §5.6); the portal's nine are candidate data inside " +
+      "decision 13's retention cage — the two debrief tables included, because they hang off " +
+      "candidate_role and die on the 30-day post-interview purge like the rest of it; the " +
+      "compliance cage's four are durable candidate metadata inside spike #66's. A new table " +
+      "must pick a regime, in the open.",
   );
 });
 
@@ -224,6 +245,18 @@ const EXPECTED_COLUMNS = {
   question: ["axis", "competency_id", "difficulty", "id", "text", "variant_of"],
   attempt: ["competency_id", "created_at", "id", "mode", "note", "question_id", "rating"],
   habit: ["active", "evidence_count", "first_seen", "id", "label", "role_id"],
+  // #77. The candidate's own account of an interview that has happened: the questions they were
+  // asked with the competency they placed each one under (`asked_json`), and one thing to do
+  // differently. One row per role, upserted — `candidate_role_id` is UNIQUE — so re-editing is a
+  // rewrite rather than a history. No `updated_at` and no `shaky_text`: nothing renders a stamp,
+  // and the shaky ticks are the join table below rather than prose, because targeting has to read
+  // them deterministically with no model call.
+  debrief: ["asked_json", "candidate_role_id", "created_at", "fix_text", "id"],
+  // #77. Two columns and no third: the pair IS the fact, so it is the composite primary key, and
+  // a duplicate tick is not a second fact worth a surrogate id or a count. No `created_at` either
+  // — the whole set is replaced on every save, so a per-tick stamp would record when a set was
+  // last rewritten and nothing reads that.
+  debrief_competency: ["competency_id", "debrief_id"],
   // #20. `attempts` is the OTP cap's whole storage: the counter rides the row it caps, and
   // dies with it. Still no `code` column and no email — the invite the row hangs off owns
   // the identity, and this table owns only the guess count.
@@ -302,6 +335,12 @@ const CASCADE_CHAIN = {
   attempt: { competency_id: "competency", question_id: "question" },
   habit: { role_id: "candidate_role" },
   otp: { invite_id: "invite" },
+  // #77. Two edges rather than one, and the second is not decoration: `debrief_competency`
+  // cascades from `debrief` so the ticks die with the debrief, AND from `competency` so a
+  // competency that goes takes its ticks rather than leaving a dangling row that would dampen
+  // targeting for a competency nobody can see.
+  debrief: { candidate_role_id: "candidate_role" },
+  debrief_competency: { debrief_id: "debrief", competency_id: "competency" },
   assignment: { candidate_id: "candidate", client_id: "clients" },
   compliance_item: { candidate_id: "candidate" },
   // #68. A live sign-in code is the one row in the cage that is a credential, so it is the one

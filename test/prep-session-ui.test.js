@@ -152,6 +152,7 @@ function bridge({ d1, client, token, urls = [], failBrief = false }) {
 // guard in group 6 is what keeps this mirror honest against the real document.
 const SHELL_IDS = [
   "session-state",
+  "session-debrief-cta",
   "act-prime",
   "prime-blocks",
   "start",
@@ -184,6 +185,7 @@ function shell() {
 
   const refs = {
     stateLine: make("p", "session-state"),
+    debriefCta: make("p", "session-debrief-cta", true),
     actPrime: make("section", "act-prime", true),
     primeBlocks: make("div", "prime-blocks"),
     startButton: make("button", "start"),

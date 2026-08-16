@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>How did the interview go?</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
+</head>
+<body>
+
+<!-- A candidate-facing page: the topbar carries the portal's own name and no recruiter
+     navigation, same as brief.html and session.html. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Interview prep</span>
+  </div>
+</header>
+
+<main class="debrief">
+
+  <div class="page-head">
+    <h1>How did the interview go?</h1>
+    <p class="page-sub" id="private-note"></p>
+    <p class="save-state" id="debrief-state" role="status"></p>
+  </div>
+
+  <!-- Shown when the interview has not happened yet. The form below is hidden in that case, so
+       the page says one thing rather than offering a form it will refuse. -->
+  <section id="unavailable" hidden>
+    <p class="prep-body" id="unavailable-note"></p>
+    <p><a class="btn btn-block" href="/prep/brief">Back to your prep</a></p>
+  </section>
+
+  <section id="debrief-form" hidden>
+
+    <div class="debrief-field">
+      <label class="prep-label" for="asked" id="asked-label"></label>
+      <!-- The textarea class is load-bearing, not decorative: app.css sizes .textarea at
+           --text-note (16px), and iOS Safari zooms the whole viewport when a focused control
+           computes under 16px. This page is typed into on a phone on the way out of an
+           interview, which is the one place it matters most. test/prep-content.test.js gates it. -->
+      <textarea class="textarea" id="asked" rows="6"></textarea>
+      <p class="prep-caption" id="asked-caption"></p>
+    </div>
+
+    <div class="debrief-field">
+      <p class="prep-label" id="place-label"></p>
+      <p class="prep-caption" id="place-caption"></p>
+      <!-- One row per non-blank line of the box above, each with its own picker. debrief.js owns
+           every element inside it. -->
+      <div id="asked-lines"></div>
+    </div>
+
+    <div class="debrief-field">
+      <p class="prep-label" id="shaky-label"></p>
+      <p class="prep-caption" id="shaky-caption"></p>
+      <!-- One checkbox per competency on this role. Empty when the handover wrote none, which is
+           a real state: the text still saves. -->
+      <div id="shaky-list"></div>
+    </div>
+
+    <div class="debrief-field">
+      <label class="prep-label" for="fix" id="fix-label"></label>
+      <textarea class="textarea" id="fix" rows="3"></textarea>
+      <p class="prep-caption" id="fix-caption"></p>
+    </div>
+
+    <p><button type="button" class="btn btn-primary btn-block" id="save"></button></p>
+
+  </section>
+
+</main>
+
+<footer class="prep-footer">
+  <p><a href="/prep/privacy">What we hold about you, and when it is deleted</a></p>
+</footer>
+
+<!-- A module script, deferred by the platform. The page boots the exported controller so
+     node --test can import the module with no document and drive the same code. -->
+<script type="module">
+  import { initDebrief } from "/prep/debrief.js";
+  initDebrief();
+</script>
+
+</body>
+</html>

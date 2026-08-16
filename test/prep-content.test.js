@@ -1,5 +1,5 @@
-// The gate over the candidate portal's two CONTENT pages: the brief a candidate reads, and the
-// drill they practise in (#63).
+// The gate over the candidate portal's three CONTENT pages: the brief a candidate reads, the
+// drill they practise in (#63), and the debrief they write after the interview (#77).
 //
 // The class of failure this file catches is a redesign that ships GREEN and inert. brief.js
 // reaches three elements by id and can see none of them from its own file, and until this file
@@ -39,10 +39,13 @@ const BRIEF_HTML = read("public/prep/brief.html");
 const BRIEF_JS = read("public/prep/brief.js");
 const SESSION_HTML = read("public/prep/session.html");
 const SESSION_JS = read("public/prep/session.js");
+const DEBRIEF_HTML = read("public/prep/debrief.html");
+const DEBRIEF_JS = read("public/prep/debrief.js");
 
 const CONTENT_PAGES = {
   "public/prep/brief.html": BRIEF_HTML,
   "public/prep/session.html": SESSION_HTML,
+  "public/prep/debrief.html": DEBRIEF_HTML,
 };
 
 /** The one opening tag carrying `id="<id>"`. Attributes may wrap across lines; none holds a `>`. */
@@ -104,6 +107,62 @@ test("every element session.js reaches by id exists in session.html", () => {
   }
 });
 
+test("every element debrief.js reaches by id exists in debrief.html", () => {
+  // debrief.js defines `const $ = (id) => doc.getElementById(id)` and every call site goes
+  // through it, the way session.js does — NOT literal getElementById calls like brief.js. So this
+  // follows the `$("…")` shape rather than the getElementById one; matching the latter here would
+  // find the helper's single call, whose argument is a VARIABLE, extract nothing, and loop over
+  // an empty set. The non-empty assertion is what turns that into a failure instead of silence.
+  const reached = [...DEBRIEF_JS.matchAll(/\$\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
+  assert.ok(
+    reached.length >= 18,
+    `parsed ${reached.length} id lookups out of debrief.js, expected at least 18 — the helper ` +
+      `this regex follows has changed shape, and this gate is now asserting nothing`,
+  );
+
+  const declared = idsOf(DEBRIEF_HTML);
+  for (const id of reached) {
+    assert.ok(
+      declared.has(id),
+      `debrief.js reaches #${id} and debrief.html no longer declares it. The controller reads it ` +
+        `on boot; class hooks may move in a redesign, ids may not.`,
+    );
+  }
+});
+
+test("both of the debrief's boxes keep the class that stops iOS zooming the page", () => {
+  // The same rule #answer carries below, on the page most likely to be filled in on a phone: this
+  // one is typed into standing outside a building, minutes after the interview.
+  for (const id of ["asked", "fix"]) {
+    assert.match(
+      tagWithId(DEBRIEF_HTML, "textarea", id),
+      /class="[^"]*\btextarea\b[^"]*"/,
+      `debrief.html's #${id} lost the textarea class. app.css sizes .textarea at --text-note ` +
+        `(16px); without it iOS Safari zooms the whole viewport the moment it is tapped.`,
+    );
+  }
+});
+
+test("the debrief's state line is still announced, and both sections start hidden", () => {
+  assert.match(
+    tagWithId(DEBRIEF_HTML, "p", "debrief-state"),
+    /role="status"/,
+    "#debrief-state is no longer announced; it is the only channel telling a screen-reader user " +
+      "their debrief saved, or failed to",
+  );
+  assert.match(
+    tagWithId(DEBRIEF_HTML, "p", "debrief-state"),
+    /class="[^"]*\bsave-state\b[^"]*"/,
+    "#debrief-state lost the save-state class, so .is-shown no longer reveals it and every " +
+      "message it carries renders at opacity 0",
+  );
+  // Ship either without the attribute and a candidate sees "this opens after your interview"
+  // sitting above the very form it says is not open yet.
+  for (const id of ["unavailable", "debrief-form"]) {
+    assert.match(tagWithId(DEBRIEF_HTML, "section", id), /\shidden[\s>]/, `#${id} no longer starts hidden`);
+  }
+});
+
 test("the answer box keeps the class that stops iOS zooming the page", () => {
   const answer = tagWithId(SESSION_HTML, "textarea", "answer");
   assert.match(
@@ -161,9 +220,9 @@ test("all three acts start hidden and keep the heading a screen reader navigates
   }
 });
 
-test("both pages still load the script that renders everything on them", () => {
+test("all three pages still load the script that renders everything on them", () => {
   // Every assertion above can survive a rewrite that drops the script itself: the ids are all
-  // still declared, the live regions are all still there, and both pages go completely inert —
+  // still declared, the live regions are all still there, and the pages go completely inert —
   // a heading, a placeholder title, and nothing else, forever.
   assert.match(
     BRIEF_HTML,
@@ -172,9 +231,14 @@ test("both pages still load the script that renders everything on them", () => {
   );
   assert.match(SESSION_HTML, /import \{ initSession \}/, "session.html no longer imports the controller");
   assert.match(SESSION_HTML, /initSession\(\)/, "session.html imports the controller and never calls it");
+  // The debrief's markup carries NO copy of its own — every label and caption is written by the
+  // controller from COPY — so a dropped script here is a page of empty labels rather than a page
+  // with a heading. It is the most inert of the three without its script.
+  assert.match(DEBRIEF_HTML, /import \{ initDebrief \}/, "debrief.html no longer imports the controller");
+  assert.match(DEBRIEF_HTML, /initDebrief\(\)/, "debrief.html imports the controller and never calls it");
 });
 
-test("both content pages stay out of the index and keep pinch zoom", () => {
+test("every content page stays out of the index and keeps pinch zoom", () => {
   for (const [page, html] of Object.entries(CONTENT_PAGES)) {
     assert.match(
       html,
@@ -195,10 +259,14 @@ test("both content pages stay out of the index and keep pinch zoom", () => {
   }
 });
 
-test("both content pages are served by the one stylesheet chain, in order", () => {
+test("every content page is served by the one stylesheet chain, in order", () => {
   // Order is the assertion, not just membership: session.css deliberately overrides prep.css's
   // .block background for feedback entries, and that override is decided by link order. Swap the
   // last two and the transcript silently loses its tone step.
+  //
+  // Named page by page rather than looped over CONTENT_PAGES, because session.html links a fifth
+  // sheet the other two do not — a loop would have to encode that exception anyway, and would
+  // silently stop asserting order for any page added to the map without a chain of its own.
   const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css"];
   assert.deepEqual(stylesheetsOf(BRIEF_HTML), chain, "brief.html's stylesheet chain or its order");
   assert.deepEqual(
@@ -206,9 +274,15 @@ test("both content pages are served by the one stylesheet chain, in order", () =
     [...chain, "/prep/session.css"],
     "session.html's stylesheet chain or its order — it links the portal's four plus its own, last",
   );
+  assert.deepEqual(
+    stylesheetsOf(DEBRIEF_HTML),
+    chain,
+    "debrief.html's stylesheet chain or its order — the portal's four and no fifth: the 16px " +
+      "floor its pickers need lives in prep.css, where the colour and size gates can see it",
+  );
 });
 
-test("neither content page carries a page-scoped style block", () => {
+test("no content page carries a page-scoped style block", () => {
   // chrome.test.js:65-100 sweeps four named pages' inline <style> blocks for raw colour and for
   // motion outside the reduced-motion guard, and neither of these pages is on that list. A style
   // block here would therefore be a hole in BOTH gates at once: raw hex and unguarded animation,

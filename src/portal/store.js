@@ -744,3 +744,143 @@ export async function habitsByRole(db, roleId) {
     .all();
   return results ?? [];
 }
+
+// ── the private debrief (#77) ──────────────────────────────────────────────────────────
+//
+// What the candidate writes down after the real interview: the questions they were actually
+// asked, which competencies felt shaky, and one thing to fix. It never crosses the wall
+// (DECISIONS.md decision 2) — no recruiter surface reads any of it, and test/prep-debrief.test.js
+// asserts that as a reachability claim rather than a promise.
+//
+// Same contract as everything above: `db` first, bound parameters only, no batch.
+
+/**
+ * The candidate's debrief for a role, or null.
+ *
+ * Raw columns — the ROUTE parses `asked_json`, the way functions/prep/api/brief.js parses
+ * `brief_json`. A store that parsed it would have to decide what a corrupt row means, and that
+ * decision is the caller's: brief.js answers 502 because the payload is a contract another module
+ * owns, and the debrief route starts the list empty because it wrote the value itself.
+ */
+export async function debriefByRole(db, roleId) {
+  return db
+    .prepare(
+      "SELECT id, asked_json, fix_text, created_at FROM debrief WHERE candidate_role_id = ?",
+    )
+    .bind(String(roleId ?? ""))
+    .first();
+}
+
+/**
+ * Write the debrief, whether or not one stands, and return the id the row now has.
+ *
+ * `asked` is an ARRAY and this function stringifies it — `persistHandover`'s treatment of
+ * `brief_json`, so there is one JSON.stringify in the codebase rather than one per caller.
+ *
+ * ON CONFLICT on the UNIQUE `candidate_role_id`, so the id is minted once and every later save
+ * edits the same row. That is what lets the ticks hang off it: DELETE-then-INSERT here would
+ * cascade `debrief_competency` away on every save, and a partial save that failed between the two
+ * writes would leave the candidate's ticks silently gone. `RETURNING id` (observeHabit's idiom) so
+ * the caller needs no re-read, and on the conflict path it returns the STANDING row's id — not
+ * the uuid this call minted and did not use.
+ *
+ * `requireFields` covers `roleId` alone: `asked` (`[]`) and `fixText` (`''`) are legitimately empty
+ * on a partial save, which is the whole point of the form being resumable.
+ */
+export async function upsertDebrief(db, { roleId, asked, fixText } = {}) {
+  requireFields({ roleId });
+  const id = await db
+    .prepare(
+      `INSERT INTO debrief (id, candidate_role_id, asked_json, fix_text) VALUES (?, ?, ?, ?)
+       ON CONFLICT (candidate_role_id) DO UPDATE
+          SET asked_json = excluded.asked_json, fix_text = excluded.fix_text
+       RETURNING id`,
+    )
+    .bind(crypto.randomUUID(), roleId, JSON.stringify(asked ?? []), String(fixText ?? ""))
+    .first("id");
+  return { id };
+}
+
+/**
+ * Replace the whole tick set.
+ *
+ * DELETE then INSERT — `issueOtp`'s idiom (:435): the newest save is the truth, and a set replaced
+ * wholesale has no half-state to reconcile. Untick-then-save is therefore a real erasure, which is
+ * what a candidate means by unticking a box.
+ *
+ * Callers pass ids ALREADY checked against the role. This function does not re-check: the route
+ * has the competency list in hand for its own 404, and a second check here would be a second
+ * policy for one fact.
+ */
+export async function setShakyCompetencies(db, { debriefId, competencyIds } = {}) {
+  requireFields({ debriefId });
+  await db.prepare("DELETE FROM debrief_competency WHERE debrief_id = ?").bind(debriefId).run();
+  for (const competencyId of competencyIds ?? []) {
+    await db
+      .prepare("INSERT INTO debrief_competency (debrief_id, competency_id) VALUES (?, ?)")
+      .bind(debriefId, String(competencyId))
+      .run();
+  }
+  return { ok: true };
+}
+
+/**
+ * The competency ids this role's candidate called shaky — targeting's only read of the debrief.
+ *
+ * A plain array of ids; the caller makes the Set. Scoped through `debrief.candidate_role_id`, so
+ * a role with no debrief answers `[]` rather than every tick in the database.
+ */
+export async function shakyCompetencyIds(db, roleId) {
+  const { results } = await db
+    .prepare(
+      `SELECT dc.competency_id FROM debrief_competency dc
+         JOIN debrief d ON d.id = dc.debrief_id
+        WHERE d.candidate_role_id = ?
+        ORDER BY dc.competency_id`,
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return (results ?? []).map((row) => row.competency_id);
+}
+
+/**
+ * A question the candidate was really asked, filed under the competency THEY assigned it to.
+ *
+ * THE ID IS DERIVED FROM THE TEXT, and that is the whole idempotency: `${competencyId}#asked-`
+ * plus the first 16 hex of the text's SHA-256 (`hashToken`, this file's own helper). Re-saving the
+ * same form re-derives the same id and `ON CONFLICT DO NOTHING` makes the second save a no-op — by
+ * construction, not by a read-then-write race on a route whose ORDINARY path is re-saving. It can
+ * collide with neither `#${index}` core ids nor `#v-${uuid}` variants. The caller must pass the
+ * same normalised text it stored in `asked_json`, or one stray space mints a second row.
+ *
+ * It is an INSERT key and nothing else. Never read a line's current placement back off these ids:
+ * a line moved between competencies leaves its first row standing, so two ids share one digest and
+ * `question` has no stamp to order them by. The placement lives in `debrief.asked_json`, which is
+ * why that column is JSON.
+ *
+ * `axis = 'lateral'`, `variant_of` NULL. Lateral because targeting reads a non-null axis as "a
+ * stored variant" and serves unattempted ones before it mints (targeting.js:146-150) — which is
+ * exactly what a real question deserves, and it needs no new serving path. It is also TRUE in
+ * SPEC's vocabulary: same competency, a real interviewer's phrasing, same difficulty. The
+ * consequence to keep in view is that `nextStage`'s `can_answer → holds_up` transition needs a
+ * successful non-revealed attempt on a VARIANT, and an asked question now qualifies — so the
+ * ladder can move faster after a debrief. That is right (a real question is the strongest evidence
+ * an answer survives a phrasing nobody rehearsed) and it is not an accident.
+ *
+ * NULL `variant_of` because this question is not a variant OF one of ours; the column is nullable
+ * and nothing branches on it. NULL `difficulty`, which targeting reads as standard
+ * (targeting.js:102).
+ */
+export async function insertAskedQuestion(db, { competencyId, text } = {}) {
+  requireFields({ competencyId, text });
+  const id = `${competencyId}#asked-${(await hashToken(String(text))).slice(0, 16)}`;
+  const result = await db
+    .prepare(
+      `INSERT INTO question (id, competency_id, text, variant_of, axis, difficulty)
+       VALUES (?, ?, ?, NULL, 'lateral', NULL)
+       ON CONFLICT (id) DO NOTHING`,
+    )
+    .bind(id, competencyId, String(text))
+    .run();
+  return { id, inserted: (result.meta?.changes ?? 0) === 1 };
+}

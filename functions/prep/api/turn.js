@@ -43,6 +43,7 @@ import {
   setCompetencyProgress,
   insertVariant,
   observeHabit,
+  shakyCompetencyIds,
 } from "../../../src/portal/store.js";
 import { requireSession } from "../../../src/prep/session.js";
 import { replayProgress } from "../../../src/prep/ladder.js";
@@ -183,7 +184,12 @@ export async function onRequestPost(context) {
     const now = new Date();
     const competencies = await competenciesByRole(env.DB, role.role_id);
     const questions = await questionsByRole(env.DB, role.role_id);
-    const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now });
+    // The debrief's shaky ticks (#77), read here with the other targeting inputs rather than at
+    // the top: a debrief saved mid-turn is picked up on the NEXT turn either way, which is the
+    // same staleness the competency cache already has and is harmless for the same reason — the
+    // ticks only reorder a queue, and the next turn reorders it again.
+    const shakyIds = await shakyCompetencyIds(env.DB, role.role_id);
+    const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now, shakyIds });
 
     let nextQuestion = state.demand.question
       ? { id: state.demand.question.id, text: state.demand.question.text }

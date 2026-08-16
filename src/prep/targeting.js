@@ -19,9 +19,28 @@ import { replayProgress, isSuccess, stageNumber } from "./ladder.js";
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Number(n) || 0));
 
-/** Readiness in [0, 1]: stage carries most of it, the rate refines within a stage. */
-export function readiness({ stage, success_rate }) {
-  return (stageNumber(stage) + clamp(success_rate, 0, 1)) / 5;
+/**
+ * How far a shaky competency is pushed back down the ladder: one rung of readiness's own
+ * five-point denominator (#77). SPEC Amendment 1 — "targeting treats a shaky competency as less
+ * ready" — and the unit is chosen so the effect is legible rather than tuned: a competency the
+ * candidate says went badly ranks as though it were a stage lower, which is what they just told
+ * us. Subtractive and clamped at 0, not multiplicative: at stage 0 there is nothing to multiply.
+ *
+ * The effect is on the QUEUE only. No number derived from it reaches a response — the routes build
+ * their competency literals by hand, and `shaky` is not one of the fields they name.
+ */
+export const SHAKY_DAMPEN = 0.2;
+
+/**
+ * Readiness in [0, 1]: stage carries most of it, the rate refines within a stage.
+ *
+ * `shaky` is the candidate's own tick from their debrief, decorated onto the row by `drillState`
+ * — never a column on `competency`, whose two mutable columns are recompute-then-write caches of
+ * the attempt log (ladder.js's invariant) and this is not derivable from that log.
+ */
+export function readiness({ stage, success_rate, shaky }) {
+  const raw = (stageNumber(stage) + clamp(success_rate, 0, 1)) / 5;
+  return shaky ? Math.max(0, raw - SHAKY_DAMPEN) : raw;
 }
 
 /**
@@ -298,8 +317,10 @@ export function confidenceQuestion({ ranked, questionsBy, attemptsBy }) {
  * rules out helper modules under functions/, and the two Functions repeating this walk is
  * how the two would drift — so it lives here, pure and tested.
  *
- * Takes the store's rows verbatim; returns:
- *   ranked      the full ranked list (with last_attempt_at joined on)
+ * Takes the store's rows verbatim. `shakyIds` (#77) is the candidate's own debrief ticks, optional
+ * and empty for every caller that has none — a competency in that set ranks as though it were a
+ * stage lower (SHAKY_DAMPEN). Returns:
+ *   ranked      the full ranked list (with last_attempt_at and shaky joined on)
  *   open        the eligible slice of it, in rank order
  *   target      open[0] or null
  *   demand      nextQuestion() for the target — {question} or {mint}
@@ -307,7 +328,7 @@ export function confidenceQuestion({ ranked, questionsBy, attemptsBy }) {
  *   sessions    sessionsOf(attempts)
  *   questionsBy / attemptsBy   Maps keyed by competency id
  */
-export function drillState({ competencies, questions, attempts, interviewAt, now = new Date() }) {
+export function drillState({ competencies, questions, attempts, interviewAt, now = new Date(), shakyIds = [] }) {
   const questionsBy = new Map();
   for (const q of questions) {
     if (!questionsBy.has(q.competency_id)) questionsBy.set(q.competency_id, []);
@@ -321,8 +342,15 @@ export function drillState({ competencies, questions, attempts, interviewAt, now
     if (a.mode !== "revealed") lastNonRevealed.set(a.competency_id, a.created_at);
   }
 
+  // One decoration pass, not two: `shaky` rides alongside `last_attempt_at` because both are
+  // per-row facts the store rows do not carry, and `rankCompetencies` reads the result once.
+  const shaky = new Set(shakyIds);
   const ranked = rankCompetencies(
-    competencies.map((c) => ({ ...c, last_attempt_at: lastNonRevealed.get(c.id) ?? null })),
+    competencies.map((c) => ({
+      ...c,
+      shaky: shaky.has(c.id),
+      last_attempt_at: lastNonRevealed.get(c.id) ?? null,
+    })),
   );
   const days = daysToInterview(interviewAt, now);
   const open = eligible(ranked, { daysToInterview: days, now });
