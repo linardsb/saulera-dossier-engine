@@ -314,6 +314,17 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
       }
       askedBox.value = asked.map((entry) => String(entry?.text ?? "").trim()).filter(Boolean).join("\n");
       fixBox.value = String(payload.fix_text ?? "");
+    } else {
+      /* The competency list is still the server's, even here — so a kept placement can be left
+         pointing at a competency a re-handover removed while the request was out. The next save
+         would post an id the route answers 404 for, and 404 is not 401, so the page would offer
+         "try again in a moment" about a request that can never succeed: the dead end the cap
+         guard above exists to remove, re-entered through this exception. The route applies this
+         same rule on the way out (`askedFrom`'s `known` set); this is it on the way in. */
+      const known = new Set(state.competencies.map((c) => c.id));
+      for (const [text, id] of state.placements) {
+        if (!known.has(id)) state.placements.delete(text);
+      }
     }
 
     renderChrome();

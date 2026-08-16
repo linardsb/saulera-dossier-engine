@@ -676,7 +676,13 @@ test("no recruiter route reads the question table, where the asked lines also li
   const all = functionFiles();
   const readers = all.filter((path) => {
     const code = stripComments(readFileSync(join(root, path), "utf8"));
-    return QUESTION_READ_FNS.some((fn) => code.includes(fn));
+    // The store functions AND raw SQL. Only the first is how the table is reached today, but a
+    // gate that catches only imports would let a route with its own `SELECT text FROM question`
+    // through while this test's name promised otherwise.
+    return (
+      QUESTION_READ_FNS.some((fn) => code.includes(fn)) ||
+      /\b(?:from|into|update|join)\s+question\b/i.test(code)
+    );
   });
 
   assert.ok(

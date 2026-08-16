@@ -319,6 +319,45 @@ test("with nothing typed mid-flight the server's row is still what the page show
   assert.deepEqual(pickersOf(s).map((p) => p.value), ["role:lone-working"]);
 });
 
+test("a competency that vanishes mid-flight leaves no placement the route would 404 on", async () => {
+  // The exception above must not re-open the dead end the cap guard closes. A placement kept
+  // through the flight can point at a competency a re-handover removed, and the next save posts
+  // an id the route answers 404 for — which is not 401, so the page would offer "try again in a
+  // moment" about a request that can never succeed.
+  let s;
+  s = await boot({
+    payloads: [AVAILABLE(), AVAILABLE({ competencies: [COMPETENCIES[0]] })],
+    duringPost: () => {
+      s.node("asked").value = "Placed on a competency about to go.\nTyped mid-flight.";
+    },
+  });
+
+  s.node("asked").value = "Placed on a competency about to go.";
+  s.node("asked").listeners.input[0]();
+  pickersOf(s)[0].value = "role:stakeholders";
+  pickersOf(s)[0].listeners.change[0]();
+
+  await s.controller.save();
+
+  assert.equal(
+    s.node("asked").value,
+    "Placed on a competency about to go.\nTyped mid-flight.",
+    "the mid-flight line still survives — this is not the fix undoing the one above",
+  );
+  assert.deepEqual(
+    [...s.controller.state.placements.values()],
+    [],
+    "and the pick on the competency that no longer exists is gone with it",
+  );
+
+  await s.controller.save();
+  assert.deepEqual(
+    JSON.parse(s.posts().at(-1).body).asked.map((entry) => entry.competency_id),
+    [null, null],
+    "so the next save carries nothing the route would refuse",
+  );
+});
+
 test("over any of the route's caps the page refuses locally and never posts", async () => {
   // The failure: the route answers 400, `save` reads every non-401 failure as transient, and the
   // candidate is told to try again in a moment — about a request that can never succeed, on a
