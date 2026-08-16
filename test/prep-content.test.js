@@ -1,5 +1,6 @@
-// The gate over the candidate portal's three CONTENT pages: the brief a candidate reads, the
-// drill they practise in (#63), and the debrief they write after the interview (#77).
+// The gate over the candidate portal's four CONTENT pages: the brief a candidate reads, the
+// drill they practise in (#63), the debrief they write after the interview (#77), and the
+// storybank they fill in before it (#78).
 //
 // The class of failure this file catches is a redesign that ships GREEN and inert. brief.js
 // reaches three elements by id and can see none of them from its own file, and until this file
@@ -41,11 +42,17 @@ const SESSION_HTML = read("public/prep/session.html");
 const SESSION_JS = read("public/prep/session.js");
 const DEBRIEF_HTML = read("public/prep/debrief.html");
 const DEBRIEF_JS = read("public/prep/debrief.js");
+const STORIES_HTML = read("public/prep/stories.html");
+const STORIES_JS = read("public/prep/stories.js");
 
 const CONTENT_PAGES = {
   "public/prep/brief.html": BRIEF_HTML,
   "public/prep/session.html": SESSION_HTML,
   "public/prep/debrief.html": DEBRIEF_HTML,
+  // #78. Adding the page here alone brings the robots-meta, viewport, pinch-zoom and
+  // no-inline-<style> gates; the chain assertion is named separately below, for the reason
+  // that test's own comment gives.
+  "public/prep/stories.html": STORIES_HTML,
 };
 
 /** The one opening tag carrying `id="<id>"`. Attributes may wrap across lines; none holds a `>`. */
@@ -127,6 +134,90 @@ test("every element debrief.js reaches by id exists in debrief.html", () => {
       `debrief.js reaches #${id} and debrief.html no longer declares it. The controller reads it ` +
         `on boot; class hooks may move in a redesign, ids may not.`,
     );
+  }
+});
+
+test("every element stories.js reaches by id exists in stories.html", () => {
+  // #78. Same `$("…")` helper shape as session.js and debrief.js, so the same regex follows it —
+  // matching getElementById here would find the helper's single call, whose argument is a
+  // VARIABLE, extract nothing, and loop over an empty set.
+  //
+  // The 20 is COUNTED, not guessed: it is every `$("…")` call site in the finished controller. A
+  // guessed floor produces an off-by-N failure that reads exactly like a real one.
+  const reached = [...STORIES_JS.matchAll(/\$\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
+  assert.ok(
+    reached.length >= 20,
+    `parsed ${reached.length} id lookups out of stories.js, expected at least 20 — the helper ` +
+      `this regex follows has changed shape, and this gate is now asserting nothing`,
+  );
+
+  const declared = idsOf(STORIES_HTML);
+  for (const id of reached) {
+    assert.ok(
+      declared.has(id),
+      `stories.js reaches #${id} and stories.html no longer declares it. The controller reads it ` +
+        `on boot; class hooks may move in a redesign, ids may not.`,
+    );
+  }
+});
+
+test("both of the storybank's boxes keep the class that stops iOS zooming the page", () => {
+  // The same rule the debrief's two boxes carry, on the page a candidate types the MOST into: a
+  // sketch is paragraphs, and the title sits directly above it so both are tapped in one breath.
+  // prep.css raises `.stories .input` and `.stories .textarea` to --text-note (16px); without the
+  // class neither resolves and iOS Safari zooms the whole viewport.
+  assert.match(
+    tagWithId(STORIES_HTML, "input", "title"),
+    /class="[^"]*\binput\b[^"]*"/,
+    "stories.html's #title lost the input class, so the 16px floor no longer applies to it",
+  );
+  assert.match(
+    tagWithId(STORIES_HTML, "textarea", "sketch"),
+    /class="[^"]*\btextarea\b[^"]*"/,
+    "stories.html's #sketch lost the textarea class",
+  );
+});
+
+test("the storybank's state line is still announced, and all three sections start hidden", () => {
+  assert.match(
+    tagWithId(STORIES_HTML, "p", "stories-state"),
+    /role="status"/,
+    "#stories-state is no longer announced; it is the only channel telling a screen-reader user " +
+      "their story saved, failed to save, or was deleted",
+  );
+  assert.match(
+    tagWithId(STORIES_HTML, "p", "stories-state"),
+    /class="[^"]*\bsave-state\b[^"]*"/,
+    "#stories-state lost the save-state class, so .is-shown no longer reveals it and every " +
+      "message it carries renders at opacity 0",
+  );
+  // Ship any of the three without the attribute and the page opens showing an empty editor over a
+  // "not ready yet" notice over a list that has not loaded.
+  for (const id of ["unavailable", "storybank", "editor"]) {
+    assert.match(tagWithId(STORIES_HTML, "section", id), /\shidden[\s>]/, `#${id} no longer starts hidden`);
+  }
+  // The gap line is the one element hidden as an ATTRIBUTE on a <p>: it is absent rather than
+  // blank when every part of the job is covered, so the space above the list closes up.
+  assert.match(tagWithId(STORIES_HTML, "p", "story-gap"), /\shidden[\s>]/, "#story-gap no longer starts hidden");
+});
+
+test("the storybank links are offered unconditionally, from both pages", () => {
+  // #78's deliberate difference from #77, gated so nobody "fixes" it by analogy with the hidden
+  // debrief CTA one line above each of them. A storybank is written BEFORE the interview, so
+  // gating it on `debrief_available` would hide the feature from every candidate who still has
+  // one to prepare for — which is all of them, at the only time it helps.
+  for (const [file, html, id] of [
+    ["brief.html", BRIEF_HTML, "stories-cta"],
+    ["session.html", SESSION_HTML, "session-stories-cta"],
+  ]) {
+    const cta = tagWithId(html, "p", id);
+    assert.doesNotMatch(
+      cta,
+      /\shidden[\s>]/,
+      `${file}'s #${id} starts hidden. Nothing unhides it — no route flag carries a storybank ` +
+        `state — so the page would offer no way to reach /prep/stories at all.`,
+    );
+    assert.match(html, new RegExp(`id="${id}"[^>]*>\\s*<a[^>]*href="/prep/stories"`), `${file} links /prep/stories`);
   }
 });
 
@@ -263,6 +354,11 @@ test("all three pages still load the script that renders everything on them", ()
   // with a heading. It is the most inert of the three without its script.
   assert.match(DEBRIEF_HTML, /import \{ initDebrief \}/, "debrief.html no longer imports the controller");
   assert.match(DEBRIEF_HTML, /initDebrief\(\)/, "debrief.html imports the controller and never calls it");
+  // #78. stories.html carries no copy of its own either — every label, caption and button word is
+  // written by the controller from COPY — so a dropped script is a page of empty labels and an
+  // "Add a story" button with no text in it.
+  assert.match(STORIES_HTML, /import \{ initStories \}/, "stories.html no longer imports the controller");
+  assert.match(STORIES_HTML, /initStories\(\)/, "stories.html imports the controller and never calls it");
 });
 
 test("every content page stays out of the index and keeps pinch zoom", () => {
@@ -306,6 +402,12 @@ test("every content page is served by the one stylesheet chain, in order", () =>
     chain,
     "debrief.html's stylesheet chain or its order — the portal's four and no fifth: the 16px " +
       "floor its pickers need lives in prep.css, where the colour and size gates can see it",
+  );
+  assert.deepEqual(
+    stylesheetsOf(STORIES_HTML),
+    chain,
+    "stories.html's stylesheet chain or its order — the portal's four and no fifth, for the same " +
+      "reason: the 16px floor its title field and sketch box need lives in prep.css",
   );
 });
 

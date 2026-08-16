@@ -90,6 +90,80 @@
 /* The three fields, held apart so the page reads as three questions rather than one wall. */
 .debrief-field { margin: 0 0 var(--space-10); }
 
+/* ── the storybank (#78) ───────────────────────────────────────────────────────────────── */
+
+/* Like `.debrief`, this is a FORM rather than prose — a title, a box of rough notes and a column
+   of ticks — so it takes the 60ch the passport's form pages settled on rather than `.brief`'s 72ch
+   reading measure. A 72ch text box is a line long enough that the eye loses its place typing into
+   it, and this is the longest thing a candidate types anywhere in the product. */
+.stories {
+  max-width: 60ch;
+  min-width: 0;
+}
+
+/* THE iOS ZOOM FIX, and the third statement of the argument `.passport .input` and `.debrief
+   .select` already make: app.css sizes `.input` at --text-body (14px), and iOS Safari zooms the
+   whole viewport whenever a focused control computes below 16px. `.textarea` already carries
+   --text-note for this reason; the title field beside it is tapped in the same breath, so it takes
+   it too. Raising the control is the whole fix — maximum-scale on the viewport meta stops the zoom
+   by disabling pinch zoom for everyone and fails WCAG 1.4.4. */
+.stories .input,
+.stories .textarea { font-size: var(--text-note); }
+
+/* The fields, held apart so the editor reads as three questions rather than one wall. */
+.stories-field { margin: 0 0 var(--space-10); }
+
+/* The forward-looking line about a part of the job no story covers yet. It sits above the list as
+   a thing to go and think about, so it is set apart from the rows without becoming a warning —
+   there is nothing wrong here, and a tint or a rule would say there was. */
+.story-gap {
+  font-family: var(--font-body);
+  font-size: var(--text-note);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-8);
+}
+
+/* One story. The rows are a list of things the candidate owns, so each is separated by a hairline
+   rather than carded — a card each would make twelve stories read as twelve documents. */
+.story-row {
+  padding: var(--space-4) 0;
+  border-bottom: var(--hairline) solid var(--border-hairline);
+}
+
+.story-row-title {
+  font-family: var(--font-body);
+  font-size: var(--text-note);
+  margin: 0 0 var(--space-2);
+}
+
+/* What it covers, or the sentence saying it covers nothing yet. Secondary, because it is the
+   candidate's own bookkeeping rather than the story. */
+.story-row-covers {
+  font-family: var(--font-body);
+  font-size: var(--text-caption);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-3);
+}
+
+/* Edit and Delete. `.btn` carries app.css's 44px min-height; the right margin is what keeps the
+   two targets from sharing an edge on a phone, where a mis-tap on this row deletes a story. */
+.story-row-action { margin-right: var(--space-3); }
+
+/* One tick. The 44px target CRAFT asks for comes from the row's own padding rather than from the
+   box, which no browser lets you resize honestly — `.debrief-tick`'s argument, restated because
+   this page's ticks sit inside a form the candidate scrolls past rather than at the end of one. */
+.story-tick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.story-tick-label {
+  font-family: var(--font-body);
+  font-size: var(--text-note);
+}
+
 /* app.css:166 holds CRAFT's 44px floor with `min-height`, and min-height does not apply to a
    non-replaced inline element (CSS 2.1 §10.7) — so the floor was silently ignored on the only
    two anchors in the deployment styled as buttons: brief.html's "Practise for it" and

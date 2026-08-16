@@ -123,6 +123,13 @@ test("0009 applies clean after 0001–0008 and the compliance cage's four tables
     "note_visibility",
     "otp",
     "question",
+    // #78's two, and the note above applies to them word for word: `story` and `story_competency`
+    // hang off `candidate_role`, so they belong to the PORTAL cage's 30-day invite purge and the
+    // 12-month dormancy purge below must leave them alone — proven by the row-for-row assertions
+    // in that file rather than assumed here. They are listed only because this assertion is "what
+    // a real SQLite ended up with after every migration", not "what this regime owns".
+    "story",
+    "story_competency",
   ]);
 });
 

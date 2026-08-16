@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   SESSION_MODEL,
@@ -190,4 +191,65 @@ test("refusal, truncation and bad shapes each carry their own 502 code", async (
     await codeOf(() => feedbackOnAttempt(fakeAnthropic(ok({ ...FEEDBACK, extra: "field" })), INPUTS)),
     "bad_turn",
   );
+});
+
+/* ── the storybank seam (#78) ──────────────────────────────────────────────────────────── */
+
+test("SESSION_SYSTEM carries rule 6 — the stories are the candidate's, and unwritable", () => {
+  // AC2's prompt-level half. Rule 1 already forbids writing their answer; this says the same thing
+  // about the surface where it would feel like helpfulness rather than ghostwriting.
+  // Whitespace-normalised first: the prompt is a wrapped template literal, so a phrase that
+  // straddles a line break carries a newline and three spaces in the middle of it. Grepping the
+  // raw string makes this gate a test of where the source happens to wrap.
+  const rules = SESSION_SYSTEM.replace(/\s+/g, " ");
+  assert.match(rules, /stories are theirs/, "SESSION_SYSTEM rule 6");
+  assert.match(rules, /never write, complete, summarise/i, "the four verbs, named individually");
+  assert.match(rules, /you have not read them/i, "the titles are all the model is given");
+
+  // NOT in PREP_SYSTEM, deliberately: that prompt runs once at Send, before the candidate has
+  // opened the portal, when there is no story to be shown or written. Adding it there would be a
+  // rule about a thing that cannot happen, which is how a prompt starts collecting noise.
+  assert.doesNotMatch(PREP_SYSTEM, /stories are theirs/, "rule 6 belongs to the turn prompt alone");
+});
+
+test("mintNudge carries the candidate's story TITLES, and says they are all it has", async () => {
+  const client = fakeAnthropic(ok({ nudge: "Which of those had a number in it?" }));
+  await mintNudge(client, {
+    question: "Tell me about a difficult escalation.",
+    competencyLabel: "Lone working",
+    storyTitles: ["The escalation on nights", "The audit nobody wanted"],
+  });
+
+  const prompt = client.calls[0].messages[0].content;
+  assert.match(prompt, /The escalation on nights/, "the title travels so the nudge can point at it");
+  assert.match(prompt, /The audit nobody wanted/);
+  assert.match(prompt, /<story_titles>/);
+  assert.match(prompt, /titles and nothing else/, "and the prompt says what it has not been given");
+});
+
+test("with no stories the nudge prompt is byte-for-byte the one it was before #78", async () => {
+  // EMPTY MEANS ABSENT, not an empty block — otherwise every existing nudge's prompt changes shape
+  // under a feature nobody has enabled, and the greps above start asserting a different string.
+  const withDefault = fakeAnthropic(ok({ nudge: "n" }));
+  await mintNudge(withDefault, { question: "Q", competencyLabel: "L" });
+  const explicit = fakeAnthropic(ok({ nudge: "n" }));
+  await mintNudge(explicit, { question: "Q", competencyLabel: "L", storyTitles: [] });
+
+  const prompt = withDefault.calls[0].messages[0].content;
+  assert.doesNotMatch(prompt, /story_titles/, "no empty block is rendered");
+  assert.doesNotMatch(prompt, /stories/i, "and no mention of them at all");
+  assert.equal(explicit.calls[0].messages[0].content, prompt, "an empty list and an absent one are one prompt");
+  assert.match(prompt, /Give ONE nudge/, "the rest of the prompt is untouched");
+});
+
+test("nothing in drill.js can handle the longer half of a story", () => {
+  // The reachability form, and the reason it is a SOURCE grep rather than a behavioural one: this
+  // module builds every model prompt in the product, so the claim worth making is that the value
+  // has no way to arrive here — not that it happened not to on the turn a test drove.
+  // test/prep-storybank.test.js makes the same assertion from the other side, over turn.js.
+  const src = readFileSync(new URL("../src/prep/drill.js", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*\/\/[^\n]*$/gm, " ");
+  assert.match(src, /storyTitles/, "the scan is reading the real module, not an empty string");
+  assert.ok(!/\bsketch\b/i.test(src), "src/prep/drill.js can see a story's content; the seam has been widened");
 });

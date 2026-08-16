@@ -458,6 +458,7 @@ the dashboard.
 | `409 {"error":"not_submitted"}` from `PUT /api/compliance/:id` | the item is no longer `submitted`, so the compare-and-swap matched nothing. Most often it turned amber while it sat on the desk; sometimes the candidate re-submitted first | reload `/compliance`. **An item that has gone amber cannot be verified** and the candidate has to re-submit it — a known trade against the re-nudge loop, not a fault. Nothing was written |
 | `502 {"error":"bad_brief"}` from `/api/prep/prepare` | the model's answer was a valid JSON payload that broke a rule the schema cannot state — a competency with no questions, a non-core `axis`, or two competencies sharing an id | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis. This used to surface as `500 internal`, which sent you to the migration row below for a model output problem |
 | `500 {"error":"internal"}` from `/prep/api/debrief` **and** `/prep/api/session`, on a deployment where `/prep/api/brief` is healthy | migration `0011` has not been applied to this environment's D1, so `debrief` and `debrief_competency` do not exist | `npm run db:remote` (production) or `npm run db:preview`. Note that this takes the DRILL down with the debrief, not just the new page: `/prep/api/session` and `/prep/api/turn` both read the shaky ticks to rank competencies, so both name `debrief`. `/prep/api/brief` is the one that stays up — it reads `candidate_role` and a date, and nothing else — which is what tells this row apart from a broken `DB` binding, where the brief 503s too |
+| `500 {"error":"internal"}` from `/prep/api/stories` **while** `/prep/api/session`, `/prep/api/turn` and `/prep/api/debrief` all stay healthy | migration `0012` has not been applied to this environment's D1, so `story` and `story_competency` do not exist | `npm run db:remote` (production) or `npm run db:preview`. **Read this row against the one above it: the combination is the discriminator.** The `0011` row takes the DRILL down with it; this one does not. `/prep/api/turn` reads the candidate's story titles inside a `try` and degrades on failure, deliberately — a missing story title only costs a nudge the chance to point at one, whereas a missing shaky tick changes which competency is drilled. So the drill keeps working, nudges quietly stop offering story titles, and the loud signal is `/prep/api/stories` itself, which is the feature's own route. If the drill is ALSO down, this is the `0011` row and not this one |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
 
@@ -797,6 +798,52 @@ post-interview call into the client-knowledge note.
 `candidate_role`, so the 30-day post-interview purge and the candidate's own delete-now take a
 debrief with everything else in the one `DELETE FROM invite` they already issue. There is no
 second retention rule to remember and nothing extra to run.
+
+---
+
+### The storybank (#78) — a page, and one thing to apply first
+
+`/prep/stories` is where a candidate writes down their own real interview stories: a name, a
+sketch in their own words, and a tick against each part of the job it shows. It is offered from
+`/prep/brief` and from the practice shell.
+
+**It is deliberately NOT date-gated, unlike the debrief.** The link on both pages carries no
+`hidden` attribute and no route flag opens it, because a storybank is written *before* the
+interview — having your material ready is the preparation. If you find yourself adding an
+availability gate here by analogy with the debrief CTA one line above it, that is the mistake the
+comment on both lines exists to stop.
+
+⚠ **Migration `0012` must be applied to this environment's D1 before the deploy** (`npm run
+db:remote` for production, `npm run db:preview` for previews). It creates `story` and
+`story_competency`.
+
+**Skipping it does NOT take the drill down**, and that is the deliberate opposite of `0011`'s
+posture. `/prep/api/turn` reads the story titles inside a `try` and carries on without them: a
+title only decorates a nudge, and a nudge without one is an ordinary good nudge, whereas `0011`'s
+shaky ticks change which competency is *drilled* and are therefore left unwrapped. The loud signal
+for a missing `0012` is `/prep/api/stories` returning `500` while everything else is healthy — see
+the triage row in section 5, which is written so that combination is the discriminator.
+
+**Nothing new to configure. No secret, no Access application, no model call on the storybank's own
+routes.** `functions/prep/api/stories.js` and `functions/prep/api/story.js` import no SDK and no
+`drill.js`, and that absence is the feature rather than an accident: SPEC's first unloosenable rule
+is that the tool never writes the candidate's words, and this is the surface where breaking it
+would feel most like helpfulness. The editor shows the *shape* of a story — what was going on, what
+you did, what changed — as a static caption, and nothing on the page offers to fill the box.
+`scripts/setup-access.py` is unchanged: the page lives under `/prep` and inherits the two bypass
+applications that already serve the portal.
+
+**Sketches never leave the candidate's page, and that is a property of the queries.** The store has
+two reads: `storiesByRole`, which selects the sketch and is called by exactly one route (the
+editor's own GET), and `storyTitlesByRole`, which selects the title column and nothing else and is
+the one `/prep/api/turn` imports. So a nudge may ask *which of your stories fits here* while having
+been handed nothing but the names. `test/prep-storybank.test.js` asserts all of it — including that
+no file under `functions/` outside `functions/prep/` can reach story content at all, decision 2's
+wall in the same shape #77 uses.
+
+**Retention is unchanged, for the same reason as the debrief's.** Both tables hang off
+`candidate_role`, so the 30-day post-interview purge and delete-now take a candidate's stories in
+the one `DELETE FROM invite` they already issue. No second retention rule, nothing extra to run.
 
 ---
 

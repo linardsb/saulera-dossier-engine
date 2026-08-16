@@ -25,6 +25,7 @@ import {
   confidenceQuestion,
   drillState,
   SHAKY_DAMPEN,
+  storyGap,
 } from "../src/prep/targeting.js";
 
 const NOW = Date.parse("2026-07-30T12:00:00Z");
@@ -424,4 +425,47 @@ test("closePayload with a flat session improves nothing", () => {
     queued: [],
   });
   assert.equal(close.improved, null);
+});
+
+/* ── the story gap (#78) ───────────────────────────────────────────────────────────────── */
+//
+// Pure, so no `{ skip }`: this function takes ids and rows and never touches SQLite. The list it
+// walks is `rankCompetencies`' own output, which is what makes the flag agree with what the drill
+// would serve next rather than being a second opinion about the same competencies.
+
+test("with no stories at all the gap is the top-ranked competency", () => {
+  // The honest first prompt on an empty storybank, and the reason this is not special-cased: a
+  // candidate with nothing written down has no material for the thing most likely to come up,
+  // which is exactly what the flag says.
+  const ranked = rankCompetencies([A, B, C]);
+  assert.deepEqual(storyGap({ ranked, coveredIds: [] }), { id: ranked[0].id, label: ranked[0].label });
+});
+
+test("with every competency covered there is no gap", () => {
+  const ranked = rankCompetencies([A, B, C]);
+  assert.equal(storyGap({ ranked, coveredIds: ["a", "b", "c"] }), null);
+});
+
+test("a role with no competencies has no gap, and does not throw", () => {
+  // The edge the page has to survive: a handover that wrote no competencies still renders, and a
+  // title-only story still saves. `find` over an empty list is `undefined`, which must read as
+  // "nothing to flag" rather than as a missing label the page would render blank.
+  assert.equal(storyGap({ ranked: [], coveredIds: [] }), null);
+  assert.equal(storyGap({}), null, "and a caller that passes nothing gets the same answer");
+});
+
+test("the gap skips covered competencies and names the highest-ranked one left", () => {
+  const ranked = rankCompetencies([A, B, C]);
+  const gap = storyGap({ ranked, coveredIds: [ranked[0].id] });
+  assert.deepEqual(gap, { id: ranked[1].id, label: ranked[1].label });
+  assert.notEqual(gap.id, ranked[0].id, "the covered one is skipped rather than merely deprioritised");
+});
+
+test("the gap carries an id and a label and NOTHING else", () => {
+  // The assertion that stops a rank, a readiness or an importance leaking later. Every one of
+  // those is on the row this function reads, and returning the row itself would ship all three to
+  // a page whose whole copy rule is that no number appears on it (SPEC's ladder rule, twice).
+  const ranked = rankCompetencies([A, B]);
+  const gap = storyGap({ ranked, coveredIds: [] });
+  assert.deepEqual(Object.keys(gap).sort(), ["id", "label"]);
 });

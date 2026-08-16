@@ -34,6 +34,11 @@
          from the session shell whichever act is showing — a candidate drilling for a second stage
          should not have to finish a session to write down what the first one asked. -->
     <p class="brief-cta" id="session-debrief-cta" hidden><a class="btn btn-block" href="/prep/debrief">How did the interview go?</a></p>
+    <!-- NOT hidden, and there is no flag to unhide it (#78) — do not "fix" this by analogy with
+         the line above. A storybank is written BEFORE the interview, and this is the surface where
+         a candidate discovers they need one: a nudge asks which of their stories fits, and the
+         answer is sometimes "I have not written any yet". So session.js needed no change either. -->
+    <p class="brief-cta" id="session-stories-cta"><a class="btn btn-block" href="/prep/stories">Your stories</a></p>
   </div>
 
   <!-- Act 1: prime. Hidden until session.js knows whether this visit is a fresh start or a

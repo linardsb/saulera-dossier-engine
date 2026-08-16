@@ -38,6 +38,15 @@ export const SESSION_EFFORT = "low";
 // The two non-negotiables are worded VERBATIM as PREP_SYSTEM rules 1–2 word them —
 // test/prep-drill.test.js greps both prompts for the same phrases, which is what keeps the
 // two call sites from drifting apart.
+//
+// RULE 6 (#78) IS RULE 1 WEARING A DIFFERENT COAT, and SPEC Amendment 1 says so in those words:
+// "the tool may prompt for a story's SHAPE but never drafts its content; that is the first
+// unloosenable rule wearing a different coat". It is stated separately anyway because the
+// temptation is differently shaped — being handed a list of story TITLES makes writing the story
+// under one feel like completing a form rather than writing the candidate's answer for them. It is
+// NOT added to PREP_SYSTEM: that prompt runs once at Send, before the candidate has opened the
+// portal, when no story exists to be shown or written. test/prep-drill.test.js greps for it here
+// and deliberately does not extend the loop that checks both prompts.
 export const SESSION_SYSTEM = `You run one turn of a private interview practice drill. Your reader
 is a candidate preparing for a confirmed interview. Nothing they do here reaches an employer or a
 recruiter — that privacy is what lets you be blunt and specific instead of hedged.
@@ -65,7 +74,12 @@ Rules, in order of importance:
 
 5. A habit is only what they actually DID in this answer, from the fixed list you are given.
    When you are not sure, say none. Never invent a pattern from one data point, and never
-   record a claimed learning style.`;
+   record a claimed learning style.
+
+6. The candidate's stories are theirs. You may be shown the TITLES of stories they have
+   written down, so you can ask which one fits — you have not read them. Never write,
+   complete, summarise, improve or guess at a story's content, and never suggest a story
+   they have not told you they have.`;
 
 /* ── the schemas, and their assert twins ───────────────────────────────────────────────── */
 
@@ -257,12 +271,37 @@ export async function feedbackOnAttempt(client, { question, answerText, mode, co
   return sessionCall(client, { prompt, schema: FEEDBACK_SCHEMA, assert: assertFeedback });
 }
 
-/** The first help rung: a reframe or one probing sub-question, never content. */
-export async function mintNudge(client, { question, competencyLabel } = {}) {
+/**
+ * The first help rung: a reframe or one probing sub-question, never content.
+ *
+ * `storyTitles` (#78) is the candidate's own storybank, BY TITLE ONLY, so the nudge may ask which
+ * of their own stories fits rather than sending them hunting for a new one under pressure. The
+ * seam upstream is `storyTitlesByRole`, whose query has no sketch column in it — if you find
+ * yourself passing a story object here, stop: that is the leak, and this signature is shaped to
+ * make it awkward.
+ *
+ * EMPTY MEANS ABSENT, not an empty block. A candidate with no storybank gets the prompt this
+ * function produced before this ticket existed, byte for byte — so every existing nudge test keeps
+ * asserting the thing it was written to assert, and a feature nobody has enabled cannot shift the
+ * shape of the prompt under them.
+ *
+ * The list is bounded BY CONSTRUCTION rather than sliced here: functions/prep/api/stories.js
+ * refuses a thirteenth story, so twelve short titles is the ceiling and there is no truncation
+ * decision to get wrong. `engagementBlock` (src/prep/prompt.js:96-110) is the pattern — a
+ * conditional block rendered per call, never folded into the cached system prompt.
+ */
+export async function mintNudge(client, { question, competencyLabel, storyTitles = [] } = {}) {
+  const stories = storyTitles.length
+    ? `\nThe candidate has written down these stories of their own, by title only:\n` +
+      `<story_titles>\n${storyTitles.map((title) => `- ${title}`).join("\n")}\n</story_titles>\n` +
+      `You may point at one and ask whether it fits here. You have the titles and nothing else — ` +
+      `never describe, summarise or extend what is in one.\n`
+    : "";
   const prompt =
     `The competency being drilled: ${competencyLabel}\n\n` +
-    `The candidate is stuck on this interview question:\n<question>\n${question}\n</question>\n\n` +
-    `Give ONE nudge: a reframe or one probing sub-question that unsticks them. It must not ` +
+    `The candidate is stuck on this interview question:\n<question>\n${question}\n</question>\n` +
+    stories +
+    `\nGive ONE nudge: a reframe or one probing sub-question that unsticks them. It must not ` +
     `contain material their answer would — it points at where to look, it never supplies what ` +
     `they would say.`;
   return sessionCall(client, { prompt, schema: NUDGE_SCHEMA, assert: assertNudge });

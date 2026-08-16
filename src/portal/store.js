@@ -900,3 +900,208 @@ export async function insertAskedQuestion(db, { competencyId, text } = {}) {
     .run();
   return { id, inserted: (result.meta?.changes ?? 0) === 1 };
 }
+
+// ── the storybank (#78) ────────────────────────────────────────────────────────────────
+//
+// The candidate's own interview stories — a title and a sketch in their own words, each ticked
+// against the parts of the job it covers. SPEC Amendment 1: the tool may prompt for a story's
+// SHAPE and never drafts its content, which is the spec's first unloosenable rule wearing a
+// different coat. Nothing in this section writes a story; every value below arrives from a form.
+//
+// It never crosses the wall (DECISIONS.md decision 2), same as the debrief above, and
+// test/prep-storybank.test.js asserts that as a reachability claim rather than a promise.
+//
+// NOT THE `StoryBankCard` BLOCK. That is the MODEL-WRITTEN brief block in src/prep/schema.js — a
+// prompt, a skeleton and a competency mapping composed at Send. This is CANDIDATE-WRITTEN state
+// the tool must never write. Near-identical names, opposite things; migrations/0012_storybank.sql
+// argues it at length, and the two are never merged, renamed into each other, or fed from here.
+//
+// THE ASYMMETRY THAT IS THE FEATURE'S SAFETY: `title` is a thing the model may be shown so a nudge
+// can ask "which of your stories fits here?". `sketch` is not. That is enforced by having two
+// different functions with two different SELECT lists rather than one function and a rule about
+// who calls it — `storyTitlesByRole` has no sketch to leak.
+//
+// Same contract as everything above: `db` first, bound parameters only, no batch.
+
+/**
+ * Every story on this role, oldest first, WITH sketches — the editor's read and the only one.
+ *
+ * This is the one function in the codebase that selects `sketch`, and exactly one route calls it:
+ * functions/prep/api/stories.js's GET, which renders it on the candidate's own editor. A
+ * model-facing caller reaching for this function instead of `storyTitlesByRole` IS the leak AC2
+ * forbids, which is why the two exist separately and why the test file asserts which file imports
+ * which.
+ *
+ * `ORDER BY created_at, rowid`, and the tiebreak is not decoration — it is a bug this file had
+ * until a flaky test found it. `created_at` defaults to `datetime('now')`, which is SECOND
+ * granularity, and two stories saved in the same second therefore tie. The obvious tiebreak, `id`,
+ * is a uuid (createStory mints it), so ties would resolve in an order that is arbitrary AND
+ * stable: a candidate who adds two stories quickly would find the second one permanently above the
+ * first, with no way to move it. `rowid` is SQLite's own insertion counter, so a tie falls back to
+ * the order the rows were actually written — which is the order the candidate wrote them in, and
+ * the only honest answer for a list they own. (VACUUM may renumber rowids; it copies in rowid
+ * order, so the relative order this depends on survives.)
+ */
+export async function storiesByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      `SELECT id, title, sketch, created_at FROM story
+        WHERE candidate_role_id = ? ORDER BY created_at, rowid`,
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return results ?? [];
+}
+
+/**
+ * Every (story_id, competency_id) pair on this role — the editor's ticks and targeting's cover set.
+ *
+ * Scoped through `story.candidate_role_id`, so a role with no stories answers `[]` rather than
+ * every tick in the database — `shakyCompetencyIds`'s reasoning, one table over.
+ */
+export async function storyCompetenciesByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      `SELECT sc.story_id, sc.competency_id FROM story_competency sc
+         JOIN story s ON s.id = sc.story_id
+        WHERE s.candidate_role_id = ?
+        ORDER BY sc.story_id, sc.competency_id`,
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return results ?? [];
+}
+
+/**
+ * The TITLES only, as a plain array of strings. The one function a model-facing caller may import.
+ *
+ * WHY THIS EXISTS AS A SEPARATE FUNCTION, in the terms that matter: `sketch` is the candidate's own
+ * words about their own life and MUST NEVER REACH A MODEL PROMPT OR A LOG LINE. A single
+ * "storiesByRole" used everywhere would make that a rule about callers — and a rule about callers
+ * is one refactor from being untrue. This query has no sketch in it, so the nudge path cannot leak
+ * one however it is rewritten. test/prep-storybank.test.js asserts both halves: that this SQL
+ * selects `title` and never mentions `sketch`, and that functions/prep/api/turn.js imports this
+ * function and not the other.
+ *
+ * Same `created_at, rowid` order as `storiesByRole` — see its JSDoc for why the tiebreak is not
+ * `id` — so the titles a nudge is shown are in the order the candidate sees on their own page. A
+ * nudge that says "your second story" must mean the one they would count second.
+ */
+export async function storyTitlesByRole(db, roleId) {
+  const { results } = await db
+    .prepare(
+      "SELECT title FROM story WHERE candidate_role_id = ? ORDER BY created_at, rowid",
+    )
+    .bind(String(roleId ?? ""))
+    .all();
+  return (results ?? []).map((row) => row.title);
+}
+
+/**
+ * A new story. THE ID IS MINTED HERE and never taken from a caller.
+ *
+ * WHY CREATE AND UPDATE ARE TWO FUNCTIONS AND NOT ONE UPSERT — the most important decision in this
+ * section, and the one place the storybank deliberately diverges from `upsertDebrief` above.
+ *
+ * A `saveStory` shaped as `INSERT … ON CONFLICT (id) DO UPDATE` would take the id FROM THE REQUEST
+ * BODY as its conflict target. A body id belonging to another invite would then either overwrite
+ * that candidate's story or insert a row under this role carrying a foreign id, and the only thing
+ * standing between either and a real caller would be a membership check the route runs in a
+ * SEPARATE STATEMENT on a database with no transaction. `upsertDebrief` has no such exposure
+ * because its conflict target is `candidate_role_id`, which comes from the SESSION and not from
+ * the body — the difference is the source of the key, not the shape of the SQL.
+ *
+ * Splitting the two puts the ownership check INSIDE THE WHERE CLAUSE (see updateStory and
+ * deleteStory), where no ordering, no race and no future refactor of the route can bypass it. A
+ * later reader who "simplifies" these back into one `ON CONFLICT (id)` statement re-opens a
+ * cross-invite write.
+ *
+ * `requireFields` covers `roleId` and `title` only: `sketch` is legitimately `''` — a title-only
+ * story is a real half-written state and the page is resumable.
+ */
+export async function createStory(db, { roleId, title, sketch } = {}) {
+  const id = crypto.randomUUID();
+  requireFields({ roleId, title });
+  await db
+    .prepare("INSERT INTO story (id, candidate_role_id, title, sketch) VALUES (?, ?, ?, ?)")
+    .bind(id, roleId, String(title), String(sketch ?? ""))
+    .run();
+  return { id };
+}
+
+/**
+ * Edit one story, ROLE-SCOPED IN THE SQL so a story id from another invite updates nothing.
+ *
+ * The `AND candidate_role_id = ?` is the ownership check itself, not a belt beside one — see
+ * createStory's argument for why it lives here and not in a preceding SELECT. `{updated: false}`
+ * is how a foreign or deleted id comes back, and the route answers `404 not_found` on it having
+ * written nothing.
+ *
+ * `created_at` is deliberately untouched, so editing a story does not move it in the candidate's
+ * own list.
+ */
+export async function updateStory(db, { roleId, storyId, title, sketch } = {}) {
+  requireFields({ roleId, storyId, title });
+  const result = await db
+    .prepare("UPDATE story SET title = ?, sketch = ? WHERE id = ? AND candidate_role_id = ?")
+    .bind(String(title), String(sketch ?? ""), storyId, roleId)
+    .run();
+  return { updated: (result.meta?.changes ?? 0) === 1 };
+}
+
+/**
+ * Replace one story's whole tick set — `setShakyCompetencies`'s idiom, story-scoped.
+ *
+ * DELETE then INSERT: the newest save is the truth, and a set replaced wholesale has no half-state
+ * to reconcile, so unticking every box is a real erasure — which is what a candidate means by it.
+ *
+ * `ON CONFLICT DO NOTHING` because there is NO TRANSACTION here and two saves can interleave (two
+ * tabs, or a client retry on a slow response; the page's in-flight guard is per page). Without it,
+ * `r1.DELETE → r2.DELETE → r1.INSERT c → r2.INSERT c` raises a UNIQUE violation on the composite
+ * key, which is not a StoreError, so the route answers `500 internal` — the exact signal
+ * DEPLOY.md's triage table reads as "migration 0012 was never applied".
+ *
+ * WHAT THIS DOES NOT CLOSE, stated rather than implied: a failure between the DELETE and the
+ * INSERTs leaves this story's ticks EMPTY, not stale. The set is small, the page re-fetches it,
+ * and re-ticking is one tap per box. THE SKETCHES ARE NOT EXPOSED TO THIS AT ALL, and that is the
+ * whole reason the ticks and the story are written by two different statements rather than one
+ * whole-set replace: paragraphs of prose cannot be re-typed, so nothing here ever deletes them.
+ *
+ * Callers pass ids ALREADY checked against the role, and pass `storyId` ALREADY confirmed to
+ * belong to it — this function does not re-check either, because the route has the competency list
+ * in hand for its own 404 and `updateStory`'s WHERE clause has already answered the second.
+ */
+export async function setStoryCompetencies(db, { storyId, competencyIds } = {}) {
+  requireFields({ storyId });
+  await db.prepare("DELETE FROM story_competency WHERE story_id = ?").bind(storyId).run();
+  for (const competencyId of competencyIds ?? []) {
+    await db
+      .prepare(
+        `INSERT INTO story_competency (story_id, competency_id) VALUES (?, ?)
+         ON CONFLICT (story_id, competency_id) DO NOTHING`,
+      )
+      .bind(storyId, String(competencyId))
+      .run();
+  }
+  return { ok: true };
+}
+
+/**
+ * Delete one story, scoped to the role so a story id from another invite deletes nothing.
+ *
+ * Same argument as `updateStory`: the `AND candidate_role_id = ?` IS the ownership check, in the
+ * one place a race cannot get between it and the write. `{deleted: false}` on a miss, and the
+ * route answers 404.
+ *
+ * `story_competency` goes with it BY CASCADE (0012), never a second DELETE — a second statement
+ * would be a second place for the erasure to be half-done, and the schema already promises this
+ * one cannot be.
+ */
+export async function deleteStory(db, { roleId, storyId } = {}) {
+  requireFields({ roleId, storyId });
+  const result = await db
+    .prepare("DELETE FROM story WHERE id = ? AND candidate_role_id = ?")
+    .bind(storyId, roleId)
+    .run();
+  return { deleted: (result.meta?.changes ?? 0) === 1 };
+}

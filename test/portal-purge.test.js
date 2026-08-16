@@ -44,6 +44,8 @@ const PORTAL_TABLES = [
   "otp",
   "debrief",
   "debrief_competency",
+  "story",
+  "story_competency",
 ];
 
 // Which invite a row belongs to, by the reference each table declares. Fixture ids embed the
@@ -59,6 +61,13 @@ const SCOPE_KEY = {
   // #77. `deb-A` and `role-A` both split to 'A', which is what keeps inviteOf below one function.
   debrief: (r) => r.candidate_role_id,
   debrief_competency: (r) => r.debrief_id,
+  // #78, and the same rule with one trap worth naming: `inviteOf` reads the letter out of
+  // `.split("-")[1]`, so the fixture story ids MUST be `story-A-1` — letter in the second
+  // position. A uuid (which is what production mints) or a `story-1-A` would yield `undefined`
+  // for every row, and the deepEqual below would then compare an empty survivor list against an
+  // empty one and pass while proving nothing about the cascade.
+  story: (r) => r.candidate_role_id,
+  story_competency: (r) => r.story_id,
 };
 const inviteOf = (row, table) => SCOPE_KEY[table](row).split("-")[1];
 
@@ -88,8 +97,9 @@ function openMigrated() {
 /**
  * One invite with its entire scope: the handover payload, two competencies, a core question
  * with a variant_of child (the self-reference must cascade with its parent), an attempt in
- * each of the three modes, a habit, an otp, the private debrief (#77) and its two shaky ticks.
- * Per invite that is 1+1+2+2+3+1+1+1+2 rows.
+ * each of the three modes, a habit, an otp, the private debrief (#77) and its two shaky ticks,
+ * and the storybank (#78) — two stories and two of their ticks.
+ * Per invite that is 1+1+2+2+3+1+1+1+2+2+2 rows.
  */
 async function seedInvite(db, letter, interviewOffset) {
   const run = (sql, ...args) => db.prepare(sql).run(...args);
@@ -128,13 +138,35 @@ async function seedInvite(db, letter, interviewOffset) {
   for (const n of [1, 2]) {
     run("INSERT INTO debrief_competency (debrief_id, competency_id) VALUES (?, ?)", `deb-${letter}`, `comp-${letter}-${n}`);
   }
+  // #78. Two stories, and the second one carries NO ticks on purpose. An unmapped story is a real
+  // state the candidate leaves behind — a title typed and not yet linked to any part of the job,
+  // or one whose only competency a re-handover removed — and it holds the same free text as a
+  // mapped one. A fixture where every story had a tick would prove the cascade only for rows the
+  // join table also reaches, and would say nothing about the one row shape most likely to be
+  // orphaned.
+  run(
+    "INSERT INTO story (id, candidate_role_id, title, sketch) VALUES (?, ?, ?, ?)",
+    `story-${letter}-1`, role, "The escalation on nights",
+    "A patient's family refused the care plan at 2am and I had nobody to hand it to.",
+  );
+  run(
+    "INSERT INTO story (id, candidate_role_id, title, sketch) VALUES (?, ?, ?, ?)",
+    `story-${letter}-2`, role, "The audit nobody wanted", "",
+  );
+  for (const n of [1, 2]) {
+    run("INSERT INTO story_competency (story_id, competency_id) VALUES (?, ?)", `story-${letter}-1`, `comp-${letter}-${n}`);
+  }
 }
 
 // `debrief_competency` has no `id` column — the pair IS the primary key (#77) — and SQLite would
 // answer `ORDER BY id` there with the implicit rowid, which is not stable across a re-insert and
 // is not the fact the row records. One order key per table, decided here once rather than in each
 // assertion, so the row-for-row deepEqual below compares like with like.
-const ORDER_BY = { debrief_competency: "debrief_id, competency_id" };
+// `story_competency` (#78) is the same shape and takes the same treatment for the same reason.
+const ORDER_BY = {
+  debrief_competency: "debrief_id, competency_id",
+  story_competency: "story_id, competency_id",
+};
 const rowsOf = (db, table) =>
   db.prepare(`SELECT * FROM ${table} ORDER BY ${ORDER_BY[table] ?? "id"}`).all();
 const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
@@ -154,7 +186,7 @@ test("0002 applies clean after 0001 and the ALTER backfills kind on existing row
   assert.deepEqual(names, [
     "agency", "assignment", "attempt", "candidate", "candidate_otp", "candidate_role", "clients",
     "competency", "compliance_item", "debrief", "debrief_competency", "events", "habit", "invite",
-    "note_visibility", "otp", "question",
+    "note_visibility", "otp", "question", "story", "story_competency",
   ]);
 
   // The legacy row was inserted before the ALTER ran; the DDL default is what makes
