@@ -168,7 +168,15 @@ export function nextQuestion({ questions, attempts }) {
     .sort((a, b) => axisRank[a.axis] - axisRank[b.axis] || byDifficultyThenId(a, b))[0];
   if (variant) return { question: variant };
 
-  const stored = questions.filter((q) => q.axis != null);
+  /* MINTED variants only — `variant_of` is what makes a row one of ours. The cap exists to bound
+     what we SPEND on a competency, and a question the candidate was really asked cost nothing:
+     `insertAskedQuestion` (store.js:879) writes `axis = 'lateral'` with `variant_of` NULL so the
+     row is served at step 2, and counting it here would let nine questions from one debrief stop
+     that competency ever minting again. The competency they tick shaky is the one they list most
+     questions under and the one SHAKY_DAMPEN puts first — so the un-fixed version starves exactly
+     the competency the debrief exists to work on. Every minted row has a non-null `variant_of`
+     (`insertVariant` requires it, store.js:638), so this excludes nothing it should count. */
+  const stored = questions.filter((q) => q.axis != null && q.variant_of != null);
   if (stored.length >= MAX_VARIANTS_PER_COMPETENCY) {
     return { question: leastRecentlyAttempted(questions, attempts) };
   }

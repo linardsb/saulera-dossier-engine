@@ -33,9 +33,23 @@
  * the server stored, so a local edit can never disagree with the row. The one thing kept locally
  * across a FAILED save is the text in the two boxes — losing what someone typed because the
  * network dropped is the failure this page can least afford.
+ *
+ * The re-fetch has ONE exception, and it is the same failure on the path where the save WORKED:
+ * anything edited between the POST leaving and the answer landing is not in the row that comes
+ * back, so rendering the row over it would erase words the candidate watched themselves type
+ * while the state line said "Saved". `sentSnapshot` is what makes that difference visible.
  */
 
 const SOURCE = "/prep/api/debrief";
+
+/* The route's caps (functions/prep/api/debrief.js:59,63,67), mirrored so an over-long note is
+   refused HERE with copy that names the limit, instead of bouncing off the route's 400 wearing
+   retry advice that can never succeed — session.js:32-33's rule, and the same reason. It matters
+   more on this page than on that one: nothing is written to browser storage here, so a candidate
+   stuck on an unsatisfiable retry has only the reload, and the reload costs them everything. */
+const MAX_ASKED = 20;
+const LINE_MAX = 500;
+const FIX_MAX = 2_000;
 
 /** Every visible string this file can produce, in one object — brief.js:25's idiom. Written for a
  *  candidate who has just walked out of an interview: no scores, no ranks, nothing that reads as
@@ -77,6 +91,17 @@ export const COPY = {
   saving: "Saving…",
   saved: "Saved. You can come back and add to this whenever you like.",
   saveFailed: "Could not save that just now. Try again in a moment. Your words are still below.",
+
+  /* The three refusals. Each names the box and the actual limit, because "try again" is the one
+     thing that cannot help here — and each says the words are safe, because on this page that is
+     the question the candidate is really asking. */
+  tooManyAsked:
+    `There is room for ${MAX_ASKED} questions here, and there are more than that below. Take out ` +
+    "the ones you need least, then save again — nothing goes anywhere until you do.",
+  lineTooLong:
+    `One of those lines is very long. Keep each question under ${LINE_MAX} characters — it is ` +
+    "meant to be roughly what they said, not word for word.",
+  fixTooLong: `That is longer than this box can save. Keep it under ${FIX_MAX} characters.`,
 
   privateNote: "This page is yours. Your recruiter never sees any of it.",
 };
@@ -167,6 +192,30 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
       .filter(Boolean);
   }
 
+  /* What the form held when the last POST went out, or null when no save is in flight. The
+     candidate is the ONLY thing that edits this form, so anything that differs from this when the
+     re-fetch lands was typed during the round trip and is not in the row the server handed back. */
+  let sentSnapshot = null;
+
+  /** The four candidate-owned values as one comparable string — the two boxes, the ticks and the
+   *  picks. Everything else on the page is the server's to decide. */
+  function formSnapshot() {
+    return JSON.stringify([
+      String(askedBox.value ?? ""),
+      String(fixBox.value ?? ""),
+      [...state.shaky].sort(),
+      [...state.placements].sort(),
+    ]);
+  }
+
+  /** Refuse a save the route would answer 400, in the state line, with the box at fault focused.
+   *  `focus` is guarded because the suite's document double does not move focus (session.js:509). */
+  function refuse(message, box) {
+    showState(message, true);
+    if (typeof box.focus === "function") box.focus();
+    return Promise.resolve();
+  }
+
   /**
    * One labelled picker per line, rebuilt from the box.
    *
@@ -247,16 +296,25 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
       id: String(c.id),
       label: String(c.label ?? ""),
     }));
-    state.shaky = new Set((payload.shaky ?? []).map(String));
+    /* A save is in flight and the form no longer matches what it carried, so every difference was
+       typed DURING the round trip. The row that just came back cannot contain it. Writing that row
+       over the four controls here is the same failure as a wiped box on a failed save — a
+       candidate on a phone taps Save, remembers question eight, types it while the request is out,
+       and watches it vanish under the word "Saved". The re-fetch still decides everything else. */
+    const keepLive = sentSnapshot !== null && formSnapshot() !== sentSnapshot;
 
-    const asked = Array.isArray(payload.asked) ? payload.asked : [];
-    state.placements = new Map();
-    for (const entry of asked) {
-      const text = String(entry?.text ?? "").trim();
-      if (text && entry?.competency_id) state.placements.set(text, String(entry.competency_id));
+    if (!keepLive) {
+      state.shaky = new Set((payload.shaky ?? []).map(String));
+
+      const asked = Array.isArray(payload.asked) ? payload.asked : [];
+      state.placements = new Map();
+      for (const entry of asked) {
+        const text = String(entry?.text ?? "").trim();
+        if (text && entry?.competency_id) state.placements.set(text, String(entry.competency_id));
+      }
+      askedBox.value = asked.map((entry) => String(entry?.text ?? "").trim()).filter(Boolean).join("\n");
+      fixBox.value = String(payload.fix_text ?? "");
     }
-    askedBox.value = asked.map((entry) => String(entry?.text ?? "").trim()).filter(Boolean).join("\n");
-    fixBox.value = String(payload.fix_text ?? "");
 
     renderChrome();
     renderLines();
@@ -341,14 +399,25 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
    */
   function save() {
     if (state.inFlight) return Promise.resolve();
+
+    /* The caps first, because the route's answer to any of them is a 400 and everything below
+       reads a non-401 failure as transient — an unguarded save would tell someone to "try again
+       in a moment" about a request that can never succeed, on a page with nothing in browser
+       storage to reload from. */
+    const lines = linesOf();
+    if (lines.length > MAX_ASKED) return refuse(COPY.tooManyAsked, askedBox);
+    if (lines.some((line) => line.length > LINE_MAX)) return refuse(COPY.lineTooLong, askedBox);
+    if (String(fixBox.value ?? "").length > FIX_MAX) return refuse(COPY.fixTooLong, fixBox);
+
     busy(true);
     showState(COPY.saving, false);
 
     const body = {
-      asked: linesOf().map((text) => ({ text, competency_id: state.placements.get(text) ?? null })),
+      asked: lines.map((text) => ({ text, competency_id: state.placements.get(text) ?? null })),
       shaky: [...state.shaky],
       fix_text: String(fixBox.value ?? ""),
     };
+    sentSnapshot = formSnapshot();
 
     return fetchFn(SOURCE, {
       method: "POST",
@@ -357,11 +426,15 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
     })
       .then((res) => {
         if (res.status === 401) {
+          // Released BEFORE leaving: if `replace` is slow, blocked or ignored, the page must not
+          // be left dead on "Saving…" with the button refusing every click.
+          busy(false);
           bounce();
           return;
         }
         if (!res.ok) throw new Error(`debrief: ${res.status}`);
-        // Re-read rather than patch: what the page shows is what the server stored.
+        // Re-read rather than patch: what the page shows is what the server stored — except for
+        // anything edited while this request was out, which `render` keeps.
         return load(COPY.saved).then(() => busy(false));
       })
       .catch((err) => {
@@ -370,6 +443,9 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
         // The boxes are deliberately untouched. A failed save that also cleared what someone
         // typed on the way out of an interview is the one failure this page cannot afford.
         showState(COPY.saveFailed, true);
+      })
+      .finally(() => {
+        sentSnapshot = null;
       });
   }
 

@@ -808,6 +808,19 @@ export async function upsertDebrief(db, { roleId, asked, fixText } = {}) {
  * wholesale has no half-state to reconcile. Untick-then-save is therefore a real erasure, which is
  * what a candidate means by unticking a box.
  *
+ * `ON CONFLICT DO NOTHING` because there is NO TRANSACTION here and two saves can interleave —
+ * two tabs, or a client retry on a slow response; the page's in-flight guard is per page. Without
+ * it, `r1.DELETE → r2.DELETE → r1.INSERT c → r2.INSERT c` raises a UNIQUE violation on the
+ * composite key, which is not a StoreError, so the route answers `500 internal` — the exact
+ * signal DEPLOY.md's triage table reads as "migration 0011 was never applied". A candidate with
+ * two tabs open would send an operator to re-run migrations.
+ *
+ * WHAT THIS DOES NOT CLOSE, stated rather than implied: a failure between the DELETE and the
+ * INSERTs leaves the ticks EMPTY, not stale — previously-saved ones are gone. The set is small,
+ * the page re-fetches it, and re-ticking is one tap per box; the alternative (INSERT the new set
+ * first, then delete the complement) needs its own branch for the untick-everything case, because
+ * `competency_id NOT IN ()` is a syntax error on the empty set. Not worth it for a set this size.
+ *
  * Callers pass ids ALREADY checked against the role. This function does not re-check: the route
  * has the competency list in hand for its own 404, and a second check here would be a second
  * policy for one fact.
@@ -817,7 +830,10 @@ export async function setShakyCompetencies(db, { debriefId, competencyIds } = {}
   await db.prepare("DELETE FROM debrief_competency WHERE debrief_id = ?").bind(debriefId).run();
   for (const competencyId of competencyIds ?? []) {
     await db
-      .prepare("INSERT INTO debrief_competency (debrief_id, competency_id) VALUES (?, ?)")
+      .prepare(
+        `INSERT INTO debrief_competency (debrief_id, competency_id) VALUES (?, ?)
+         ON CONFLICT (debrief_id, competency_id) DO NOTHING`,
+      )
       .bind(debriefId, String(competencyId))
       .run();
   }

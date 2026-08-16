@@ -199,7 +199,13 @@ export async function onRequestPost(context) {
     // No transaction exists, so the order IS the recovery story (turn.js's header): a crash after
     // the first leaves their words saved and their ticks missing, which the next save fixes; a
     // crash after the second leaves a question row uncreated, which the next save fixes FOR FREE
-    // because the id is derived from the text. Nothing is left wrong, only incomplete.
+    // because the id is derived from the text.
+    //
+    // The words are never left wrong, only unfinished. The TICKS have one narrower exposure and
+    // it is stated rather than glossed: `setShakyCompetencies` deletes the set before it writes
+    // the new one, so a failure between the two clears ticks that were already saved. They come
+    // back with the next save of a page the candidate is looking at, and the store's header
+    // argues why closing that window is not worth its own branch.
     const { id: debriefId } = await upsertDebrief(env.DB, { roleId: role.role_id, asked, fixText });
     await setShakyCompetencies(env.DB, { debriefId, competencyIds: [...new Set(shaky)] });
 

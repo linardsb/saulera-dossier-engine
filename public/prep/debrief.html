@@ -66,7 +66,10 @@
 
     <div class="debrief-field">
       <label class="prep-label" for="fix" id="fix-label"></label>
-      <textarea class="textarea" id="fix" rows="3"></textarea>
+      <!-- maxlength mirrors FIX_MAX in debrief.js, which mirrors the route's own cap. The browser
+           stops the paste; the JS guard is still what answers for the other two caps, which are a
+           line count and a per-line length and have no attribute form. -->
+      <textarea class="textarea" id="fix" rows="3" maxlength="2000"></textarea>
       <p class="prep-caption" id="fix-caption"></p>
     </div>
 

@@ -163,6 +163,33 @@ test("the debrief's state line is still announced, and both sections start hidde
   }
 });
 
+test("both entry links start hidden and are unhidden only by the route's own flag", () => {
+  // #81 M3, the brief page's half. `public/prep/brief.js` reads `document` at module scope, so
+  // unlike session.js and debrief.js there is no controller a test can drive with a double —
+  // which is exactly why the one line that opens this link had nothing gating it. A source
+  // assertion is what this page can honestly carry.
+  //
+  // Both halves matter and they fail differently: drop the `hidden` attribute and every candidate
+  // is offered a debrief before their interview, on a page that will only refuse the form; drop
+  // the unhide and the feature has no entry point at all from either page.
+  for (const [file, html, id] of [
+    ["brief.html", BRIEF_HTML, "debrief-cta"],
+    ["session.html", SESSION_HTML, "session-debrief-cta"],
+  ]) {
+    assert.match(
+      tagWithId(html, "p", id),
+      /\shidden[\s>]/,
+      `${file}'s #${id} no longer starts hidden — the debrief link would be offered before the interview`,
+    );
+  }
+  assert.match(
+    BRIEF_JS,
+    /if\s*\(\s*payload\.debrief_available\s*===\s*true\s*\)\s*debriefCta\.hidden\s*=\s*false/,
+    "brief.js no longer unhides the debrief link on the route's flag — either the link is gone " +
+      "or it is now opened on something other than /prep/api/brief's own `debrief_available`",
+  );
+});
+
 test("the answer box keeps the class that stops iOS zooming the page", () => {
   const answer = tagWithId(SESSION_HTML, "textarea", "answer");
   assert.match(

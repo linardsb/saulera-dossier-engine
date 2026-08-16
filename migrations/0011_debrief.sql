@@ -47,8 +47,11 @@ CREATE TABLE debrief (
 );
 
 -- The ticks. Composite primary key rather than a surrogate id: the pair IS the fact, and a
--- duplicate tick is not a second fact. The route replaces the whole set per save (the store's
--- DELETE-then-INSERT, issueOtp's idiom), so there is no partial-update ordering to get wrong.
+-- duplicate tick is not a second fact — which is also what lets the store's INSERT carry
+-- ON CONFLICT DO NOTHING, so two saves interleaving cannot raise a constraint error. The route
+-- replaces the whole set per save (the store's DELETE-then-INSERT, issueOtp's idiom); with no
+-- transaction, a failure between the two leaves the set EMPTY rather than stale, and the next
+-- save restores it from the page. See store.js's setShakyCompetencies for why that trade stands.
 -- Both parents cascade: the debrief dies with the role, and a competency that somehow goes takes
 -- its ticks rather than leaving a dangling one that would dampen nothing.
 CREATE TABLE debrief_competency (

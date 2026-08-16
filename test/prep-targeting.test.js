@@ -308,6 +308,31 @@ test("at the mint cap the least-recently-attempted question is re-served, no {mi
   assert.equal(served.question.id, "a#0", "oldest attempt is re-served");
 });
 
+test("questions the candidate was really asked do not spend the mint budget", () => {
+  // #81 M1. `insertAskedQuestion` writes `axis = 'lateral'` so a real question is SERVED like a
+  // stored variant — which is the point. Counting it toward the cap is a different claim, and a
+  // wrong one: the cap bounds what we spend, and these cost nothing. Nine of them under one
+  // competency would otherwise stop it ever minting again, permanently, and the competency a
+  // candidate lists most questions under is the one they ticked shaky.
+  const asked = Array.from({ length: MAX_VARIANTS_PER_COMPETENCY + 1 }, (_, i) => ({
+    id: `a#asked-${i}`,
+    competency_id: "a",
+    text: `A question they really asked, number ${i}.`,
+    axis: "lateral",
+    difficulty: null,
+    variant_of: null, // what tells a real question from one of ours
+  }));
+  const questions = [core("a#0", 1), ...asked];
+  const attempts = [
+    attempt({ question_id: "a#0", rating: 4, created_at: stamp(-100) }),
+    ...asked.map((q, i) =>
+      attempt({ question_id: q.id, axis: "lateral", rating: 3, created_at: stamp(-90 + i) }),
+    ),
+  ];
+
+  assert.ok(nextQuestion({ questions, attempts }).mint, "the competency can still mint");
+});
+
 test("leastRecentlyAttempted treats unattempted as oldest", () => {
   const questions = [core("a#0", 2), core("a#1", 1)];
   const attempts = [attempt({ question_id: "a#1", created_at: stamp(-5) })];

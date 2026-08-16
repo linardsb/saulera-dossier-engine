@@ -43,6 +43,7 @@ import {
 } from "../src/portal/store.js";
 import { onRequestGet as debriefGet, onRequestPost as debriefPost } from "../functions/prep/api/debrief.js";
 import { onRequestGet as sessionRoute } from "../functions/prep/api/session.js";
+import { onRequestGet as briefRoute } from "../functions/prep/api/brief.js";
 import { onRequestGet as eventsGet } from "../functions/api/events.js";
 import { drillState, MAX_VARIANTS_PER_COMPETENCY } from "../src/prep/targeting.js";
 import { mintToken, SESSION_COOKIE } from "../src/prep/tokens.js";
@@ -50,7 +51,13 @@ import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Two competencies and one core question each — enough to rank, place and drill. */
+/** Two competencies and one core question each — enough to rank, place and drill.
+ *
+ *  `axis: "core"` is what assertBrief demands of a stored payload, and this fixture now goes
+ *  through /prep/api/brief as well, which is the only route that asserts it. persistHandover
+ *  writes NULL into the column regardless (store.js:245-256's note on the CHECK), so the field
+ *  changes nothing about what lands in `question` — it makes the fixture a real brief rather
+ *  than one that happened never to be read as one. */
 const PAYLOAD = {
   role_title: "Community Nurse",
   blocks: [],
@@ -59,8 +66,8 @@ const PAYLOAD = {
     { id: "stakeholders", label: "Working with stakeholders", importance: 4, source_quote: "q" },
   ],
   questions: [
-    { competency_id: "lone-working", text: "A core lone-working question.", difficulty: "standard" },
-    { competency_id: "stakeholders", text: "A core stakeholder question.", difficulty: "standard" },
+    { competency_id: "lone-working", text: "A core lone-working question.", axis: "core", difficulty: "standard" },
+    { competency_id: "stakeholders", text: "A core stakeholder question.", axis: "core", difficulty: "standard" },
   ],
 };
 
@@ -164,6 +171,25 @@ test("setShakyCompetencies replaces the whole set, and the scope is the role", {
   assert.deepEqual(await shakyCompetencyIds(d1, mine.roleId), [mine.ids[1]]);
 
   assert.deepEqual(await shakyCompetencyIds(d1, theirs.roleId), [], "a role with no debrief has no ticks");
+});
+
+test("a tick written twice is a no-op, not a 500 an operator reads as a missing migration", { skip }, async () => {
+  // #81 M2. With no transaction, two saves interleave as DELETE, DELETE, INSERT c, INSERT c — two
+  // tabs, or a client retry, since the page's in-flight guard is per page. A UNIQUE violation on
+  // the composite key is not a StoreError, so the route would answer `500 internal`, which is the
+  // one signal DEPLOY.md's triage table reads as "migration 0011 was never applied". Passing the
+  // pair twice is that second INSERT exactly, and the real engine is what makes it mean anything.
+  const d1 = d1Shape(openMigrated());
+  const { roleId, ids } = await seed(d1);
+  const { id } = await upsertDebrief(d1, { roleId, asked: [], fixText: "" });
+
+  await setShakyCompetencies(d1, { debriefId: id, competencyIds: [ids[0], ids[0], ids[1]] });
+
+  assert.deepEqual(
+    await shakyCompetencyIds(d1, roleId),
+    [...ids].sort(),
+    "and the duplicate leaves one tick, not two rows and not an error",
+  );
 });
 
 test("insertAskedQuestion is idempotent by construction, and keys on (competency, text)", { skip }, async () => {
@@ -488,13 +514,46 @@ test("a tick reorders the drill and reaches no field of the session response", {
   assert.ok(!Object.keys(after).includes("shaky"), "nor does it appear at the top level");
 });
 
-/* ── the accepted interaction with the mint cap ────────────────────────────────────────── */
+/* ── the entry point ───────────────────────────────────────────────────────────────────── */
 
-test("eight asked questions reach the mint cap, and the competency re-serves instead", { skip }, async () => {
-  // Documented, not a bug (plan Assumption 5): asked questions are stored variants, so they count
-  // toward decision 6's cost envelope. A competency holding eight questions a real interviewer
-  // wrote has no need of minted ones — but a future reader finding `{mint}` gone would file it,
-  // so it is asserted here with the reason attached.
+test("both routes carry debrief_available, and it turns over on the interview day", { skip }, async () => {
+  // #81 M3. The flag is the WHOLE entry point — no link is offered without it, from either page.
+  // Before this, one assertion in the suite covered the chain, so the `false` branch and the
+  // brief route's half could both be deleted and every test would stay green while the feature
+  // had no way in. Both routes, both directions, one test.
+  const d1 = d1Shape(openMigrated());
+  const early = await seed(d1, { inviteId: "inv-early", interviewAt: at(3) });
+  const now = await seed(d1, { inviteId: "inv-now", interviewAt: at(0) });
+
+  const ask = (route, path, token) =>
+    route({
+      request: { url: `https://engine.pages.dev/prep/api/${path}`, headers: headers(token) },
+      env: { DB: d1 },
+    }).then((res) => res.json());
+
+  for (const [path, route] of [["brief", briefRoute], ["session", sessionRoute]]) {
+    assert.equal(
+      (await ask(route, path, early.token)).debrief_available,
+      false,
+      `/prep/api/${path}: no link before the interview — the page would only refuse the form`,
+    );
+    assert.equal(
+      (await ask(route, path, now.token)).debrief_available,
+      true,
+      `/prep/api/${path}: offered on the day, the same gate the debrief route itself applies`,
+    );
+  }
+});
+
+/* ── the interaction with the mint cap ─────────────────────────────────────────────────── */
+
+test("asked questions do not use up the competency's mint budget", { skip }, async () => {
+  // #81 M1, end to end, and the reversal of what plan Assumption 5 accepted. Asked questions are
+  // SERVED like stored variants — that is deliberate and needs no new path — but counting them
+  // against decision 6's cost envelope is a different claim. They cost nothing to obtain, nothing
+  // deletes them, and the id is content-derived, so eight typo-fix re-saves reach the same
+  // ceiling. Left uncounted, one debrief could stop a competency minting for good — and it would
+  // be the competency the candidate ticked shaky, which SHAKY_DAMPEN puts at the front.
   const db = openMigrated();
   const d1 = d1Shape(db);
   const { token, roleId, ids } = await seed(d1);
@@ -528,8 +587,15 @@ test("eight asked questions reach the mint cap, and the competency re-serves ins
     now: new Date(),
   });
 
-  assert.equal(state.demand.mint, undefined, "at the cap a competency stops minting — decision 6's envelope");
-  assert.ok(state.demand.question, "and re-serves the least recently attempted instead of going empty");
+  assert.ok(
+    state.demand.mint,
+    "eight questions from one interview must not exhaust the competency's minting",
+  );
+  assert.equal(
+    mine.filter((q) => q.variant_of != null).length,
+    0,
+    "and none of them is a minted variant — `variant_of` is what the cap actually counts",
+  );
 });
 
 /* ── AC5: the wall ─────────────────────────────────────────────────────────────────────── */
@@ -553,6 +619,14 @@ const DEBRIEF_STORE_FNS = [
   "shakyCompetencyIds",
   "insertAskedQuestion",
 ];
+
+// #81 M5. THE OTHER PLACE THE CANDIDATE'S WORDS LIVE, and the word "debrief" appears nowhere near
+// it: `insertAskedQuestion` writes what a real interviewer asked into the SHARED `question` table,
+// beside our own minted ones. A future `functions/api/clients/[id]/questions.js` importing
+// `questionsByRole` would match neither `/\bdebrief/i` nor any name in the list above — green,
+// while a recruiter dashboard renders questions a candidate typed under "your recruiter never
+// sees any of it". These are the only three readers of that table (store.js:534,553,575).
+const QUESTION_READ_FNS = ["questionsByRole", "attemptsByRole", "questionForRole"];
 
 const stripComments = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/[^\n]*$/gm, " ");
@@ -596,6 +670,48 @@ test("no endpoint outside functions/prep/ can reach debrief content at all", () 
   );
 });
 
+test("no recruiter route reads the question table, where the asked lines also live", () => {
+  // The test above cannot see this breach: it matches the word "debrief" and five store names,
+  // and a route reading `question` carries none of them. Same wall, second door.
+  const all = functionFiles();
+  const readers = all.filter((path) => {
+    const code = stripComments(readFileSync(join(root, path), "utf8"));
+    return QUESTION_READ_FNS.some((fn) => code.includes(fn));
+  });
+
+  assert.ok(
+    readers.includes("functions/prep/api/session.js") && readers.includes("functions/prep/api/turn.js"),
+    "the scan cannot see the two candidate routes that DO read questions; the names have drifted",
+  );
+
+  const recruiter = readers.filter((path) => path.startsWith("functions/api/"));
+  assert.deepEqual(
+    recruiter,
+    [],
+    `${recruiter.join(", ")} reads the question table. Since #77 those rows are not all ours: ` +
+      `insertAskedQuestion writes what a real interviewer asked, in the candidate's own words, ` +
+      `under the promise that no recruiter sees it. If a recruiter surface genuinely needs ` +
+      `question METADATA — a count, a competency id, a difficulty — add a store function that ` +
+      `projects those columns and never selects \`text\`, and name it here.`,
+  );
+});
+
+test("the route is structurally model-free, which is what makes the ticket's constraint hold", () => {
+  // #81 M6. The page's half is gated in test/prep-debrief-ui.test.js:492; the ROUTE — the file
+  // whose own header calls the absent import "what makes that un-regressable rather than merely
+  // true today" — had nothing. prep-turn.test.js:216 is the one-line precedent.
+  //
+  // The constraint is the spec's first unloosenable rule: the competency a question belongs under
+  // is the CANDIDATE'S pick from a list. Nothing infers it from the text, nothing summarises the
+  // debrief, nothing drafts the "one thing to fix". An import is how that stops being true.
+  const src = readFileSync(join(root, "functions/prep/api/debrief.js"), "utf8");
+  assert.match(src, /onRequestPost/, "the scan is reading the route, not an empty string");
+  assert.ok(
+    !/from\s+["'][^"']*(@anthropic-ai\/sdk|drill\.js)["']/.test(src),
+    "structurally model-free: no sdk import, no drill.js import",
+  );
+});
+
 test("the debrief's SQL lives in exactly one module, and it is not the recruiter's store", () => {
   const engineStore = readFileSync(join(root, "src/store.js"), "utf8");
   assert.doesNotMatch(
@@ -625,6 +741,14 @@ test("the recruiter's counter cannot carry a word the candidate wrote", { skip }
     fix_text: SENTINEL,
   });
   db.prepare("INSERT INTO events (client_id, duration_ms) VALUES ('c-1', 8200)").run();
+
+  // The premise the two scans above rest on, checked rather than assumed: the candidate's words
+  // are in TWO tables, and only one of them has "debrief" in its name. If this ever stops being
+  // true the `question`-table gate is guarding an empty room and should say so here first.
+  const inQuestions = db
+    .prepare("SELECT COUNT(*) AS n FROM question WHERE text LIKE ?")
+    .get(`%${SENTINEL}%`).n;
+  assert.equal(inQuestions, 1, "an asked line is stored in the shared question table, verbatim");
 
   const body = await (await eventsGet({ env: { DB: d1 } })).text();
   assert.ok(!body.includes(SENTINEL), `the debrief reached the recruiter's counter: ${body}`);
