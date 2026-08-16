@@ -1,4 +1,4 @@
-// GET /prep/api/brief -> 200 { role_title, blocks, competencies }
+// GET /prep/api/brief -> 200 { role_title, blocks, competencies, debrief_available }
 //
 // The candidate's own prep brief (#22), which is what turns #21's dashboard from a renderer of
 // a checked-in fixture into a page about a real person's interview.
@@ -21,8 +21,9 @@
 
 import { candidateProjection } from "../../../src/prep/projection.js";
 import { assertBrief } from "../../../src/prep/schema.js";
-import { briefJsonByInviteId } from "../../../src/portal/store.js";
+import { briefJsonByInviteId, roleByInviteId } from "../../../src/portal/store.js";
 import { requireSession } from "../../../src/prep/session.js";
+import { daysToInterview } from "../../../src/prep/targeting.js";
 import { json, errorResponse } from "../../../src/http.js";
 
 export async function onRequestGet(context) {
@@ -55,10 +56,23 @@ export async function onRequestGet(context) {
       return json({ error: "bad_brief" }, 502);
     }
 
+    // Whether the debrief page has anything to offer (#77), so the brief can carry the link only
+    // once the interview has happened. One extra SELECT, and the same day-granularity gate
+    // /prep/api/debrief applies. A missing role row is not a state that occurs while a brief
+    // exists, but it defaults to false rather than throwing — fail closed: the worst case is a
+    // link that is not offered, never a form offered before its interview.
+    const role = await roleByInviteId(env.DB, session.inviteId);
+    const debriefAvailable = role ? daysToInterview(role.interview_at, new Date()) <= 0 : false;
+
     // THE PROJECTION, never the stored row. src/prep/projection.js's header says what comes
     // out and why; the short version is that `failed_quote`, `importance` and `questions` are
     // one View Source away if this returns `payload` directly.
-    return json(candidateProjection(payload));
+    //
+    // The spread is of the PROJECTION — this codebase's own literal, built field by field — and
+    // not of a store row. That is the discipline the paragraph above states: a store row spread
+    // into a response is one refactor away from shipping a column nobody meant to send, and a
+    // projection has no columns to ship.
+    return json({ ...candidateProjection(payload), debrief_available: debriefAvailable });
   } catch (err) {
     return errorResponse(err);
   }

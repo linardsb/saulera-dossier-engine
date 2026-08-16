@@ -457,6 +457,7 @@ the dashboard.
 | `503 {"error":"mail_not_configured"}` from `PUT /api/compliance/:id` on a **send-back** | `RESEND_API_KEY` or `PREP_BASE_URL` is unset or malformed in this environment, or that candidate's row carries no email address | set the secrets (section 5b) and redeploy, or fix the candidate's address. **Nothing was written** — the item is still awaiting review and the send-back is safe to retry. The reason exists only in the email, which is why this route refuses to reset an item it cannot explain. **Verify** is unaffected: it sends no mail |
 | `409 {"error":"not_submitted"}` from `PUT /api/compliance/:id` | the item is no longer `submitted`, so the compare-and-swap matched nothing. Most often it turned amber while it sat on the desk; sometimes the candidate re-submitted first | reload `/compliance`. **An item that has gone amber cannot be verified** and the candidate has to re-submit it — a known trade against the re-nudge loop, not a fault. Nothing was written |
 | `502 {"error":"bad_brief"}` from `/api/prep/prepare` | the model's answer was a valid JSON payload that broke a rule the schema cannot state — a competency with no questions, a non-core `axis`, or two competencies sharing an id | retry once; if it repeats, generate through the manual route and keep the reply for diagnosis. This used to surface as `500 internal`, which sent you to the migration row below for a model output problem |
+| `500 {"error":"internal"}` from `/prep/api/debrief` **and** `/prep/api/session`, on a deployment where `/prep/api/brief` is healthy | migration `0011` has not been applied to this environment's D1, so `debrief` and `debrief_competency` do not exist | `npm run db:remote` (production) or `npm run db:preview`. Note that this takes the DRILL down with the debrief, not just the new page: `/prep/api/session` and `/prep/api/turn` both read the shaky ticks to rank competencies, so both name `debrief`. `/prep/api/brief` is the one that stays up — it reads `candidate_role` and a date, and nothing else — which is what tells this row apart from a broken `DB` binding, where the brief 503s too |
 
 **Migrate before deploying**, or the first request hits a database with no tables.
 
@@ -761,6 +762,41 @@ item stays exactly where it was. **Verify** has no such requirement: it sends no
 
 **No migration.** This screen reads and writes `compliance_item` and creates nothing;
 `migrations/` and `test/schema.test.js` are untouched.
+
+### The private debrief (#77) — a page, and one thing to apply first
+
+`/prep/debrief` is where a candidate writes down what they were actually asked, which
+competencies felt shaky, and one thing to fix. It is offered from `/prep/brief` and from the
+practice shell, and **only once the interview day has arrived** — the gate is day granularity, the
+same rule the send CTA and the day-before reminder already use, so an interview at 09:00 today is
+debriefable at 14:00.
+
+⚠ **Migration `0011` must be applied to this environment's D1 before the deploy** (`npm run
+db:remote` for production, `npm run db:preview` for previews). It creates `debrief` and
+`debrief_competency`; `/prep/api/debrief` names both, and — the part that is easy to miss —
+`/prep/api/session` and `/prep/api/turn` do too, because targeting reads the shaky ticks to rank
+what to drill next. Skipping it takes the whole drill down, not just the new page. See the triage
+table row in section 5.
+
+**Nothing new to configure. No secret, no Access application, no model call.** The route works on
+a deployment with no `ANTHROPIC_API_KEY` at all, and that is structural rather than incidental:
+`functions/prep/api/debrief.js` imports no SDK, because the ticket's constraint is that the
+competency a question is filed under is the candidate's own tap on a list — never inferred, never
+summarised, never drafted. `scripts/setup-access.py` is unchanged: the page lives under `/prep`
+and inherits the two bypass applications that already serve the portal, and `requireSession` on
+the invite cookie is what stops everyone else.
+
+**It never crosses the wall.** Nothing a candidate writes here reaches any recruiter surface —
+there is no dashboard tile, no "questions this client asks" aggregation, and no export, by
+decision 2. That is asserted rather than promised: `test/prep-debrief.test.js` walks every file
+under `functions/` and fails if any of them outside `functions/prep/` can reach debrief content at
+all. If the agency wants per-client question patterns, the recruiter captures them from their own
+post-interview call into the client-knowledge note.
+
+**Retention is unchanged, and that is the point of the schema shape.** Both tables hang off
+`candidate_role`, so the 30-day post-interview purge and the candidate's own delete-now take a
+debrief with everything else in the one `DELETE FROM invite` they already issue. There is no
+second retention rule to remember and nothing extra to run.
 
 ---
 

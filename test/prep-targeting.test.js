@@ -23,6 +23,8 @@ import {
   DAY_BEFORE_CLOSE_TURNS,
   isDayBefore,
   confidenceQuestion,
+  drillState,
+  SHAKY_DAMPEN,
 } from "../src/prep/targeting.js";
 
 const NOW = Date.parse("2026-07-30T12:00:00Z");
@@ -189,6 +191,58 @@ test("confidenceQuestion ignores revealed-mode 'successes' — the honesty rule 
   assert.equal(confidenceQuestion({ ranked, questionsBy, attemptsBy }), null);
 });
 
+/* ── the debrief's dampening (#77) ─────────────────────────────────────────────────────── */
+
+test("a shaky tick moves the queue: the ticked competency becomes the target", () => {
+  // Two competencies identical in every input the ranking reads — same importance, same cached
+  // stage and rate — so the ONLY thing that can separate them is the tick. Without it the id
+  // tiebreak decides and 'p' wins; with it, 'q' does.
+  const p = { id: "p", label: "P", importance: 4, stage: "can_answer", success_rate: 0.5 };
+  const q = { id: "q", label: "Q", importance: 4, stage: "can_answer", success_rate: 0.5 };
+  const args = { competencies: [p, q], questions: [], attempts: [], interviewAt: stamp(20 * 24 * 60), now };
+
+  assert.equal(drillState(args).target.id, "p", "with no tick, the id tiebreak decides");
+  assert.equal(drillState({ ...args, shakyIds: ["q"] }).target.id, "q");
+  assert.equal(
+    drillState({ ...args, shakyIds: [] }).target.id,
+    "p",
+    "unticking puts it back — the dampening is not sticky in the ranking, only in the row",
+  );
+});
+
+test("readiness clamps at 0 — a shaky competency at the bottom never goes negative", () => {
+  assert.equal(readiness({ stage: "", success_rate: 0, shaky: true }), 0);
+  assert.equal(readiness({ stage: "can_answer", success_rate: 0, shaky: true }), 0);
+  assert.equal(
+    readiness({ stage: "can_answer", success_rate: 0.5, shaky: true }),
+    0.3 - SHAKY_DAMPEN,
+    "one rung of readiness's own five-point denominator",
+  );
+  assert.equal(readiness({ stage: "can_answer", success_rate: 0.5 }), 0.3, "no tick, no change");
+});
+
+test("confidenceQuestion inherits the dampening — a shaky competency does not open the day before", () => {
+  // Both hold a success, so both are eligible for the confidence rep. B is readier (0.3 vs 0.25)
+  // and would open the session; ticking it shaky drops it to 0.1 and D opens instead.
+  const questionsBy = new Map([
+    ["b", [{ ...core("b#0", 1), competency_id: "b" }]],
+    ["d", [{ ...core("d#0", 1), competency_id: "d" }]],
+  ]);
+  const attemptsBy = new Map([
+    ["b", [attempt({ question_id: "b#0", rating: 4 })]],
+    ["d", [attempt({ question_id: "d#0", rating: 3 })]],
+  ]);
+  const plain = confidenceQuestion({ ranked: rankCompetencies([B, D]), questionsBy, attemptsBy });
+  assert.equal(plain.id, "b#0");
+
+  const damped = confidenceQuestion({
+    ranked: rankCompetencies([{ ...B, shaky: true }, D]),
+    questionsBy,
+    attemptsBy,
+  });
+  assert.equal(damped.id, "d#0", "the competency they said felt shaky is not the one to open on");
+});
+
 /* ── variant demand ────────────────────────────────────────────────────────────────────── */
 
 const core = (id, difficulty) => ({ id, competency_id: "a", text: `Q ${id}`, axis: null, difficulty, variant_of: null });
@@ -252,6 +306,31 @@ test("at the mint cap the least-recently-attempted question is re-served, no {mi
   const served = nextQuestion({ questions, attempts });
   assert.equal(served.mint, undefined, "the cap holds decision 6's cost envelope");
   assert.equal(served.question.id, "a#0", "oldest attempt is re-served");
+});
+
+test("questions the candidate was really asked do not spend the mint budget", () => {
+  // #81 M1. `insertAskedQuestion` writes `axis = 'lateral'` so a real question is SERVED like a
+  // stored variant — which is the point. Counting it toward the cap is a different claim, and a
+  // wrong one: the cap bounds what we spend, and these cost nothing. Nine of them under one
+  // competency would otherwise stop it ever minting again, permanently, and the competency a
+  // candidate lists most questions under is the one they ticked shaky.
+  const asked = Array.from({ length: MAX_VARIANTS_PER_COMPETENCY + 1 }, (_, i) => ({
+    id: `a#asked-${i}`,
+    competency_id: "a",
+    text: `A question they really asked, number ${i}.`,
+    axis: "lateral",
+    difficulty: null,
+    variant_of: null, // what tells a real question from one of ours
+  }));
+  const questions = [core("a#0", 1), ...asked];
+  const attempts = [
+    attempt({ question_id: "a#0", rating: 4, created_at: stamp(-100) }),
+    ...asked.map((q, i) =>
+      attempt({ question_id: q.id, axis: "lateral", rating: 3, created_at: stamp(-90 + i) }),
+    ),
+  ];
+
+  assert.ok(nextQuestion({ questions, attempts }).mint, "the competency can still mint");
 });
 
 test("leastRecentlyAttempted treats unattempted as oldest", () => {

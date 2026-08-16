@@ -29,6 +29,11 @@
     <p class="page-sub">Real questions, and one change to make per answer. You are preparing
       here, never being marked, and nothing you do is shown to your recruiter.</p>
     <p class="save-state" id="session-state" role="status"></p>
+    <!-- Hidden until the interview has happened (#77): session.js unhides it on the GET payload's
+         debrief_available. It sits in the page head rather than inside an act, so it is reachable
+         from the session shell whichever act is showing — a candidate drilling for a second stage
+         should not have to finish a session to write down what the first one asked. -->
+    <p class="brief-cta" id="session-debrief-cta" hidden><a class="btn btn-block" href="/prep/debrief">How did the interview go?</a></p>
   </div>
 
   <!-- Act 1: prime. Hidden until session.js knows whether this visit is a fresh start or a

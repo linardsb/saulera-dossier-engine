@@ -111,6 +111,12 @@ test("0009 applies clean after 0001–0008 and the compliance cage's four tables
     "clients",
     "competency",
     "compliance_item",
+    // #77's two, and they are the portal cage's rather than this one's: they hang off
+    // `candidate_role`, so the 30-day invite purge governs them and the 12-month dormancy purge
+    // below must leave them alone. They are listed here only because this assertion is "what a
+    // real SQLite ended up with after every migration", not "what this regime owns".
+    "debrief",
+    "debrief_competency",
     "events",
     "habit",
     "invite",

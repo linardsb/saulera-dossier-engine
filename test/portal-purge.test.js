@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,7 +34,17 @@ try {
   // Node < 22.5: ERR_UNKNOWN_BUILTIN_MODULE. `skip` above carries the remedy.
 }
 
-const PORTAL_TABLES = ["invite", "candidate_role", "competency", "question", "attempt", "habit", "otp"];
+const PORTAL_TABLES = [
+  "invite",
+  "candidate_role",
+  "competency",
+  "question",
+  "attempt",
+  "habit",
+  "otp",
+  "debrief",
+  "debrief_competency",
+];
 
 // Which invite a row belongs to, by the reference each table declares. Fixture ids embed the
 // invite's letter ('inv-A', 'role-A', 'comp-A-1'), so scope membership is readable off the key.
@@ -46,28 +56,40 @@ const SCOPE_KEY = {
   attempt: (r) => r.competency_id,
   habit: (r) => r.role_id,
   otp: (r) => r.invite_id,
+  // #77. `deb-A` and `role-A` both split to 'A', which is what keeps inviteOf below one function.
+  debrief: (r) => r.candidate_role_id,
+  debrief_competency: (r) => r.debrief_id,
 };
 const inviteOf = (row, table) => SCOPE_KEY[table](row).split("-")[1];
 
 /**
- * Both migrations, in wrangler's order, onto a database that is POPULATED between them —
- * the ALTER has to land on an events table that already has rows, because that is what it
- * will meet in production (AC #1's second proof, after `npm run db:local`).
+ * Every migration, in wrangler's order, onto a database that is POPULATED between the first two —
+ * the ALTER has to land on an events table that already has rows, because that is what it will
+ * meet in production (AC #1's second proof, after `npm run db:local`).
+ *
+ * The tail after 0002 is applied by enumeration rather than by name, and #77 is why: this file
+ * stopped at 0002 while every caged table lived there, and the debrief's two tables (0011) do not.
+ * A fixture that seeds a table the schema has not created fails with `no such table`, which reads
+ * exactly like the cascade bug this file exists to catch. Enumerating is also what makes the NEXT
+ * caged table free — sqlite-d1.js:110-116 makes the same argument for the shared helper: a caller
+ * that applies only the migrations it has heard of is testing a schema this deployment does not run.
  */
 function openMigrated() {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON"); // D1's default; SQLite's is OFF
-  db.exec(readFileSync(join(migrations, "0001_init.sql"), "utf8"));
+  const files = readdirSync(migrations).filter((f) => f.endsWith(".sql")).sort();
+  db.exec(readFileSync(join(migrations, files[0]), "utf8"));
   db.exec("INSERT INTO clients (id, name) VALUES ('c-1', 'Ashdown Park Community Healthcare')");
   db.exec("INSERT INTO events (client_id, duration_ms) VALUES ('c-1', 8200)");
-  db.exec(readFileSync(join(migrations, "0002_portal.sql"), "utf8"));
+  for (const file of files.slice(1)) db.exec(readFileSync(join(migrations, file), "utf8"));
   return db;
 }
 
 /**
  * One invite with its entire scope: the handover payload, two competencies, a core question
  * with a variant_of child (the self-reference must cascade with its parent), an attempt in
- * each of the three modes, a habit and an otp. Per invite that is 1+1+2+2+3+1+1 rows.
+ * each of the three modes, a habit, an otp, the private debrief (#77) and its two shaky ticks.
+ * Per invite that is 1+1+2+2+3+1+1+1+2 rows.
  */
 async function seedInvite(db, letter, interviewOffset) {
   const run = (sql, ...args) => db.prepare(sql).run(...args);
@@ -92,9 +114,29 @@ async function seedInvite(db, letter, interviewOffset) {
   }
   run("INSERT INTO habit (role_id, label) VALUES (?, 'buries the result')", role);
   run("INSERT INTO otp (invite_id, code_hash, expires_at) VALUES (?, ?, datetime('now', '+15 minutes'))", invite, await hashToken(`code-${letter}`));
+  // #77. One placed line and one still unplaced, which is the shape the form actually saves — a
+  // `null` placement is a real state, not a half-written row, so the cascade must take it too.
+  run(
+    "INSERT INTO debrief (id, candidate_role_id, asked_json, fix_text) VALUES (?, ?, ?, ?)",
+    `deb-${letter}`, role,
+    JSON.stringify([
+      { text: "Tell me about a lone visit that went wrong.", competency_id: `comp-${letter}-1` },
+      { text: "Why this trust?", competency_id: null },
+    ]),
+    "Lead with the result, not the setup.",
+  );
+  for (const n of [1, 2]) {
+    run("INSERT INTO debrief_competency (debrief_id, competency_id) VALUES (?, ?)", `deb-${letter}`, `comp-${letter}-${n}`);
+  }
 }
 
-const rowsOf = (db, table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all();
+// `debrief_competency` has no `id` column — the pair IS the primary key (#77) — and SQLite would
+// answer `ORDER BY id` there with the implicit rowid, which is not stable across a re-insert and
+// is not the fact the row records. One order key per table, decided here once rather than in each
+// assertion, so the row-for-row deepEqual below compares like with like.
+const ORDER_BY = { debrief_competency: "debrief_id, competency_id" };
+const rowsOf = (db, table) =>
+  db.prepare(`SELECT * FROM ${table} ORDER BY ${ORDER_BY[table] ?? "id"}`).all();
 const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
 
 // ── AC #1: the migrations apply, in order, onto a database that already has data ───────
@@ -102,11 +144,18 @@ const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).
 test("0002 applies clean after 0001 and the ALTER backfills kind on existing rows", { skip }, () => {
   const db = openMigrated();
 
+  // Every migration's tables, not 0001's and 0002's — see openMigrated's note. The list is the
+  // three regimes test/schema.test.js names, read off a database rather than off the files, so a
+  // migration that parses there and fails to APPLY here is caught by one of the two.
   const names = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all()
     .map((r) => r.name);
-  assert.deepEqual(names, ["agency", "attempt", "candidate_role", "clients", "competency", "events", "habit", "invite", "otp", "question"]);
+  assert.deepEqual(names, [
+    "agency", "assignment", "attempt", "candidate", "candidate_otp", "candidate_role", "clients",
+    "competency", "compliance_item", "debrief", "debrief_competency", "events", "habit", "invite",
+    "note_visibility", "otp", "question",
+  ]);
 
   // The legacy row was inserted before the ALTER ran; the DDL default is what makes
   // recordEvent's untouched SQL keep writing pack events.

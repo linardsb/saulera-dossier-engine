@@ -160,6 +160,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
   const closeButton = $("close-drill");
   const actClose = $("act-close");
   const closeMount = $("close-body");
+  const debriefCta = $("session-debrief-cta");
 
   const state = {
     phase: "loading", // loading | prime | drill | done | closed | not-ready | failed
@@ -247,6 +248,9 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
 
     state.session = payload;
     state.dayBefore = payload.day_before === true;
+    // The debrief link (#77), offered from the head so it is reachable whichever act is showing.
+    // The flag is the route's, derived from the same `interview_at` /prep/api/debrief gates on.
+    if (payload.debrief_available === true) debriefCta.hidden = false;
     state.habits = (Array.isArray(payload.habits) ? payload.habits : []).map(String);
     for (const competency of payload.competencies) {
       if (competency.covered) state.covered.push(String(competency.label));
