@@ -633,3 +633,30 @@ test("with migration 0012 unapplied the drill still works — the nudge just car
   assert.ok((await response.json()).nudge, "and the candidate still gets their nudge");
   assert.doesNotMatch(client.calls[0].messages[0].content, /story_titles/);
 });
+
+test("a BUG in the story read is not swallowed as though it were a missing migration", { skip }, async () => {
+  /* The catch above is scoped to "0012 is unapplied", and it used to catch everything. A TypeError
+     from a rename was therefore absorbed identically to a missing table — story titles disabled
+     forever, behind one log line reading "turn: story titles unavailable: unknown", with the drill
+     answering 200 the whole time. `err?.code ?? err?.name` produced that "unknown" for every D1
+     error too, because D1 raises plain Errors with neither field, so the line could not tell an
+     operator apart the two states it exists to distinguish.
+
+     A programmer error belongs in the outer handler where a real bug belongs. A missing table does
+     not. */
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+
+  // A rename, as the runtime sees one: the read throws a TypeError rather than a database error.
+  const broken = {
+    prepare(sql) {
+      if (/FROM story\b/i.test(sql)) throw new TypeError("db.prepare(...).bind(...).al is not a function");
+      return d1.prepare(sql);
+    },
+  };
+
+  const response = await postTurn(broken, fakeClient(), { action: "help", question_id: question.id, rung: "nudge" }, token);
+  assert.notEqual(response.status, 200, "a 200 here is the bug hiding — it must surface, not decorate nothing");
+});

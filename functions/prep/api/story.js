@@ -99,20 +99,30 @@ export async function onRequestPost(context) {
     }
 
     // ── save: the same caps stories.js applies, for the same reasons ────────────────────
-    const title = String(body.title ?? "").trim();
+    //
+    // A FULL-REPLACE ROUTE DEMANDS A FULL BODY. Every field below is written unconditionally —
+    // `SET title = ?, sketch = ?` plus a whole-set replace of the ticks — so a field that never
+    // arrived is not "unchanged", it is erased. The route cannot tell an absent `sketch` from a
+    // box the candidate deliberately cleared, and only one of those is recoverable, so the absent
+    // one has to be a 400. Demanding presence rather than guessing is also the only version of
+    // this that stays true if a future caller sends a partial body meaning "patch".
+    if (typeof body.title !== "string") return json({ error: "missing_fields", field: "title" }, 400);
+    const title = body.title.trim();
     if (!title) return json({ error: "missing_fields", field: "title" }, 400);
     if (title.length > TITLE_MAX) return json({ error: "too_long", field: "title" }, 400);
 
     // Blank is legal — a title-only story is a real half-written state, and an edit that clears
-    // the sketch box is a real erasure the candidate meant.
-    const sketch = body.sketch ?? "";
-    if (typeof sketch !== "string") return json({ error: "missing_fields", field: "sketch" }, 400);
+    // the sketch box is a real erasure the candidate meant. ABSENT is not blank: it used to
+    // default to `""` here and silently wipe paragraphs the file header says cannot be re-typed.
+    if (typeof body.sketch !== "string") return json({ error: "missing_fields", field: "sketch" }, 400);
+    const sketch = body.sketch;
     if (sketch.length > SKETCH_MAX) return json({ error: "too_long", field: "sketch" }, 400);
 
-    const rawCovers = body.competency_ids ?? [];
-    if (!Array.isArray(rawCovers)) {
+    // Same shape, same argument: an absent list would erase every tick the candidate had set.
+    if (!Array.isArray(body.competency_ids)) {
       return json({ error: "missing_fields", field: "competency_ids" }, 400);
     }
+    const rawCovers = body.competency_ids;
 
     // The ownership check on the OTHER id-shaped values, before any write: a competency under
     // someone else's invite is not found (stories.js's register, and debrief.js:185-196's).
@@ -134,7 +144,28 @@ export async function onRequestPost(context) {
     // takes no role, deliberately (its caller has already proved ownership), so reaching it on the
     // 404 path would write into another invite's story. The early return above is what stops that,
     // and it is the reason the two writes are not reordered for symmetry with stories.js.
-    await setStoryCompetencies(env.DB, { storyId, competencyIds: [...new Set(covers)] });
+    try {
+      await setStoryCompetencies(env.DB, { storyId, competencyIds: [...new Set(covers)] });
+    } catch (err) {
+      /* THE TWO-TAB WINDOW: another tab deletes this story between the matched UPDATE above and
+         this write, so `story_competency.story_id`'s foreign key (0012) has nothing to point at.
+         D1 raises a plain Error, not a StoreError, so `errorResponse` answered `500 internal` —
+         which is exactly the signal DEPLOY.md's triage table tells an operator to read as
+         "migration 0012 was never applied". A row that has just been deleted is not an internal
+         failure and is not a migration problem: it is 404, the same answer the UPDATE itself
+         gives when it loses the same race a moment earlier.
+
+         Matched on the message because that is all D1 gives back, and narrowly, so a genuine
+         failure still surfaces as a 500 rather than being dressed up as a missing row. The
+         separator is optional in the pattern deliberately: node:sqlite (what the suite runs on)
+         says `FOREIGN KEY constraint failed`, and D1 wraps and prefixes its errors — matching only
+         the spaced form would give a test that passes locally and a 500 in production, which is
+         the failure this branch exists to prevent. */
+      if (/FOREIGN[ _]?KEY/i.test(String(err?.message ?? ""))) {
+        return json({ error: "not_found" }, 404);
+      }
+      throw err;
+    }
 
     return json({ ok: true, id: storyId });
   } catch (err) {

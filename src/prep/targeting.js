@@ -404,13 +404,24 @@ export function drillState({ competencies, questions, attempts, interviewAt, now
  * covered" is a score of the candidate's own preparation dressed as progress. The page writes the
  * sentence; this returns the subject of it.
  *
- * `coveredIds` is the set of competency ids with at least one story — `story_competency`'s rows,
- * deduped by the caller.
+ * `coveredIds` is the set of competency ids with at least one story behind them — `story_competency`
+ * rows, deduped by the caller AND filtered by it to stories that actually have a sketch.
  *
- * Two boundaries worth naming because they look like bugs and are not:
+ * WHY THE FILTERING IS THE CALLER'S AND NOT THIS FUNCTION'S: this takes ids, not rows, so it has
+ * no sketch to test and adding one would drag the candidate's own words into the targeting module
+ * — the one place in this codebase they most certainly do not belong. The rule it depends on is
+ * stated at the only caller (functions/prep/api/stories.js): a tick without a sketch is not cover.
+ * Passing raw `story_competency` rows here is the mistake that hands back "covered" for a
+ * competency the candidate has written nothing about, and this paragraph is the warning.
+ *
+ * Three boundaries worth naming because they look like bugs and are not:
  *   · with NO stories at all this returns the top-ranked competency, which is correct — it is the
  *     honest first prompt on an empty storybank, and the page's copy reads the same either way.
  *   · with every competency covered — or with a role that has none at all — it returns null.
+ *   · a story that is all ticks and no words covers NOTHING, so the flag stays up. That is the
+ *     copy being true rather than the function being strict: "nothing in your stories covers X"
+ *     has to mean a story, and one story titled "x" with every box ticked used to silence this
+ *     for a whole role, permanently.
  */
 export function storyGap({ ranked, coveredIds = [] } = {}) {
   const covered = new Set(coveredIds);

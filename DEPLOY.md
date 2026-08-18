@@ -824,6 +824,18 @@ shaky ticks change which competency is *drilled* and are therefore left unwrappe
 for a missing `0012` is `/prep/api/stories` returning `500` while everything else is healthy — see
 the triage row in section 5, which is written so that combination is the discriminator.
 
+**Two answers from the storybank that are NOT a missing `0012`, so the row above stays readable:**
+
+- `404 {"error":"not_found"}` from `/prep/api/story` on a save — the story was deleted between the
+  update and the tick write, almost always a second tab. `story_competency`'s foreign key is what
+  raises it. This used to answer `500 internal`, which pointed an operator straight at the
+  migration row for a row that had simply gone.
+- `200 {"ok":true,"covers_saved":false}` from `POST /prep/api/stories` — the story was written and
+  its ticks were not. The words are safe and the id is in the answer, which is what stops a retry
+  writing a second copy; the candidate re-ticks with one tap per box. It logs
+  `prep stories: story saved, ticks did not`, and that log line is the only place this is visible,
+  so a run of them is worth reading as a real fault in the tick table rather than as noise.
+
 **Nothing new to configure. No secret, no Access application, no model call on the storybank's own
 routes.** `functions/prep/api/stories.js` and `functions/prep/api/story.js` import no SDK and no
 `drill.js`, and that absence is the feature rather than an accident: SPEC's first unloosenable rule

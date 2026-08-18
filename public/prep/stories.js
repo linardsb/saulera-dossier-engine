@@ -116,11 +116,25 @@ export const COPY = {
      dispatch) and a modal a candidate taps through by reflex is not a confirmation. The button
      changes its own words and waits. */
   confirmRemove: "Really delete?",
+  /* The same two-step, guarding the other way a story's words vanish: opening a different one over
+     an editor that has unsaved words in it. Says what would be lost and exactly what a second tap
+     does, because the button that triggers it ("Add a story") is full-width and a thumb's width
+     above the editor. */
+  unsavedWarning:
+    "You have words here that are not saved yet. Tap again to leave them behind, or Save this " +
+    "story first.",
 
   save: "Save this story",
   saving: "Saving…",
   saved: "Saved.",
   saveFailed: "Could not save that just now. Try again in a moment. Your words are still below.",
+  /* A 404 means the story is gone or a tick points at something that no longer exists — a retry
+     can never succeed, so "try again in a moment" would be a dead end on a page with nothing in
+     browser storage to reload from. Says what happened, and says the words are still there,
+     because that is the question being asked. */
+  saveGone:
+    "That story is no longer there — it may have been deleted in another tab. Your words are " +
+    "still below: tap Save this story again to keep them as a new one.",
   cancel: "Cancel",
 
   deleting: "Deleting…",
@@ -199,6 +213,10 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
     editingId: undefined,
     covers: new Set(), // competency ids ticked IN THE EDITOR, not on the stored row
     confirmingId: null, // the story whose Delete button is waiting for a second tap
+    /* Which story a second tap would open THROUGH unsaved words: an id, or `null` for the new
+       story, and `undefined` when nothing is armed — `null` cannot be the unarmed value here
+       because it is a real target. */
+    discardArmed: undefined,
     inFlight: false, // one write at a time
   };
 
@@ -222,10 +240,29 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
     saveButton.setAttribute("aria-disabled", isBusy ? "true" : "false");
   }
 
-  /* What the editor held when the last POST went out, or null when no save is in flight. The
-     candidate is the ONLY thing that edits this form, so anything that differs from this when the
-     re-fetch lands was typed during the round trip and is not in the row the server handed back. */
+  /* What the editor held when the last POST went out, or null when no save is in flight. Read by
+     `save` alone now — the render guard below used to key off it, which is the bug this pair of
+     variables exists to fix. */
   let sentSnapshot = null;
+
+  /* WHAT THE SERVER HOLDS for the row the editor is on, or null when the editor is shut.
+     `editorSnapshot() !== editorBaseline` therefore means "the editor holds words the server does
+     not", which is the only question worth asking before overwriting the boxes.
+
+     WHY THIS REPLACED THE IN-FLIGHT CHECK. The guard used to be `sentSnapshot !== null && …`, and
+     `sentSnapshot` is assigned in exactly one place: `save`. So the guard could only ever fire
+     during a save's own round trip. Delete a DIFFERENT story while editing one, and `remove`'s
+     re-fetch landed with `sentSnapshot` null, `editingId` still set — and `render` wrote the
+     stored row over a rewritten sketch, under the word "Deleted." Nothing is in browser storage
+     by design, so there is no undo. Any round trip can now land safely, not just a save's.
+
+     It is refreshed in four places and all four are load-bearing: `openEditor` (the boxes came
+     from a stored row), the overwrite branch in `render` (they just did again), `closeEditor`
+     (there is no row), and a successful save — where it becomes `sentSnapshot`, NOT the current
+     editor content, because what the server now holds is what was POSTED. Setting it to the live
+     content there would mark words typed during the round trip as saved, which is the same
+     data loss through the opposite door. */
+  let editorBaseline = null;
 
   /** The three candidate-owned values as one comparable string. Everything else on the page is the
    *  server's to decide. */
@@ -235,6 +272,11 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
       String(sketchBox.value ?? ""),
       [...state.covers].sort(),
     ]);
+  }
+
+  /** Does the editor hold anything the server has not been told about? `false` when it is shut. */
+  function isDirty() {
+    return state.editingId !== undefined && editorBaseline !== null && editorSnapshot() !== editorBaseline;
   }
 
   /** Refuse a write the route would answer 400, in the state line, with the box at fault focused.
@@ -371,13 +413,41 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
     // error worth a line — the list is about to be re-fetched anyway.
     if (storyId !== null && !story) return load();
 
+    /* TWO TAPS TO DISCARD, on the delete button's own idiom. "Add a story" is full-width and sits
+       directly above the editor, and nothing here is disabled while the editor is open — so the
+       mis-tap that throws away 1,500 characters is a thumb's width away at all times. Armed per
+       TARGET rather than as a flag, so arming on one row and then tapping another re-arms rather
+       than opening the second row unwarned. `undefined` is the unarmed value because `null` is a
+       real target: the new story. */
+    if (isDirty()) {
+      if (state.discardArmed !== storyId) {
+        state.discardArmed = storyId;
+        showState(COPY.unsavedWarning, true);
+        return Promise.resolve();
+      }
+    }
+    state.discardArmed = undefined;
+
+    /* A primed "Really delete?" was cleared here without redrawing the row that says it, so the
+       label survived on screen and lied about its state — the next tap on it deleted a story the
+       candidate believed they had backed out of. */
+    const wasConfirming = state.confirmingId !== null;
+
     state.editingId = storyId;
-    state.covers = new Set(story?.competency_ids ?? []);
+    /* Pruned to the competencies the server currently knows, exactly as the keepLive branch in
+       `render` does. Loading them raw was the one path that did not, and it is the path that POSTs
+       them: an id removed by a re-handover would come back 404 from the route, and 404 is not 401,
+       so the page would offer "try again in a moment" about a request that can never succeed. */
+    const known = new Set(state.competencies.map((c) => c.id));
+    state.covers = new Set((story?.competency_ids ?? []).filter((id) => known.has(id)));
     state.confirmingId = null;
     titleBox.value = story?.title ?? "";
     sketchBox.value = story?.sketch ?? "";
     renderCovers();
+    if (wasConfirming) renderList();
     editor.hidden = false;
+    // The boxes now hold exactly what the server holds — a new story's blank pair included.
+    editorBaseline = editorSnapshot();
     clearState();
     return Promise.resolve();
   }
@@ -385,6 +455,8 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
   function closeEditor() {
     state.editingId = undefined;
     state.covers = new Set();
+    state.discardArmed = undefined;
+    editorBaseline = null;
     titleBox.value = "";
     sketchBox.value = "";
     editor.hidden = true;
@@ -408,13 +480,15 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
       : null;
     state.maxStories = Number(payload.max_stories ?? 0);
 
-    /* A save is in flight and the editor no longer matches what it carried, so every difference
-       was typed DURING the round trip. The row that just came back cannot contain it. Writing that
-       row over these three controls is the same failure as a wiped box on a failed save — a
-       candidate on a phone taps Save, remembers the rest of the story, types it while the request
-       is out, and watches it vanish under the word "Saved". Everything OUTSIDE the editor still
-       re-renders from the server. */
-    const keepLive = sentSnapshot !== null && editorSnapshot() !== sentSnapshot;
+    /* The editor holds something the server does not, so the row that just came back cannot
+       contain it. Writing that row over these three controls is the same failure as a wiped box on
+       a failed save — a candidate on a phone taps Save, remembers the rest of the story, types it
+       while the request is out, and watches it vanish under the word "Saved". Everything OUTSIDE
+       the editor still re-renders from the server.
+
+       ANY round trip, not just a save's: this used to ask whether a save was in flight, which left
+       `remove`'s re-fetch free to overwrite a rewritten sketch under the word "Deleted." */
+    const keepLive = isDirty();
 
     if (!keepLive && state.editingId !== undefined) {
       const still = state.stories.find((s) => s.id === state.editingId);
@@ -422,6 +496,8 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
         titleBox.value = still.title;
         sketchBox.value = still.sketch;
         state.covers = new Set(still.competency_ids);
+        // These boxes now hold the server's row, so nothing is outstanding against it.
+        editorBaseline = editorSnapshot();
       }
     } else if (keepLive) {
       /* The competency list is still the server's, even here — so a kept tick can be left pointing
@@ -545,14 +621,44 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
           bounce();
           return;
         }
+        /* 404 IS NOT TRANSIENT and must not be funnelled into "try again in a moment". The route
+           answers it when the story was deleted elsewhere, or when a posted competency_id is
+           unknown — a retry can never succeed and no amount of waiting repairs it. Re-fetch the
+           list so the page stops lying about what exists, and leave the boxes alone: the words are
+           the one thing here that cannot be re-derived. `keepLive` protects them through the
+           re-fetch, because the editor is dirty against a row the server no longer has. */
+        if (res.status === 404) {
+          /* THE EDITOR MOVES TO A NEW STORY, and the copy below is why. Leaving `editingId` on the
+             dead row would make the next Save re-POST to the item route and 404 again — the copy
+             would be promising a way out the code did not have, which is the same dead end this
+             branch exists to close, one turn further on. Their words stay in the boxes; `keepLive`
+             carries them through the re-fetch, because the editor is now dirty against a row the
+             server no longer holds. */
+          state.editingId = null;
+          return load().then(() => {
+            busy(false);
+            showState(COPY.saveGone, true);
+          });
+        }
         if (!res.ok) throw new Error(`stories: ${res.status}`);
         return res.json().then((answer) => {
-          // A new story's id comes back, so the editor stays on the row it just created rather
-          // than guessing which of the re-fetched stories is the one.
-          if (isNew && answer && answer.id) state.editingId = String(answer.id);
+          /* A new story's id comes back, so the editor stays on the row it just created rather
+             than guessing which of the re-fetched stories is the one. Guarded on the editor STILL
+             being on that new story: Cancel during the round trip sets `editingId` to `undefined`
+             and hides the editor, and assigning the id here regardless left a hidden editor
+             pointing at a real row — a later Save would then focus an invisible input. */
+          if (isNew && answer && answer.id && state.editingId === null) {
+            state.editingId = String(answer.id);
+          }
+          // What the server now holds is what was POSTED, not what the boxes hold — see
+          // `editorBaseline`. Read before `load`, which renders against it.
+          const stored = sentSnapshot;
           // Re-read rather than patch: what the page shows is what the server stored — except for
           // anything edited while this request was out, which `render` keeps.
-          return load(COPY.saved).then(() => busy(false));
+          return load(COPY.saved).then(() => {
+            if (state.editingId !== undefined) editorBaseline = stored;
+            busy(false);
+          });
         });
       })
       .catch((err) => {

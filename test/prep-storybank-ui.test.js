@@ -393,6 +393,211 @@ test("arming a second row disarms the first", async () => {
   assert.equal(s.posts().length, 0);
 });
 
+test("deleting ANOTHER story does not discard what is typed in the open editor", async () => {
+  /* The finding, and it is the failure this file's own header names as the one the page can least
+     afford. The keep-live guard used to ask "is a save in flight?", and `sentSnapshot` is set in
+     exactly one place — `save`. A delete's re-fetch therefore landed with the guard off and the
+     editor still open on a different row, and `render` wrote the stored sketch over a rewritten
+     one, under the word "Deleted." Nothing is in browser storage by design: no undo.
+
+     Sequence: edit A, rewrite the sketch, notice B is junk, delete B. */
+  const a = STORY({ id: "a", title: "A", sketch: "The stored version." });
+  const b = STORY({ id: "b", title: "B", sketch: "Junk." });
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [a, b] }), PAYLOAD({ stories: [a] })],
+  });
+
+  await s.controller.openEditor("a");
+  s.node("sketch").value = "The rewritten version, five minutes of typing.";
+  s.controller.state.covers.add("role:stakeholders");
+
+  const deleteB = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === 'Delete “B”')[0];
+  deleteB().listeners.click[0]();
+  await deleteB().listeners.click[0]();
+
+  assert.equal(textOf(s.node("stories-state")), COPY.deleted, "the delete still happened");
+  assert.equal(rowsOf(s).length, 1, "and the list outside the editor still re-rendered from the server");
+  assert.equal(
+    s.node("sketch").value,
+    "The rewritten version, five minutes of typing.",
+    "the words survive the round trip the delete started",
+  );
+  assert.ok(s.controller.state.covers.has("role:stakeholders"), "and so does the tick they had just added");
+});
+
+test("an editor with nothing typed in it DOES take the server's row on someone else's delete", async () => {
+  // The other half, or the guard above would just be "never overwrite" wearing a dirty check.
+  const a = STORY({ id: "a", title: "A", sketch: "The stored version." });
+  const moved = STORY({ id: "a", title: "A", sketch: "What the other tab saved." });
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [a, STORY({ id: "b", title: "B" })] }), PAYLOAD({ stories: [moved] })],
+  });
+
+  await s.controller.openEditor("a");
+  const deleteB = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === 'Delete “B”')[0];
+  deleteB().listeners.click[0]();
+  await deleteB().listeners.click[0]();
+
+  assert.equal(s.node("sketch").value, "What the other tab saved.", "nothing was outstanding, so the server wins");
+});
+
+test("opening another story over unsaved words takes two taps, and says what is at stake", async () => {
+  /* "Add a story" is full-width and sits directly above the editor, and nothing is disabled while
+     the editor is open — `busy` sets aria-disabled on Save alone. A mis-tap after 1,500 characters
+     used to throw them away with no warning and no undo. */
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" })] })],
+  });
+
+  await s.controller.openEditor("a");
+  s.node("sketch").value = "Fifteen hundred characters of it.";
+
+  await s.controller.openEditor("b");
+  assert.equal(textOf(s.node("stories-state")), COPY.unsavedWarning);
+  assert.equal(s.controller.state.editingId, "a", "the first tap changes nothing but the state line");
+  assert.equal(s.node("sketch").value, "Fifteen hundred characters of it.");
+
+  await s.controller.openEditor("b");
+  assert.equal(s.controller.state.editingId, "b", "the second tap is the decision");
+  assert.equal(s.node("sketch").value, STORY().sketch);
+});
+
+test("arming the discard on one story and then tapping a different one re-arms rather than opening", async () => {
+  // Armed per TARGET, not as a flag — otherwise a warning earned by tapping B silently authorises
+  // opening C, which is the mis-tap the guard exists for.
+  const s = await boot({
+    payloads: [
+      PAYLOAD({
+        stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" }), STORY({ id: "c", title: "C" })],
+      }),
+    ],
+  });
+
+  await s.controller.openEditor("a");
+  s.node("sketch").value = "Unsaved.";
+  await s.controller.openEditor("b");
+  await s.controller.openEditor("c");
+
+  assert.equal(s.controller.state.editingId, "a", "a tap on C is C's first tap, not B's second");
+  assert.equal(textOf(s.node("stories-state")), COPY.unsavedWarning);
+  assert.equal(s.node("sketch").value, "Unsaved.");
+});
+
+test("an editor with nothing typed in it opens the next story on the first tap", async () => {
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" })] })],
+  });
+
+  await s.controller.openEditor("a");
+  await s.controller.openEditor("b");
+  assert.equal(s.controller.state.editingId, "b", "no unsaved words, no ceremony");
+});
+
+test("a primed Delete does not survive the editor opening over it", async () => {
+  // `openEditor` cleared `confirmingId` without redrawing the row that renders it, so the label
+  // stayed on "Really delete?" while the state behind it said otherwise — and the next tap on it
+  // deleted a story the candidate believed they had backed out of.
+  const s = await boot({ payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" })] })] });
+  const deleteA = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === 'Delete “A”')[0];
+
+  deleteA().listeners.click[0]();
+  assert.equal(textOf(deleteA()), COPY.confirmRemove, "primed");
+
+  await s.controller.openEditor("a");
+  assert.equal(s.controller.state.confirmingId, null);
+  assert.equal(textOf(deleteA()), COPY.remove, "the button says what the state says");
+});
+
+test("openEditor drops ticks pointing at competencies the server no longer knows", async () => {
+  /* The keepLive and list paths both prune; `openEditor` loaded them raw — and it is the path that
+     POSTs them. A competency removed by a re-handover would come back 404 from the route, and 404
+     is not 401, so the page offered "try again in a moment" about a request that can never
+     succeed. */
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [STORY({ competency_ids: ["role:lone-working", "role:gone"] })] })],
+  });
+
+  await s.controller.openEditor("story-1");
+  assert.deepEqual([...s.controller.state.covers], ["role:lone-working"]);
+
+  await s.controller.save();
+  const posted = JSON.parse(s.posts()[0].body);
+  assert.deepEqual(posted.competency_ids, ["role:lone-working"], "the dead id never reaches the route");
+});
+
+test("a 404 on save says the story is gone rather than offering a retry that cannot work", async () => {
+  // Every non-401 used to funnel into "try again in a moment". The route answers 404 when the
+  // story was deleted elsewhere or a posted competency_id is unknown — the one dead end the
+  // client-side caps cannot guard, re-entered through the one status they do not cover.
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" })] }), PAYLOAD({ stories: [] })],
+    postStatus: 404,
+  });
+
+  await s.controller.openEditor("a");
+  s.node("sketch").value = "Five minutes of typing.";
+  await s.controller.save();
+
+  assert.equal(textOf(s.node("stories-state")), COPY.saveGone);
+  assert.doesNotMatch(COPY.saveGone, /try again in a moment/i, "and it is not the transient copy");
+  assert.equal(s.node("sketch").value, "Five minutes of typing.", "the words are still in the box");
+  assert.equal(rowsOf(s).length, 0, "the list re-fetched, so the page stops showing a story that is gone");
+
+  /* AND THE ADVICE HAS TO WORK. The copy says to tap Save again to keep the words as a new story;
+     if `editingId` stayed on the dead row that second Save would re-POST to the item route and
+     404 again — a dead end dressed as a next step, which is the very thing this branch closes. */
+  assert.equal(s.controller.state.editingId, null, "the editor is on a NEW story now");
+  assert.match(COPY.saveGone, /keep them as a new one/, "which is what the copy promises");
+
+  s.calls.length = 0;
+  await s.controller.save();
+  assert.equal(s.posts()[0].url, "/prep/api/stories", "the retry creates rather than editing a row that is gone");
+  assert.equal(JSON.parse(s.posts()[0].body).sketch, "Five minutes of typing.", "with every word they typed");
+});
+
+test("cancelling during a new story's save does not leave the editor pointing at the new row", async () => {
+  // `save` assigned the returned id unconditionally, so Cancel mid-flight left `editingId` set on
+  // a HIDDEN editor — and a later Save would focus an invisible input.
+  const s = await boot({
+    payloads: [PAYLOAD(), PAYLOAD({ stories: [STORY({ id: "story-new" })] })],
+    postBody: { ok: true, id: "story-new" },
+  });
+
+  await s.controller.openEditor(null);
+  s.node("title").value = "A story";
+  const saving = s.controller.save();
+  s.controller.closeEditor();
+  await saving;
+
+  assert.equal(s.controller.state.editingId, undefined, "the editor is shut, and says so");
+  assert.equal(s.node("editor").hidden, true);
+});
+
+test("a tick's change handler is what puts the id in the POST", async () => {
+  /* Mutation-proven gap: inverting `checked → delete` in the handler passed the whole file,
+     because nothing dispatched `change`. The story gap depends entirely on this set, so "tap a box
+     → that id reaches the route" is the assertion the feature's only output rests on. */
+  const s = await boot({ payloads: [PAYLOAD({ stories: [STORY({ competency_ids: [] })] })] });
+  await s.controller.openEditor("story-1");
+
+  const ticks = ticksOf(s);
+  ticks[1].checked = true;
+  ticks[1].listeners.change[0]();
+  await s.controller.save();
+
+  assert.deepEqual(
+    JSON.parse(s.posts()[0].body).competency_ids,
+    ["role:stakeholders"],
+    "ticking the second box is what sends the second competency",
+  );
+
+  // And untick removes it, or the handler could be `add` on both branches.
+  ticks[1].checked = false;
+  ticks[1].listeners.change[0]();
+  await s.controller.save();
+  assert.deepEqual(JSON.parse(s.posts()[1].body).competency_ids, [], "unticking is a real erasure");
+});
+
 test("a failed delete disarms the button and says so", async () => {
   const s = await boot({ payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" })] })], postStatus: 500 });
   const deleteA = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];

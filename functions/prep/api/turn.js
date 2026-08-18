@@ -144,8 +144,18 @@ export async function onRequestPost(context) {
         try {
           storyTitles = await storyTitlesByRole(env.DB, role.role_id);
         } catch (err) {
-          // The code alone — a message could quote what the candidate typed.
-          console.error("turn: story titles unavailable:", err?.code ?? err?.name ?? "unknown");
+          /* A TypeError is NOT a missing migration, and swallowing both identically is how a
+             rename disables story titles forever behind one indistinguishable log line. The catch
+             above is scoped to "0012 is unapplied", so anything that is not a database answer is
+             re-thrown to the outer handler where a real bug belongs.
+
+             The log line carries `message`, not `code ?? name`, and the change is deliberate:
+             D1 raises plain `Error`s, so `code` and `name` were both absent and every failure
+             printed as "unknown" — the exact discrimination this line exists to give an operator.
+             A D1 error message names the table or the SQL, never a row value, so nothing the
+             candidate typed can travel in it. */
+          if (err instanceof TypeError || err instanceof ReferenceError) throw err;
+          console.error("turn: story titles unavailable:", err?.message ?? "unknown");
         }
         const { nudge } = await mintNudge(client, { ...inputs, storyTitles });
         return json({ nudge });

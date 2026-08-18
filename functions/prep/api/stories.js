@@ -42,6 +42,7 @@
 import {
   roleByInviteId,
   competenciesByRole,
+  countStoriesByRole,
   storiesByRole,
   storyCompetenciesByRole,
   createStory,
@@ -115,14 +116,28 @@ export async function onRequestGet(context) {
     const pairs = await storyCompetenciesByRole(env.DB, role.role_id);
     const shakyIds = await shakyCompetencyIds(env.DB, role.role_id);
 
-    // One pass over the pairs, keyed both ways: per story for the editor's ticks, and as a flat
-    // cover set for the gap. Two walks over the same rows would be two chances to disagree.
+    /* One pass over the pairs, keyed both ways: per story for the editor's ticks, and as a flat
+       cover set for the gap. Two walks over the same rows would be two chances to disagree.
+
+       A TICK ONLY COUNTS AS COVER IF THERE IS A STORY BEHIND IT. The two sets diverge here, and
+       deliberately: the EDITOR shows every tick the candidate set, because it is their bookkeeping
+       and a half-written story is a real state this page is built to resume. The GAP does not,
+       because it is a claim about raw material — the copy says "nothing in your stories covers X",
+       and a checkbox is not a story. A blank sketch is legal, and ticks are capped only by count,
+       so one story titled "x" with an empty sketch and every box ticked used to silence the flag
+       for that role permanently. The feature's only output, switched off by its own bookkeeping.
+
+       The candidate is not told off for it: the flag simply comes back until they write something,
+       which is exactly what the flag is for. */
+    const withSketch = new Set(
+      stories.filter((s) => String(s.sketch ?? "").trim().length > 0).map((s) => s.id),
+    );
     const byStory = new Map();
     const covered = new Set();
     for (const pair of pairs) {
       if (!byStory.has(pair.story_id)) byStory.set(pair.story_id, []);
       byStory.get(pair.story_id).push(pair.competency_id);
-      covered.add(pair.competency_id);
+      if (withSketch.has(pair.story_id)) covered.add(pair.competency_id);
     }
 
     return json({
@@ -166,23 +181,33 @@ export async function onRequestPost(context) {
     if (!role) return json({ error: "not_found" }, 404);
 
     // ── shape and caps, each its own answer ─────────────────────────────────────────────
-    const title = String(body.title ?? "").trim();
+    //
+    // `typeof` on every field, never `String(…)`. Coercing meant `{"title":{}}` stored the string
+    // "[object Object]" and `["a","b"]` stored "a,b" — a 200 for a body that was never a story,
+    // and a row the candidate cannot account for. ./story.js checks the same three the same way.
+    if (typeof body.title !== "string") return json({ error: "missing_fields", field: "title" }, 400);
+    const title = body.title.trim();
     if (!title) return json({ error: "missing_fields", field: "title" }, 400);
     if (title.length > TITLE_MAX) return json({ error: "too_long", field: "title" }, 400);
 
     // A blank sketch is LEGAL and this is the line that says so: a title typed and saved is a real
-    // half-written state, and the page is resumable. Only the type is checked.
-    const sketch = body.sketch ?? "";
-    if (typeof sketch !== "string") return json({ error: "missing_fields", field: "sketch" }, 400);
+    // half-written state, and the page is resumable. Absent is a different thing from blank, and
+    // is refused — see ./story.js, where defaulting it silently erased stored paragraphs.
+    if (typeof body.sketch !== "string") return json({ error: "missing_fields", field: "sketch" }, 400);
+    const sketch = body.sketch;
     if (sketch.length > SKETCH_MAX) return json({ error: "too_long", field: "sketch" }, 400);
 
-    const rawCovers = body.competency_ids ?? [];
-    if (!Array.isArray(rawCovers)) {
+    if (!Array.isArray(body.competency_ids)) {
       return json({ error: "missing_fields", field: "competency_ids" }, 400);
     }
+    const rawCovers = body.competency_ids;
 
-    const existing = await storiesByRole(env.DB, role.role_id);
-    if (existing.length >= MAX_STORIES) return json({ error: "too_long", field: "stories" }, 400);
+    /* COUNT, not the rows. This used to call `storiesByRole` — the one query that selects
+       `sketch` — purely to take `.length`, which put ~24KB of the most personal text in the
+       product on the WRITE path for no reader, and made store.js's "exactly one route calls it"
+       untrue at handler granularity. The narrower query is both the cheaper and the honest one. */
+    const existing = await countStoriesByRole(env.DB, role.role_id);
+    if (existing >= MAX_STORIES) return json({ error: "too_long", field: "stories" }, 400);
 
     // ── the ownership check ─────────────────────────────────────────────────────────────
     // Anything id-shaped in the body is checked against THIS role before it is written, and a miss
@@ -204,12 +229,30 @@ export async function onRequestPost(context) {
     // one tap per box. The other order would leave ticks pointing at no story, and the candidate's
     // words — the thing that cannot be re-typed — are what the first write secures.
     const { id } = await createStory(env.DB, { roleId: role.role_id, title, sketch });
-    await setStoryCompetencies(env.DB, { storyId: id, competencyIds: [...new Set(covers)] });
+
+    /* DEGRADE WITH THE ID IN HAND — debrief.js:212-224's move, and the comment above used to claim
+       a repair this path could not actually reach. It said the next save fixes a missing tick set
+       "with one tap per box", which presumes a caller that KNOWS the story's id. On a 500 the id
+       never left this function: the page keeps `editingId === null`, so a retry POSTs to the
+       collection route again and the candidate ends up with two identical stories — one tick-less,
+       one cap slot burned — where they made one.
+
+       So the ticks degrade and the story does not. The words are secured, the id comes back, and
+       `covers_saved: false` says plainly which half is missing. The log line is the one this
+       route's outer catch deliberately does not emit: a swallowed failure that is invisible
+       otherwise, which is exactly the case its own header reserves logging for. */
+    let coversSaved = true;
+    try {
+      await setStoryCompetencies(env.DB, { storyId: id, competencyIds: [...new Set(covers)] });
+    } catch (err) {
+      coversSaved = false;
+      console.error("prep stories: story saved, ticks did not", err?.message ?? err);
+    }
 
     // The id comes back so the page can open the new story for editing without guessing which of
     // the re-fetched rows is the one it just wrote. Nothing else: the page re-fetches rather than
     // patching (passport.js's rule).
-    return json({ ok: true, id });
+    return json({ ok: true, id, covers_saved: coversSaved });
   } catch (err) {
     // No log line here, deliberately, and the reason is worth stating because the sibling routes
     // both have one. turn.js:216 and debrief.js:223 log inside a DEGRADING branch — a failure they

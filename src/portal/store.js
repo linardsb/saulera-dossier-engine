@@ -973,6 +973,28 @@ export async function storyCompetenciesByRole(db, roleId) {
 }
 
 /**
+ * How many stories this role has. The cap's read, and nothing else.
+ *
+ * Exists so the twelve-story cap does not have to fetch every sketch to count rows. The POST path
+ * called `storiesByRole` for `.length`, which put every paragraph the candidate has ever written
+ * onto the write path with no reader for it, and made the claim above — exactly one route calls
+ * the sketch-bearing query — untrue at handler granularity even though it stayed true per file.
+ *
+ * NOT A GUARANTEE THAT THE CAP HOLDS, and the distinction matters. This is a read, the INSERT is a
+ * separate statement, and there is no transaction between them, so two concurrent POSTs both read
+ * 11 and both write: raced to 21 rows on a 12-cap role. The cap is a courtesy to an honest client,
+ * not a bound anything downstream may rely on — which is why `storyTitlesByRole` carries its own
+ * `LIMIT` and `mintNudge` slices again.
+ */
+export async function countStoriesByRole(db, roleId) {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS n FROM story WHERE candidate_role_id = ?")
+    .bind(String(roleId ?? ""))
+    .first();
+  return Number(row?.n ?? 0);
+}
+
+/**
  * The TITLES only, as a plain array of strings. The one function a model-facing caller may import.
  *
  * WHY THIS EXISTS AS A SEPARATE FUNCTION, in the terms that matter: `sketch` is the candidate's own
@@ -986,11 +1008,19 @@ export async function storyCompetenciesByRole(db, roleId) {
  * Same `created_at, rowid` order as `storiesByRole` — see its JSDoc for why the tiebreak is not
  * `id` — so the titles a nudge is shown are in the order the candidate sees on their own page. A
  * nudge that says "your second story" must mean the one they would count second.
+ *
+ * `LIMIT 12` IS A SECURITY BOUND, not a convenience. The twelve-story cap in
+ * functions/prep/api/stories.js is a read-then-write with no transaction around it, so two
+ * concurrent POSTs race straight through it — 21 rows on a 12-cap role, reproduced. Anything this
+ * function returns is interpolated into a prompt (src/prep/drill.js `mintNudge`), so an unbounded
+ * result is an unbounded payload in a model's user turn. The bound belongs in the statement, where
+ * no route ordering can step around it. `mintNudge` slices as well; neither is redundant, because
+ * neither can see the other.
  */
 export async function storyTitlesByRole(db, roleId) {
   const { results } = await db
     .prepare(
-      "SELECT title FROM story WHERE candidate_role_id = ? ORDER BY created_at, rowid",
+      "SELECT title FROM story WHERE candidate_role_id = ? ORDER BY created_at, rowid LIMIT 12",
     )
     .bind(String(roleId ?? ""))
     .all();
@@ -1052,14 +1082,31 @@ export async function updateStory(db, { roleId, storyId, title, sketch } = {}) {
 /**
  * Replace one story's whole tick set — `setShakyCompetencies`'s idiom, story-scoped.
  *
- * DELETE then INSERT: the newest save is the truth, and a set replaced wholesale has no half-state
- * to reconcile, so unticking every box is a real erasure — which is what a candidate means by it.
+ * DELETE then INSERT, so a set replaced wholesale has no half-state to reconcile and unticking
+ * every box is a real erasure — which is what a candidate means by it.
+ *
+ * WHAT "THE NEWEST SAVE IS THE TRUTH" IS WORTH, stated accurately because this docstring used to
+ * claim it outright. It holds for saves that do not overlap, which is every save from one page.
+ * Under interleaving it is a UNION, not a replacement: `r1.DELETE → r2.DELETE → r1.INSERT a →
+ * r2.INSERT b` leaves `[a, b]` when the last writer said `[b]` only. Reproduced, not reasoned
+ * about. The consequence is specific and worse here than for the debrief's version of this
+ * function: a resurrected tick makes `storyGap` report a competency as covered at the moment the
+ * candidate said it is not, so the feature's only output is silently suppressed by its own
+ * bookkeeping.
+ *
+ * NOT FIXED HERE, deliberately. A correct fix needs a per-story write generation to compare
+ * against, and the schema has no such column by design — 0012 is deliberately minimal. Adding a
+ * fake one (a timestamp at second granularity) would buy nothing this comment does not. What is
+ * cheap and real is that the window is two overlapping writes to the SAME story, which needs two
+ * tabs or a retry against a slow response, and the page re-fetches after every save, so the union
+ * is visible on screen and one tap per box corrects it. Filed rather than papered over.
  *
  * `ON CONFLICT DO NOTHING` because there is NO TRANSACTION here and two saves can interleave (two
  * tabs, or a client retry on a slow response; the page's in-flight guard is per page). Without it,
  * `r1.DELETE → r2.DELETE → r1.INSERT c → r2.INSERT c` raises a UNIQUE violation on the composite
  * key, which is not a StoreError, so the route answers `500 internal` — the exact signal
- * DEPLOY.md's triage table reads as "migration 0012 was never applied".
+ * DEPLOY.md's triage table reads as "migration 0012 was never applied". Do not remove it to get
+ * last-writer-wins: that trades a silent merge for a 500 and fixes nothing.
  *
  * WHAT THIS DOES NOT CLOSE, stated rather than implied: a failure between the DELETE and the
  * INSERTs leaves this story's ticks EMPTY, not stale. The set is small, the page re-fetches it,
