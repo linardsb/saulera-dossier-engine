@@ -377,3 +377,54 @@ export function drillState({ competencies, questions, attempts, interviewAt, now
 
   return { ranked, open, target, demand, queued, sessions: sessionsOf(attempts), questionsBy, attemptsBy };
 }
+
+/**
+ * SPEC Amendment 1: "targeting may flag a top-ranked competency no story covers." (#78)
+ *
+ * The highest-ranked competency with NO story mapped to it, or null. Rank order is
+ * `rankCompetencies`' own — `importance × (1 − readiness)` — which is what makes the flag
+ * FORWARD-LOOKING ("this matters and you have no raw material for it") rather than a gap score.
+ *
+ * IT IS RANK ORDER AND DELIBERATELY NOT THE DRILL QUEUE, which is a real difference worth being
+ * exact about because the two are one function apart. `drillState` serves `eligible(ranked, …)[0]`,
+ * and `eligible` keeps only the top half within three days of the interview and drops anything
+ * inside its cooldown — so the competency drilled NEXT is often not `ranked[0]`. This function
+ * ignores all of that on purpose: SPEC Amendment 1 says "a TOP-RANKED competency no story covers",
+ * and "you have nothing to say about the most important part of this job" does not stop being true
+ * because that competency was practised yesterday. A gap that went quiet during a cooldown would
+ * hide itself for exactly the two days before the interview when there is still time to act.
+ *
+ * The caller decorates `shaky` before ranking, the way `drillState` does. That is not about the
+ * queue: a shaky tick lowers `readiness`, which changes the RANK itself, so an undecorated list
+ * ranks a competency the candidate has just said went badly as though it had not.
+ *
+ * NOTHING NUMERIC LEAVES: `{id, label}`, never a rank, a position, a count of uncovered
+ * competencies, or a readiness. That is `closePayload`'s `asLabel` rule (:273) and it is load-
+ * bearing twice over — SPEC's ladder rule says show movement and not a rank, and a "3 of 5
+ * covered" is a score of the candidate's own preparation dressed as progress. The page writes the
+ * sentence; this returns the subject of it.
+ *
+ * `coveredIds` is the set of competency ids with at least one story behind them — `story_competency`
+ * rows, deduped by the caller AND filtered by it to stories that actually have a sketch.
+ *
+ * WHY THE FILTERING IS THE CALLER'S AND NOT THIS FUNCTION'S: this takes ids, not rows, so it has
+ * no sketch to test and adding one would drag the candidate's own words into the targeting module
+ * — the one place in this codebase they most certainly do not belong. The rule it depends on is
+ * stated at the only caller (functions/prep/api/stories.js): a tick without a sketch is not cover.
+ * Passing raw `story_competency` rows here is the mistake that hands back "covered" for a
+ * competency the candidate has written nothing about, and this paragraph is the warning.
+ *
+ * Three boundaries worth naming because they look like bugs and are not:
+ *   · with NO stories at all this returns the top-ranked competency, which is correct — it is the
+ *     honest first prompt on an empty storybank, and the page's copy reads the same either way.
+ *   · with every competency covered — or with a role that has none at all — it returns null.
+ *   · a story that is all ticks and no words covers NOTHING, so the flag stays up. That is the
+ *     copy being true rather than the function being strict: "nothing in your stories covers X"
+ *     has to mean a story, and one story titled "x" with every box ticked used to silence this
+ *     for a whole role, permanently.
+ */
+export function storyGap({ ranked, coveredIds = [] } = {}) {
+  const covered = new Set(coveredIds);
+  const found = (ranked ?? []).find((c) => !covered.has(c.id));
+  return found ? { id: found.id, label: found.label } : null;
+}

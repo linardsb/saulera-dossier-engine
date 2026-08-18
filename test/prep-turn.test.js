@@ -18,6 +18,7 @@ import {
   persistHandover,
   hashToken,
   questionsByRole,
+  createStory,
 } from "../src/portal/store.js";
 import { mintToken, SESSION_COOKIE } from "../src/prep/tokens.js";
 import { HABIT_LABELS } from "../src/prep/habits.js";
@@ -549,4 +550,113 @@ test("day-before shortens the close: suggest_close flips on the 3rd turn at at(1
     assert.equal(body.suggest_close, turn >= 3, `turn ${turn}: the day-before threshold is 3, not 6`);
   }
   assert.ok(body.next_question !== undefined, "the 4th turn was still served — suggest, never block");
+});
+
+/* ── the storybank seam (#78) ──────────────────────────────────────────────────────────── */
+
+const SKETCH_SENTINEL = "sentinel-no-model-may-ever-read-this-sketch";
+
+/** Two stories on the role, written through the production writers the editor's route uses. */
+async function seedStories(d1, roleId) {
+  const first = await createStory(d1, {
+    roleId,
+    title: "The escalation on nights",
+    sketch: `${SKETCH_SENTINEL} — the family refused the plan at 2am.`,
+  });
+  await createStory(d1, {
+    roleId,
+    title: "The audit nobody wanted",
+    sketch: `${SKETCH_SENTINEL} — I found the gap in the records.`,
+  });
+  return first;
+}
+
+test("a nudge carries the candidate's story titles and none of their words", { skip }, async () => {
+  const d1 = d1Shape(openMigrated());
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+  await seedStories(d1, roleId);
+  const client = fakeClient();
+
+  const response = await postTurn(d1, client, { action: "help", question_id: question.id, rung: "nudge" }, token);
+  assert.equal(response.status, 200);
+  assert.ok((await response.json()).nudge, "the response shape is unchanged: still one string");
+
+  const prompt = client.calls[0].messages[0].content;
+  assert.match(prompt, /The escalation on nights/, "the titles travel so the nudge can point at one");
+  assert.match(prompt, /The audit nobody wanted/);
+  assert.ok(
+    !prompt.includes(SKETCH_SENTINEL),
+    "the candidate's own words reached a model prompt — the one thing this seam exists to prevent",
+  );
+});
+
+test("the reveal rung is handed no story titles at all", { skip }, async () => {
+  // A skeleton of headings is already the structural answer; titles beside it would push the model
+  // toward "use your story about X", which is content rather than structure.
+  const d1 = d1Shape(openMigrated());
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+  await seedStories(d1, roleId);
+  const client = fakeClient();
+
+  await postTurn(d1, client, { action: "help", question_id: question.id, rung: "reveal" }, token);
+  const prompt = client.calls[0].messages[0].content;
+  assert.doesNotMatch(prompt, /story_titles/);
+  assert.doesNotMatch(prompt, /The escalation on nights/);
+});
+
+test("a candidate with no storybank gets the nudge prompt unchanged", { skip }, async () => {
+  const d1 = d1Shape(openMigrated());
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+  const client = fakeClient();
+
+  await postTurn(d1, client, { action: "help", question_id: question.id, rung: "nudge" }, token);
+  assert.doesNotMatch(client.calls[0].messages[0].content, /story_titles/, "empty means absent, not an empty block");
+});
+
+test("with migration 0012 unapplied the drill still works — the nudge just carries no titles", { skip }, async () => {
+  // DEPLOY.md's triage row, asserted rather than promised, and the deliberate OPPOSITE of #77's
+  // posture: the shaky read is unwrapped and takes the drill down, because a ticked competency
+  // changes what is DRILLED. A story title only decorates a nudge, so taking a paid turn down for
+  // it would be the worse trade. The loud signal for a missing 0012 is /prep/api/stories itself.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+  db.exec("DROP TABLE story_competency; DROP TABLE story;");
+  const client = fakeClient();
+
+  const response = await postTurn(d1, client, { action: "help", question_id: question.id, rung: "nudge" }, token);
+  assert.equal(response.status, 200, "the drill does not go down when the storybank's table is missing");
+  assert.ok((await response.json()).nudge, "and the candidate still gets their nudge");
+  assert.doesNotMatch(client.calls[0].messages[0].content, /story_titles/);
+});
+
+test("a BUG in the story read is not swallowed as though it were a missing migration", { skip }, async () => {
+  /* The catch above is scoped to "0012 is unapplied", and it used to catch everything. A TypeError
+     from a rename was therefore absorbed identically to a missing table — story titles disabled
+     forever, behind one log line reading "turn: story titles unavailable: unknown", with the drill
+     answering 200 the whole time. `err?.code ?? err?.name` produced that "unknown" for every D1
+     error too, because D1 raises plain Errors with neither field, so the line could not tell an
+     operator apart the two states it exists to distinguish.
+
+     A programmer error belongs in the outer handler where a real bug belongs. A missing table does
+     not. */
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1);
+  const question = (await questionsByRole(d1, roleId))[0];
+
+  // A rename, as the runtime sees one: the read throws a TypeError rather than a database error.
+  const broken = {
+    prepare(sql) {
+      if (/FROM story\b/i.test(sql)) throw new TypeError("db.prepare(...).bind(...).al is not a function");
+      return d1.prepare(sql);
+    },
+  };
+
+  const response = await postTurn(broken, fakeClient(), { action: "help", question_id: question.id, rung: "nudge" }, token);
+  assert.notEqual(response.status, 200, "a 200 here is the bug hiding — it must surface, not decorate nothing");
 });

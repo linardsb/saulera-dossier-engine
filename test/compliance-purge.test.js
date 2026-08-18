@@ -59,6 +59,38 @@ function seedOtherRegimes(db) {
     `INSERT INTO invite (id, client_id, token_hash, email, interview_at, expires_at)
      VALUES ('inv-1', 'c-1', 'h-1', 'live@example.com', datetime('now', '+2 days'), datetime('now', '+16 days'))`,
   );
+  /* A REAL STORY UNDER THAT INVITE, and the row is the point. The table list below claims #78's
+     two tables belong to the portal's own 30-day cage and that the compliance regimes here must
+     leave them alone — but this function used to insert an invite and NOTHING under it, so no
+     `story` row ever existed while a purge ran. The claim was asserted against an empty table:
+     dropping every story on the floor would have passed.
+
+     A story needs a `candidate_role` to hang off (0002) and a `competency` for its tick (0012), so
+     the whole chain is seeded. `storySurvived` below is what reads it. */
+  db.exec(
+    `INSERT INTO candidate_role (id, invite_id, jd_text, ethos_text, cv_text, brief_json)
+     VALUES ('role-1', 'inv-1', 'jd', '', 'cv', '{}')`,
+  );
+  db.exec(
+    `INSERT INTO competency (id, role_id, label, importance, source_quote)
+     VALUES ('role-1:lone-working', 'role-1', 'Lone working', 5, 'q')`,
+  );
+  db.exec(
+    `INSERT INTO story (id, candidate_role_id, title, sketch)
+     VALUES ('story-1', 'role-1', 'The escalation on nights', 'The candidate own words.')`,
+  );
+  db.exec("INSERT INTO story_competency (story_id, competency_id) VALUES ('story-1', 'role-1:lone-working')");
+}
+
+/** The candidate's own account of their own working life, still there. `sketch` included: a row
+ *  that survived with its words blanked would satisfy a count and fail the promise. */
+function assertStorySurvived(db) {
+  assert.deepEqual(
+    rowsOf(db, "story").map((row) => [row.id, row.sketch]),
+    [["story-1", "The candidate own words."]],
+    "a compliance purge reached into the portal's cage and took a candidate's story",
+  );
+  assert.equal(countOf(db, "story_competency"), 1, "and its ticks go with it or not at all");
 }
 
 /**
@@ -123,6 +155,16 @@ test("0009 applies clean after 0001–0008 and the compliance cage's four tables
     "note_visibility",
     "otp",
     "question",
+    // #78's two, and the note above applies to them word for word: `story` and `story_competency`
+    // hang off `candidate_role`, so they belong to the PORTAL cage's 30-day invite purge and the
+    // 12-month dormancy purge below must leave them alone. The cascade proof is
+    // test/portal-purge.test.js; that this regime does not reach them is `assertStorySurvived`,
+    // which reads a row `seedOtherRegimes` really inserts — the comment here used to claim proof
+    // that lived in another file and covered a different question. They are listed only because
+    // this assertion is "what a real SQLite ended up with after every migration", not "what this
+    // regime owns".
+    "story",
+    "story_competency",
   ]);
 });
 
@@ -201,9 +243,14 @@ test("purgeDormant takes exactly the dormant cages, including the exact 12-month
   assert.equal(countOf(db, "agency"), 1);
   assert.equal(countOf(db, "events"), 1, "the aggregate counter outlives every identity");
   assert.equal(countOf(db, "invite"), 1, "the portal cage answers to its own clock, not this one");
+  // And the candidate's own stories with it — a real row, not an empty table. #78's two tables
+  // hang off `candidate_role`, so the 30-day invite purge governs them and this 12-month one has
+  // no claim on them whatsoever.
+  assertStorySurvived(db);
 
   // A second pass finds nothing: {purged: 0}, no error, the portal serves normally.
   assert.deepEqual(await purgeDormant(d1), { purged: 0 });
+  assertStorySurvived(db);
 });
 
 test("the purge takes a live sign-in code with the cage (#68)", { skip }, async () => {
@@ -254,6 +301,7 @@ test("deleteCandidate drops one whole cage and leaves the rest untouched", { ski
   assert.equal(countOf(db, "clients"), 1);
   assert.equal(countOf(db, "events"), 1);
   assert.equal(countOf(db, "invite"), 1);
+  assertStorySurvived(db);
 
   // Idempotent: the second call matches nothing and still answers ok — after either call the
   // candidate's compliance state is clean. The `deleted: 0` beside it is the honest half, and
