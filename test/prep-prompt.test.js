@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   PREP_SYSTEM,
   buildPrepMessages,
+  concernsTaskBlock,
   prepInputsBlock,
   visibleNoteBlock,
 } from "../src/prep/prompt.js";
@@ -176,22 +177,48 @@ test("the cached prefix is byte-identical between a locum and a perm call for th
   assert.notEqual(locum[1].text, perm[1].text, "the branch lives in the second block");
 });
 
-test("the locum branch asks for the primer and the slim mix; every other value does not", () => {
+test("the locum branch asks for the slim mix; every other value does not", () => {
   const locum = prepInputsBlock({ ...INPUTS, engagement: "locum" });
   assert.match(locum, /locum booking/);
-  assert.match(locum, /FirstDayPrimer/);
   assert.match(locum, /"client"/);
   assert.match(locum, /"screening"/);
   assert.match(locum, /Never generic clinical coaching/);
-  assert.match(locum, /omit the\s+block entirely/, "an empty primer is worse than an absent one");
+
+  // The FIRST call no longer asks for a FirstDayPrimer at all — a sixth block branch is a 400
+  // under adaptive thinking, so the primer moved to the second call and its instruction went
+  // with it (concernsTaskBlock, asserted below). Naming it here would ask a decoder for a
+  // variant its schema does not carry.
+  assert.doesNotMatch(locum, /FirstDayPrimer/, "the first call must not name a block it cannot emit");
 
   // #46 D2: "unknown" behaves as perm. All three non-locum values get the one-line rule.
   for (const engagement of ["permanent", "unknown", undefined]) {
     const text = prepInputsBlock({ ...INPUTS, engagement });
     assert.doesNotMatch(text, /This is a locum booking/, `${engagement} must not take the locum branch`);
-    assert.doesNotMatch(text, /FirstDayPrimer block from/, `${engagement} must not ask for the primer`);
+    assert.doesNotMatch(text, /FirstDayPrimer/, `${engagement} must not mention the primer either`);
     assert.match(text, /every question type "competency"/);
-    assert.match(text, /do not emit a\s+FirstDayPrimer/);
+  }
+});
+
+test("the SECOND call's task carries the primer instruction, and only for a locum", () => {
+  // Where the locum branch went. Still per-candidate and still after the cache breakpoint —
+  // `prepInputsBlock` composes both — so moving it changed which call asks, not what is cached.
+  const competencies = [{ id: "comp-x", label: "Working alone" }];
+
+  const locum = concernsTaskBlock(competencies, "locum");
+  assert.match(locum, /first_day_items from the client knowledge/);
+  assert.match(locum, /names the field it came from/, "provenance survived the move");
+  assert.match(locum, /EMPTY list/, "an empty block is still worse than an absent one");
+
+  for (const engagement of ["permanent", "unknown", undefined]) {
+    const text = concernsTaskBlock(competencies, engagement);
+    assert.match(text, /first_day_items is an EMPTY list/, `${engagement} asks for no primer`);
+    assert.doesNotMatch(text, /scanner fleet/, `${engagement} must not take the locum branch`);
+  }
+
+  // Both branches still carry the concerns work, which is the point of the call.
+  for (const engagement of ["locum", "permanent"]) {
+    assert.match(concernsTaskBlock(competencies, engagement), /EMPTY evidence_quote/);
+    assert.match(concernsTaskBlock(competencies, engagement), /comp-x/, "the ids are handed back in");
   }
 });
 

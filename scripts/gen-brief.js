@@ -145,6 +145,17 @@ if (provenance.primer_total) {
       `${provenance.primer_unsourced} unsourced — ${provenance.primer_total} total`,
   );
 }
+if (provenance.concern_total) {
+  // Three numbers, not two: `nothing in the CV` is the honest outcome and the one worth reading
+  // on a local run, and folding it into "evidenced" would print a clean line over a concern the
+  // candidate's record does not answer. verify.js:briefSummary carries the argument.
+  console.log(
+    `concerns: ${provenance.concern_sourced} evidenced, ` +
+      `${provenance.concern_unsourced} unsourced, ` +
+      `${provenance.concern_no_material} with nothing in the CV to meet it — ` +
+      `${provenance.concern_total} total`,
+  );
+}
 const typeCounts = {};
 for (const q of payload.questions) {
   const type = q.type ?? "competency";
@@ -171,15 +182,36 @@ if (failures.length) {
   // Loud on purpose. A demotion means the model cited something it could not stand up, and that
   // is the one defect this whole mechanism exists to catch.
   console.log("\nNOT SENDABLE — these did not verify:");
+  // A case per kind. The two-branch version printed `f.panel_index` for every non-competency
+  // failure, so a primer failure already read `blocks[3].panel[undefined]` — a path that points
+  // at nothing, in the one output whose job is to say exactly where to look.
   for (const f of failures) {
-    if (f.kind === "competency") {
-      console.log(`  · competency[${f.index}] (${f.label}) — ${f.reason}`);
-      console.log(`      quote: ${JSON.stringify(String(f.quote).slice(0, 88))}`);
-    } else {
-      console.log(
-        `  · blocks[${f.block_index}].panel[${f.panel_index}] — ${f.reason}` +
-          `\n      key: ${JSON.stringify(f.key)}`,
-      );
+    switch (f.kind) {
+      case "competency":
+        console.log(`  · competency[${f.index}] (${f.label}) — ${f.reason}`);
+        console.log(`      quote: ${JSON.stringify(String(f.quote).slice(0, 88))}`);
+        break;
+      case "panel_source":
+        console.log(`  · blocks[${f.block_index}].panel[${f.panel_index}] — ${f.reason}`);
+        console.log(`      key: ${JSON.stringify(f.key)}`);
+        break;
+      case "primer_source":
+        console.log(`  · blocks[${f.block_index}].items[${f.item_index}] — ${f.reason}`);
+        console.log(`      key: ${JSON.stringify(f.key)}`);
+        break;
+      case "concern_source":
+        console.log(`  · blocks[${f.block_index}].concerns[${f.concern_index}] — ${f.reason}`);
+        console.log(`      quote: ${JSON.stringify(String(f.quote).slice(0, 88))}`);
+        break;
+      case "concerns_call":
+        // Not a provenance failure at all: the second call did not answer, so two blocks are
+        // simply absent. The route degrades rather than dying (src/prep/generate.js), and this
+        // script is where that degradation has to be loud.
+        console.log(`  · ${f.block} — the second call did not answer: ${f.reason}`);
+        break;
+      default:
+        console.log(`  · ${f.kind ?? "unknown"} — ${f.reason}`);
+        console.log(`      ${JSON.stringify(f)}`);
     }
   }
   process.exit(1);

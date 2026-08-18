@@ -281,15 +281,66 @@ test("#50: question types ride brief_json; the question table stays type-free", 
   // only feeds the drill, which a locum candidate never enters.
   const db = openMigrated();
   const payload = PAYLOAD();
+  // #79's concern questions are left alone: they are what pairs with the fixture's
+  // LikelyConcerns block, and retyping them would make this a test of the pairing rule
+  // throwing rather than of a type surviving the round trip.
   payload.questions.forEach((q) => {
-    q.type = "client";
+    if (q.type !== "concern") q.type = "client";
   });
   await send(d1Shape(db), sendBody({ payload }));
 
   const [role] = rowsOf(db, "candidate_role");
-  assert.ok(JSON.parse(role.brief_json).questions.every((q) => q.type === "client"));
+  const stored = JSON.parse(role.brief_json).questions;
+  assert.ok(stored.some((q) => q.type === "concern"), "#79's tag rides brief_json too");
+  assert.ok(stored.filter((q) => q.type !== "concern").every((q) => q.type === "client"));
   const columns = db.prepare("PRAGMA table_info(question)").all().map((c) => c.name);
   assert.ok(!columns.includes("type"), "no 0008 rode in with this ticket");
+});
+
+test("#79: a demoted concern quote does not block a Send — the gate is competency-only", { skip }, async () => {
+  // D3, and the sharp edge of demote-don't-drop. A concern whose quote we could not stand up
+  // degrades to a BLANK quote, and a blank quote is SPEC's normal, expected state: "the material
+  // holds no genuine counter, say so plainly." Blocking here would make the honest outcome look
+  // like a fault, in front of a recruiter who can do nothing about it.
+  //
+  // PAYLOAD() is used rather than the shipped fixture for the reason recorded at :53-60: the
+  // fixture carries a deliberately unverified competency and can never pass this route, so a
+  // red test would read as this decision being wrong rather than as the gate doing its job.
+  const db = openMigrated();
+  const payload = PAYLOAD();
+  const concerns = payload.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+  concerns[0].evidence_quote = "Twelve years running an IV therapy service";
+
+  const { response } = await send(d1Shape(db), sendBody({ payload }));
+  assert.equal(response.status, 201, "every competency verified, so the send stands");
+
+  const [role] = rowsOf(db, "candidate_role");
+  const stored = JSON.parse(role.brief_json).blocks.find((b) => b.name === "LikelyConcerns");
+  assert.equal(stored.props.concerns[0].evidence_quote, "", "blanked on the way through");
+  assert.equal(
+    stored.props.concerns[0].failed_evidence_quote,
+    "Twelve years running an IV therapy service",
+    "and the diagnostic is kept in the recruiter's artefact, where it is of use",
+  );
+});
+
+test("#79: concern questions reach the queue as ordinary rows, with no type column", { skip }, async () => {
+  // AC2's "no new loop", measured at the only place it could have needed one. saveHandover
+  // writes (id, competency_id, text, axis, difficulty) — `type` is not a column and does not
+  // become one — so nextQuestion serves a concern counter as a core question and the drill
+  // learns nothing about the word.
+  const db = openMigrated();
+  await send(d1Shape(db), sendBody());
+
+  const columns = db.prepare("PRAGMA table_info(question)").all().map((c) => c.name);
+  assert.ok(!columns.includes("type"), "no migration rode in with #79 either");
+
+  const payload = PAYLOAD();
+  const concern = payload.questions.find((q) => q.type === "concern");
+  const row = rowsOf(db, "question").find((r) => r.text === concern.text);
+  assert.ok(row, "the concern question was written like any other");
+  assert.equal(row.axis, null, "axis NULL is what makes it a CORE row to targeting");
+  assert.equal(row.competency_id.endsWith(concern.competency_id), true, "under its own competency");
 });
 
 test("#50: a forged question type is refused at the door as a 400", { skip }, async () => {
@@ -1072,9 +1123,16 @@ test("AC #6: send -> click the link -> GET /prep/api/brief returns the projectio
   // THE ASSERTION THE ISSUE NAMED, measured on the actual bytes a candidate's browser receives.
   assert.ok(!wire.includes("failed_quote"), "failed_quote reached the candidate");
   assert.ok(!wire.includes("importance"), "importance reached the candidate");
-  assert.ok(!wire.includes("questions"), "the question bank reached the candidate");
+  // Not a scan for the WORD any more: #79's QuestionsToAsk block carries a `questions` prop of
+  // its own — questions the candidate ASKS, which this endpoint does serve. The bank is what
+  // must not travel, so the bank's own text is what is measured, which catches a passthrough
+  // under a renamed key too.
+  for (const q of PAYLOAD().questions) {
+    assert.ok(!wire.includes(q.text), `the question bank reached the candidate: ${q.text.slice(0, 40)}…`);
+  }
 
   const projection = JSON.parse(wire);
+  assert.ok(!("questions" in projection), "and no top-level bank key at all");
   assert.ok(projection.blocks.length, "and there is still a brief to render");
   assert.equal(projection.competencies.length, PAYLOAD().competencies.length);
   assert.ok(projection.competencies.every((c) => c.verified === true), "all sourced against this brief");

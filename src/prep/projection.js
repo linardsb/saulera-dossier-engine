@@ -42,6 +42,15 @@ function projectPanelEntry(entry) {
   return { ...entry, failed_field_key: "" };
 }
 
+/** A concern with the model's invented span blanked, and the demotion marker intact (#79). The
+ *  KEY stays and only the VALUE goes, for projectPanelEntry's reason: registry.js decides what a
+ *  candidate reads from the BLANK QUOTE, and the marker is what a later reader of the stored row
+ *  can still tell a demotion from an honest gap by. */
+function projectConcern(entry) {
+  if (!entry || typeof entry !== "object" || !("failed_evidence_quote" in entry)) return entry;
+  return { ...entry, failed_evidence_quote: "" };
+}
+
 /** One block, projected. Recurses into `CompetencyMap.children`. */
 function projectBlock(block) {
   if (!block || typeof block !== "object") return block;
@@ -54,6 +63,19 @@ function projectBlock(block) {
   // same treatment: the invented slug goes, the demotion marker stays.
   if (block.name === "FirstDayPrimer" && Array.isArray(block.props?.items)) {
     return { ...block, props: { ...block.props, items: block.props.items.map(projectPanelEntry) } };
+  }
+
+  // #79's concerns need only the diagnostic stripped, and that is the whole difference from the
+  // competency branch below. `verifyBrief` demotes a concern by BLANKING `evidence_quote` and
+  // recording `failed_evidence_quote`, so the header's "the quote and the failed quote hold the
+  // same invented sentence" problem cannot recur here — there is no second name under which the
+  // model's guess could travel. A SOURCED concern's quote is the candidate's own CV and goes
+  // untouched, which is the whole point of quoting the CV rather than the note.
+  if (block.name === "LikelyConcerns" && Array.isArray(block.props?.concerns)) {
+    return {
+      ...block,
+      props: { ...block.props, concerns: block.props.concerns.map(projectConcern) },
+    };
   }
 
   // A PanelBrief cannot legally nest here — assertBrief:263 rejects anything but a

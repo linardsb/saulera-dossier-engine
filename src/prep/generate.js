@@ -19,8 +19,8 @@ import { MODEL, EFFORT, FALLBACK_BETA } from "../generate.js";
 import { briefProfile } from "../domain.js";
 import { cleanInput } from "../prompt.js";
 import { StoreError } from "../store.js";
-import { BRIEF_SCHEMA, assertBrief } from "./schema.js";
-import { PREP_SYSTEM, buildPrepMessages } from "./prompt.js";
+import { BRIEF_SCHEMA, CONCERNS_SCHEMA, assertBrief, foldConcerns } from "./schema.js";
+import { PREP_SYSTEM, buildPrepMessages, concernsTaskBlock } from "./prompt.js";
 import { verifyBrief, briefSummary } from "./verify.js";
 
 /**
@@ -38,6 +38,83 @@ import { verifyBrief, briefSummary } from "./verify.js";
  * told a candidate the prep is coming. Lower EFFORT before lowering this.
  */
 export const MAX_TOKENS = 48_000;
+
+/**
+ * The #79 call's ceiling, sized separately because the call is a fraction of the size.
+ *
+ * Two intros, a handful of concerns with a CV span each, a counter question per concern and a
+ * short list of questions to ask. Thinking shares this budget as it does above, so it is not
+ * three thousand tokens — but there is no reason to hand a page-and-a-half of output the same
+ * 48k the whole brief gets, and a smaller ceiling makes a runaway cheap to notice.
+ */
+export const CONCERNS_MAX_TOKENS = 16_000;
+
+/**
+ * #79's second call: the likely concerns and the questions to ask.
+ *
+ * WHY THERE ARE TWO CALLS AT ALL — the one thing to read before changing this. `BRIEF_SCHEMA`
+ * shipped at Claude Opus 5's structured-outputs grammar ceiling; a seventh block variant, or one
+ * extra top-level `string[]`, is a `400 "The compiled grammar is too large"` (measured, and
+ * recorded at src/prep/schema.js's CALL_ONE_BLOCK_NAMES). Not a shape this call chose, then, but
+ * the only shape available. Architecture decision 5's "one call, prompt-cached" is amended by
+ * exactly this much, and the prefix is still cached: only the closing instruction differs, so
+ * this call READS the cache the first one wrote.
+ *
+ * Sequential rather than concurrent, because every concern names a `competency_id` and those ids
+ * are the first call's output.
+ *
+ * NEVER THROWS. Returns `{ extra, failure }` — `extra: null` and a failure entry is a brief
+ * without its two extra blocks, which is a smaller loss than no brief at all. The caller pushes
+ * the failure onto the same list a demoted quote lands on, so nothing about it is silent.
+ */
+async function generateConcerns(client, { inputs, engagement, competencies }) {
+  const named = (competencies ?? []).filter((c) => typeof c?.id === "string" && c.id);
+  // No competencies means nothing to hang a concern on. Not a failure — assertBrief is about to
+  // reject the payload for its own reasons, and reporting a second one would misdirect.
+  if (!named.length) return { extra: null, failure: null };
+
+  const fail = (reason) => ({
+    extra: null,
+    failure: { kind: "concerns_call", reason, block: "LikelyConcerns / QuestionsToAsk" },
+  });
+
+  try {
+    const stream = client.beta.messages.stream({
+      model: MODEL,
+      max_tokens: CONCERNS_MAX_TOKENS,
+      system: PREP_SYSTEM,
+      thinking: { type: "adaptive" },
+      output_config: {
+        effort: EFFORT,
+        format: { type: "json_schema", schema: CONCERNS_SCHEMA },
+      },
+      betas: [FALLBACK_BETA],
+      fallbacks: "default",
+      messages: buildPrepMessages({
+        ...inputs,
+        engagement,
+        task: concernsTaskBlock(named, engagement),
+      }),
+    });
+
+    const message = await stream.finalMessage();
+    if (message.stop_reason === "refusal") return fail("the model declined this half");
+    if (message.stop_reason === "max_tokens") {
+      return fail(`truncated at ${CONCERNS_MAX_TOKENS} tokens`);
+    }
+
+    const text = (message.content ?? []).find((b) => b.type === "text")?.text;
+    if (!text) return fail("the model returned nothing for this half");
+
+    return { extra: JSON.parse(text), failure: null };
+  } catch (err) {
+    // Deliberately broad, and deliberately without the message: a network error, a 400 on the
+    // schema, or unparseable JSON are the same event to a recruiter — the brief is fine and two
+    // blocks are missing. `no candidate text reaches an error message` is a tested rule of this
+    // file, and an SDK error can carry the request body.
+    return fail(err instanceof SyntaxError ? "the model's answer was not valid JSON" : "the call failed");
+  }
+}
 
 /**
  * One prep brief: the candidate-visible slice of the client note, plus the brief, the CV and the
@@ -130,7 +207,9 @@ export async function generateBrief(
 
   // Shape first, then sourcing, then return — the payload is verified BEFORE it is returned, and
   // an unsourceable competency comes back marked, never dropped and never silently promoted.
-  // The CLEANED brief is the haystack, because the cleaned brief is what the model was given.
+  // The CLEANED brief is the haystack, because the cleaned brief is what the model was given —
+  // and #79's CV haystack is the CLEANED CV for exactly the same reason. Handing the raw
+  // argument to either would let a quote that is genuinely in the input fail on whitespace.
   //
   // `assertBrief` throws a plain Error by design (schema.js:218: "a shape bug, not an HTTP
   // outcome"), so the translation happens here, where every other model failure in this function
@@ -139,17 +218,35 @@ export async function generateBrief(
   // so a payload the decoder accepted can still fail. Unwrapped it reaches `errorResponse` as
   // `500 internal`, which DEPLOY.md's triage table reads as "the migration did not run" and
   // sends the operator to `npm run db:remote` for a model output problem.
+  // #79's second call, and the fold. It runs BEFORE assertBrief so the folded payload is checked
+  // exactly as a payload from one call would be — including the concern↔question pairing rule,
+  // which is the whole reason the counter questions are minted here rather than later.
+  //
+  // DEGRADES RATHER THAN THROWS. The brief is the product of this route; the two extra surfaces
+  // are additive. Killing a prep brief the recruiter has already promised a candidate, because a
+  // secondary call timed out, would be the same dead Send button MAX_TOKENS is sized to avoid.
+  // It is not silent either — `concerns_call` lands in `failures`, which is what
+  // scripts/gen-brief.js prints and exits 1 on, and briefSummary then counts zero concerns.
+  const { extra, failure: concernsFailure } = await generateConcerns(client, {
+    inputs,
+    engagement,
+    competencies: parsed?.competencies,
+  });
+
   let shaped;
   try {
-    shaped = assertBrief(parsed);
+    shaped = assertBrief(foldConcerns(parsed, extra));
   } catch (err) {
     throw new StoreError("bad_brief", 502, String(err?.message ?? "the model's answer is not a prep brief"));
   }
 
   const { payload, failures } = verifyBrief(shaped, {
     brief: inputs.brief,
+    cv: inputs.cv,
     fieldKeys: inputs.visibleFields.map((f) => f.key),
   });
+
+  if (concernsFailure) failures.push(concernsFailure);
 
   return {
     // Stamped on the VERIFIED payload, so verifyBrief's rebuild cannot drop it. assertBrief

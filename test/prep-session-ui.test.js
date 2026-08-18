@@ -664,9 +664,17 @@ test("day-of gets the day-before shape; two days out does not", { skip }, async 
 function LOCUM_PAYLOAD() {
   const payload = PAYLOAD();
   payload.engagement = "locum";
-  payload.questions.forEach((q, i) => {
-    q.type = ["client", "competency", "screening"][i % 3];
-  });
+  // #79's concern questions keep their type: they are what pairs with the fixture's
+  // LikelyConcerns block, and retyping one makes the whole payload fail assertBrief on the way
+  // out of storage — which arrives here as a blank page rather than as a type problem. The
+  // cycle therefore counts the questions it actually assigns, so all three of the original
+  // groups are still represented however many concern questions the fixture grows.
+  let n = 0;
+  for (const q of payload.questions) {
+    if (q.type === "concern") continue;
+    q.type = ["client", "competency", "screening"][n % 3];
+    n += 1;
+  }
   payload.blocks.push({
     name: "FirstDayPrimer",
     props: {
@@ -702,6 +710,10 @@ test("a locum handover renders the primer and the grouped list, and never enters
   assert.ok(primeText.includes("What this manager tends to ask"), "grouped: client");
   assert.ok(primeText.includes("Expect to be asked about your experience"), "grouped: competency");
   assert.ok(primeText.includes("Have ready"), "grouped: screening");
+  // #79's fourth group. Without it a concern question falls into the competency bucket and
+  // renders under "Expect to be asked about your experience" — a silent mislabelling, which is
+  // the failure registry.js:22-31's rule exists to prevent, arriving through a different door.
+  assert.ok(primeText.includes("Where they may push back"), "grouped: concern");
   assert.ok(primeText.includes(COPY.locumNote), "the honest one-liner renders");
 
   // The perm prime's furniture stays out: no re-priming card, no progress, no resumable note.

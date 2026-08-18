@@ -56,6 +56,24 @@ Rules, in order of importance:
    this one usually does. If the material does not say, say it does not say. When you attribute
    something to the client knowledge, name the field it came from.
 
+7. Name the objections this interviewer is most likely to raise, in a LikelyConcerns block.
+   Derive each one from the GAP between the candidate's CV and the client brief — a first post
+   of this kind, unfamiliar kit, a gap in the record — and put it as an interviewer would put
+   it: about the record, never about the person. The evidence for each concern is a VERBATIM
+   span of THEIR CV and never a sentence of your own. If their material holds no genuine
+   counter, leave the quote EMPTY and write nothing further: the page has its own reviewed
+   words for that, and inventing a counter is rule 2 broken where it does the most damage,
+   because they will rehearse it and an interviewer who probes will hear the seam. Every
+   concern also gets at least one question of type "concern" against the SAME competency, and
+   every one of those is difficulty "probing" — a counter is not the first thing you put in
+   front of someone, it is what they come to once they have had a win.
+
+8. Give the candidate a short QuestionsToAsk block: questions they could ask the interviewer,
+   drawn from the brief and the client knowledge above and specific to THIS role and THIS
+   client. Raw material for their own, never a script — a memorised question sounds memorised
+   too. Never one whose answer is already in the brief, and never one that would reveal what
+   the agency knows privately.
+
 In a clinical staffing context these are not stylistic preferences. A candidate who walks into a
 room having rehearsed a fabricated answer, or having been told they are ready when nobody can
 know that, is carrying our mistake into their own interview.`;
@@ -96,26 +114,59 @@ export const visibleNoteBlock = (clientName, fields = []) =>
 const engagementBlock = (engagement) =>
   engagement === "locum"
     ? "This is a locum booking, not an interview process: there is usually no panel — an " +
-      "informal call with the manager at most. Compose a FirstDayPrimer block from the client " +
-      "knowledge above: how to get in on day one, the scanner fleet and its protocols, PACS " +
-      "and RIS, who to report to. If the client knowledge holds nothing practical, omit the " +
-      "block entirely — an empty block is worse than an absent one. Keep the question bank " +
+      "informal call with the manager at most. Keep the question bank " +
       'slim: mostly type "client" questions drawn from what this manager tends to probe, a few ' +
       'type "competency" questions phrased to verify experience rather than teach it ("Which ' +
-      'scanners have you run solo?"), and one or two type "screening" questions on ' +
-      "availability, rate and compliance logistics. Never generic clinical coaching — the " +
+      'scanners have you run solo?"), one or two type "screening" questions on availability, ' +
+      "rate and compliance logistics, and the concern counters rule 7 asks for, which are type " +
+      '"concern" — a booking has its own likely concerns, unfamiliar kit and a site this ' +
+      "candidate has not worked. Never generic clinical coaching — the " +
       "reader is an expert, and this page only tells them what the agency knows that they " +
       "cannot.\n\n"
-    : 'This is not a locum booking: give every question type "competency", and do not emit a ' +
-      "FirstDayPrimer block.\n\n";
+    : 'This is not a locum booking: give every question type "competency" — except the concern ' +
+      'counters rule 7 asks for, which are type "concern".\n\n';
+
+/**
+ * The second call's closing instruction, and the competencies it has to reference.
+ *
+ * These three surfaces cannot ride the first call: six block variants is a 400 under the
+ * thinking mode this product uses, and `src/prep/schema.js`'s CALL_ONE_BLOCK_NAMES carries the
+ * measurements. The call is SECOND rather than concurrent because every concern names a
+ * `competency_id`, and those ids do not exist until the first call has answered — so the first
+ * call's competencies are handed back in, as the ids-and-labels the model must choose from.
+ *
+ * It appends to the SAME per-candidate block, after the cache breakpoint, so the expensive prefix
+ * (PREP_SYSTEM plus the visible slice) is a cache READ on this call rather than a second write.
+ *
+ * The first-day paragraph is CONDITIONAL on the engagement and appears only for a locum booking
+ * — the same branch `engagementBlock` makes, in the same place relative to the breakpoint, and
+ * for the same reason: this text is per-candidate and must never reach the cached prefix.
+ */
+export const concernsTaskBlock = (competencies = [], engagement) =>
+  `Now write the remaining parts of this same brief, and nothing else.\n\n` +
+  `These are the competencies you just extracted. Every concern and every counter question must ` +
+  `name one of these ids exactly:\n\n<competencies>\n` +
+  competencies.map((c) => `<competency id="${attr(c?.id)}">${c?.label ?? ""}</competency>`).join("\n") +
+  `\n</competencies>\n\n` +
+  `Rule 7's likely concerns, with a counter question for each, and rule 8's questions to ask ` +
+  `them. Both rules apply exactly as stated above — in particular, a concern whose counter is ` +
+  `not literally in the CV gets an EMPTY evidence_quote rather than a sentence of yours.\n\n` +
+  (engagement === "locum"
+    ? "This is a locum booking, so also fill first_day_items from the client knowledge above: " +
+      "how to get in on day one, the scanner fleet and its protocols, PACS and RIS, who to " +
+      "report to. Each item names the field it came from, exactly as the panel does. If the " +
+      "client knowledge holds nothing practical, return an EMPTY list — an empty block is worse " +
+      "than an absent one, and an empty list is how you say there is nothing to say here."
+    : "This is not a locum booking, so first_day_items is an EMPTY list and first_day_intro is " +
+      "an empty string. Do not invent a first day for a permanent role.");
 
 /** The per-candidate half, and the instruction that closes the prompt. */
-export const prepInputsBlock = ({ brief, cv, interviewAt, engagement }) =>
+export const prepInputsBlock = ({ brief, cv, interviewAt, engagement, task }) =>
   `Here is the client's brief for the role:\n\n<brief>\n${brief}\n</brief>\n\n` +
   `Here is the candidate's CV:\n\n<cv>\n${cv}\n</cv>\n\n` +
   `The interview is on ${interviewAt}.\n\n` +
   engagementBlock(engagement) +
-  `Compose the candidate's prep brief.`;
+  (task ?? `Compose the candidate's prep brief.`);
 
 /**
  * The visible slice goes FIRST and is the cache breakpoint: it is the one input reused across
@@ -123,7 +174,7 @@ export const prepInputsBlock = ({ brief, cv, interviewAt, engagement }) =>
  * The brief, the CV, the date and the engagement branch vary per candidate and therefore come
  * after it.
  */
-export function buildPrepMessages({ clientName, visibleFields, brief, cv, interviewAt, engagement }) {
+export function buildPrepMessages({ clientName, visibleFields, brief, cv, interviewAt, engagement, task }) {
   return [
     {
       role: "user",
@@ -135,7 +186,11 @@ export function buildPrepMessages({ clientName, visibleFields, brief, cv, interv
         },
         {
           type: "text",
-          text: prepInputsBlock({ brief, cv, interviewAt, engagement }),
+          // `task` swaps only the CLOSING instruction, which sits after the breakpoint — so #79's
+          // second call reads the same cached prefix rather than writing a second one. It is a
+          // choice between instructions this file already holds, never a channel a caller can
+          // put text through: nothing here interpolates it into the note or the inputs.
+          text: prepInputsBlock({ brief, cv, interviewAt, engagement, task }),
         },
       ],
     },

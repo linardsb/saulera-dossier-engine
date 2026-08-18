@@ -280,12 +280,19 @@ export async function onRequestPost(context) {
     // panel claim that was sourced at prepare demotes here and renders to the candidate
     // wearing an Unverified mark. That is fail-closed and needs no extra code; it is written
     // down so a reviewer does not read it as a race nobody thought about.
-    const { payload, failures } = verifyBrief(struck, { brief, fieldKeys });
+    // #79's second haystack is the cleaned `cv` — the SAME string persisted as `cv_text` below,
+    // so the stored row and the verified `brief_json` cannot disagree about it either.
+    const { payload, failures } = verifyBrief(struck, { brief, cv, fieldKeys });
 
     if (payload.competencies.some((c) => !c.verified)) {
       // The JD half of architecture §3 as a gate. An unsourced PANEL claim does NOT block:
       // demote-don't-drop means it renders wearing its mark, which is the rule working as
       // designed (scripts/gen-brief.js uses the same definition of "sendable").
+      //
+      // #79's concerns do not block either, and for a stronger reason than the panel's. A
+      // demoted concern quote degrades to a blank one, and a blank one is SPEC's normal,
+      // expected state: "the material holds no genuine counter, say so plainly." Blocking a
+      // Send on it would make the honest outcome look like a fault.
       return json({ error: "not_sendable", failures }, 400);
     }
 

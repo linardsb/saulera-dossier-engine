@@ -68,9 +68,23 @@ export function strikeCompetencies(payload, struckIds = []) {
       return { ...block, props: { ...block.props, covers_competency_ids: ids } };
     }
 
-    // PrimerCard, PanelBrief, LogisticsRail and the rest reference no competency, so there is
-    // nothing here to prune. Returned as-is rather than shallow-copied: nothing below mutates
-    // them, and a copy would only obscure that.
+    if (block?.name === "LikelyConcerns") {
+      const concerns = (block.props?.concerns ?? []).filter((c) => !struck.has(c?.competency_id));
+      // A concerns block with nothing left names no objection. Dropped, not kept empty — the
+      // CompetencyMap branch above and registry.js:264-266 make the same call.
+      if (!concerns.length) return null;
+      // The paired questions need no work here: `questions` is already filtered by
+      // `competency_id` above, so a struck competency loses its concern AND its concern
+      // question together, and `assertBrief`'s pairing rule survives a strike for free. That
+      // is the non-obvious part of this branch, which is why it is written down.
+      return { ...block, props: { ...block.props, concerns } };
+    }
+
+    // PrimerCard, PanelBrief, LogisticsRail, QuestionsToAsk and the rest reference no
+    // competency, so there is nothing here to prune — QuestionsToAsk is plain strings about the
+    // client, not about any one competency, so its absence from the branches above is a
+    // decision rather than an omission. Returned as-is rather than shallow-copied: nothing
+    // below mutates them, and a copy would only obscure that.
     return block;
   };
 

@@ -19,10 +19,11 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { generateBrief, MAX_TOKENS } from "../src/prep/generate.js";
-import { BRIEF_SCHEMA } from "../src/prep/schema.js";
+import { generateBrief, MAX_TOKENS, CONCERNS_MAX_TOKENS } from "../src/prep/generate.js";
+import { BRIEF_SCHEMA, CONCERNS_SCHEMA } from "../src/prep/schema.js";
 import { MODEL, EFFORT, FALLBACK_BETA } from "../src/generate.js";
 import { StoreError } from "../src/store.js";
+import { visibleFields } from "../src/note-fields.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), "utf8");
@@ -40,8 +41,17 @@ const INPUTS = {
   interviewAt: "2026-08-12",
 };
 
+/**
+ * `message` may be one reply for every call, or an array answered in order — #79 makes this
+ * module issue TWO requests, and a fake that cannot tell them apart would let the second one be
+ * handed the first one's answer and still go green.
+ *
+ * An array entry may also be a function, which is called and may throw: that is how the
+ * degraded-second-call path is exercised.
+ */
 function fakeAnthropic(message) {
   const calls = [];
+  const replies = Array.isArray(message) ? message : null;
   return {
     calls,
     // The beta namespace, because the refusal fallback rides the beta endpoint. A fake with
@@ -50,12 +60,48 @@ function fakeAnthropic(message) {
       messages: {
         stream(request) {
           calls.push(request);
-          return { finalMessage: async () => message };
+          const reply = replies ? replies[calls.length - 1] : message;
+          if (typeof reply === "function") return { finalMessage: async () => reply() };
+          return { finalMessage: async () => reply };
         },
       },
     },
   };
 }
+
+/** A payload as the FIRST call now returns it: #79's two blocks are the second call's. */
+const briefOnly = () => {
+  const p = structuredClone(PAYLOAD);
+  p.blocks = p.blocks.filter((b) => b.name !== "LikelyConcerns" && b.name !== "QuestionsToAsk");
+  p.questions = p.questions.filter((q) => q.type !== "concern");
+  return p;
+};
+
+/** What the SECOND call returns: no block names, because generate.js writes those itself. */
+const CONCERNS = () => ({
+  concerns_intro: "Two things they will want to test before they offer.",
+  concerns: [
+    {
+      concern: "You came out of an acute ward.",
+      competency_id: "comp-lone-working",
+      evidence_quote: "Community Staff Nurse — Weald Valley Community Trust, 2022–2026",
+    },
+    {
+      concern: "The caseload includes IV therapy and your CV does not mention it.",
+      competency_id: "comp-wound-management",
+      evidence_quote: "",
+    },
+  ],
+  concern_questions: [
+    { competency_id: "comp-lone-working", text: "What makes you different from them?" },
+    { competency_id: "comp-wound-management", text: "How would you get up to speed on IV therapy?" },
+  ],
+  questions_intro: "A few worth having in your pocket.",
+  questions_to_ask: ["How is the caseload split across the Crawley corridor?"],
+});
+
+/** The two-call happy path: the brief, then the concerns. */
+const bothCalls = () => [ok(briefOnly()), ok(CONCERNS())];
 
 const ok = (payload = PAYLOAD, extra = {}) => ({
   stop_reason: "end_turn",
@@ -149,6 +195,173 @@ test("the breakpoint is on the visible slice, with the per-candidate inputs afte
   assert.ok(blocks[1].text.includes(BRIEF) && blocks[1].text.includes(CV));
 });
 
+/* ── #79: the second call, and what it costs ───────────────────────────────────────────── */
+
+test("#79: a second call carries the two surfaces, and the first call never asks for them", async () => {
+  // WHY THERE ARE TWO. BRIEF_SCHEMA shipped at Claude Opus 5's structured-outputs grammar
+  // ceiling: a seventh block variant is a 400, measured. So this asserts the split itself —
+  // the first request must not name either block, or the whole Send dies rather than degrading.
+  const db = fakeAnthropic(bothCalls());
+  const result = await generateBrief(db, INPUTS);
+
+  assert.equal(db.calls.length, 2, "one call for the brief, one for the concerns");
+
+  // On the BRANCH names, not on the serialised text: `question.type`'s description mentions
+  // LikelyConcerns in prose, which is free — descriptions cost no grammar at all (measured: the
+  // eight-branch schema with every description stripped still 400s). It is the seventh and
+  // eighth `anyOf` branches that are the 400.
+  const branches = db.calls[0].output_config.format.schema.properties.blocks.items.anyOf;
+  const named = branches.map((b) => b.properties.name.const);
+  assert.equal(named.length, 5, "five branches is what compiles; six is the 400 #50 shipped");
+  for (const name of ["FirstDayPrimer", "LikelyConcerns", "QuestionsToAsk"]) {
+    assert.ok(!named.includes(name), `${name} in the first call's anyOf is a dead Send button`);
+  }
+
+  assert.deepEqual(db.calls[1].output_config.format.schema, CONCERNS_SCHEMA);
+  assert.equal(db.calls[1].max_tokens, CONCERNS_MAX_TOKENS, "sized for its own, smaller answer");
+  assert.equal(db.calls[1].model, MODEL, "the same model — one definition, both calls");
+
+  // Both blocks arrive folded, under names generate.js wrote rather than a decoder minted.
+  const concerns = result.payload.blocks.find((b) => b.name === "LikelyConcerns");
+  const asks = result.payload.blocks.find((b) => b.name === "QuestionsToAsk");
+  assert.ok(concerns && asks, "both surfaces reached the payload");
+  assert.equal(concerns.props.concerns.length, 2);
+  assert.deepEqual(asks.props.questions, ["How is the caseload split across the Crawley corridor?"]);
+
+  // The counter questions are ordinary questions in the bank, minted probing.
+  const minted = result.payload.questions.filter((q) => q.type === "concern");
+  assert.equal(minted.length, 2);
+  assert.ok(minted.every((q) => q.difficulty === "probing"), "a counter never opens a competency");
+  assert.ok(minted.every((q) => q.axis === "core"));
+});
+
+test("#79: the second call reads the cached prefix and is told the competencies by id", async () => {
+  // The economics of the split. If the second call rewrote the prefix it would cost as much as
+  // the first, and decision 5's caching argument would be gone. Only the CLOSING instruction
+  // differs, and that sits after the breakpoint.
+  const db = fakeAnthropic(bothCalls());
+  await generateBrief(db, INPUTS);
+  const [first, second] = db.calls;
+
+  assert.deepEqual(
+    second.messages[0].content[0],
+    first.messages[0].content[0],
+    "the cached block is byte-identical, so the second call is a cache READ",
+  );
+  assert.equal(second.system, first.system, "and PREP_SYSTEM is the same string");
+  assert.notEqual(second.messages[0].content[1].text, first.messages[0].content[1].text);
+
+  // Sequential for a reason: a concern names a competency_id, and those ids are the first
+  // call's output. The second call is handed them, so it cannot invent one.
+  const inputs = second.messages[0].content[1].text;
+  for (const c of briefOnly().competencies) {
+    assert.ok(inputs.includes(c.id), `${c.id} was not offered to the second call`);
+    assert.ok(inputs.includes(c.label), `${c.label} was not offered to the second call`);
+  }
+});
+
+test("#79: a failed second call degrades to a brief without the blocks, and says so", async () => {
+  // The brief is this route's product; the two extra surfaces are additive. Killing a prep brief
+  // the recruiter has already promised a candidate, because a secondary call timed out, is the
+  // same dead Send button MAX_TOKENS is sized to avoid. Degrading is the call — but never in
+  // silence, so it lands in `failures` where scripts/gen-brief.js prints it and exits 1.
+  const cases = [
+    ["a thrown error", () => { throw new Error("socket hang up"); }],
+    ["a refusal", { stop_reason: "refusal", content: [] }],
+    ["a truncation", { stop_reason: "max_tokens", content: [] }],
+    ["unparseable JSON", { stop_reason: "end_turn", content: [{ type: "text", text: "{oh dear" }] }],
+    ["no text at all", { stop_reason: "end_turn", content: [] }],
+  ];
+
+  for (const [why, reply] of cases) {
+    const db = fakeAnthropic([ok(briefOnly()), reply]);
+    const result = await generateBrief(db, INPUTS);
+
+    assert.ok(result.payload.blocks.length, `${why}: there is still a brief`);
+    assert.ok(
+      !result.payload.blocks.some((b) => ["LikelyConcerns", "QuestionsToAsk"].includes(b.name)),
+      `${why}: no half-built block was folded in`,
+    );
+    const failure = result.failures.find((f) => f.kind === "concerns_call");
+    assert.ok(failure, `${why}: the loss was not recorded`);
+    assert.equal(result.provenance.concern_total, 0, `${why}: and it counts as zero concerns`);
+  }
+});
+
+test("#79: no candidate text reaches a degraded second call's failure entry", async () => {
+  // The rule this file already holds for every other model failure. An SDK error can carry the
+  // request body, and the request body is the candidate's CV.
+  const db = fakeAnthropic([
+    ok(briefOnly()),
+    () => { throw new Error(`upstream said: ${CV}`); },
+  ]);
+  const result = await generateBrief(db, INPUTS);
+
+  const wire = JSON.stringify(result.failures.find((f) => f.kind === "concerns_call"));
+  assert.ok(!wire.includes("Weald Valley"), "the CV reached the failure entry");
+  assert.ok(!wire.includes("socket") && !wire.includes("upstream"), "and neither did the raw error");
+});
+
+/* ── AC3 (#79): the unshared half of the note cannot reach either new block ─────────────── */
+
+test("AC3: an unticked note section reaches nothing in the request, and the ticked half does", async () => {
+  // Built from the REAL gate rather than a hand-made array, because the claim is about the
+  // seam and not about a fixture. `visibleFields` (src/note-fields.js:209-214) is the only
+  // channel; this asserts that #79's two blocks added no second one.
+  //
+  // The existing `.note` grep gate covers functions/api/prep/prepare.js ONLY
+  // (test/prep-prepare.test.js:166-171) — verified. It does not reach src/prep/prompt.js or
+  // this module, so AC3 is not already covered and this test is not redundant.
+  const NOTE = [
+    "## Their process",
+    "Two stages, both in East Grinstead.",
+    "",
+    "## What we really think",
+    "Rejected our last two candidates for being vague under pressure. Do not share.",
+  ].join("\n");
+
+  const slice = visibleFields(NOTE, ["their-process"]);
+  assert.equal(slice.length, 1, "the gate handed over one section, so the test has a hidden half");
+
+  const db = fakeAnthropic(bothCalls());
+  await generateBrief(db, { ...INPUTS, visibleFields: slice });
+
+  // EVERY request, not just the first. #79 added a second call, and a leak proof that read
+  // `calls[0]` would have stopped covering the very blocks the criterion is about.
+  assert.equal(db.calls.length, 2, "both calls are about to be searched");
+  for (const [i, call] of db.calls.entries()) {
+    // THE WHOLE serialised request, not visibleNoteBlock's output. The point is that no new
+    // parameter smuggled the note in through the second content block, the system prompt, or
+    // anywhere else — buildPrepMessages is the only way text reaches the model, so a leak
+    // anywhere in this object is a leak.
+    const sent = JSON.stringify(call);
+    assert.ok(!sent.includes("Rejected our last two candidates"), `call ${i}: unshared text travelled`);
+    assert.ok(!sent.includes("what-we-really-think"), `call ${i}: even its key travelled`);
+    assert.ok(sent.includes("Two stages, both in East Grinstead"), `call ${i}: the SHARED half must be there`);
+  }
+});
+
+test("AC3, structurally: the prompt has one input surface and it never reads the note", () => {
+  // The grep half, mirroring the Level 1 gate test/prep-prepare.test.js applies to the Function.
+  // `visibleFields` is already filtered by the time it arrives, so what makes AC3 provable is
+  // that there is no OTHER parameter — a `note` argument added for #79's concerns would have
+  // been the obvious shortcut and this is what refuses it.
+  const source = read("../src/prep/prompt.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  assert.doesNotMatch(source, /\.note\b/, "src/prep/prompt.js must never read a client note");
+
+  const signature = source.match(/export function buildPrepMessages\(\{([^}]*)\}\)/);
+  assert.ok(signature, "buildPrepMessages still takes one destructured object");
+  assert.deepEqual(
+    signature[1].split(",").map((s) => s.trim()).filter(Boolean).sort(),
+    // `task` is #79's second call selecting its closing instruction — a choice between
+    // instructions this module already holds, never a channel for caller text: nothing
+    // interpolates it into the note block or the inputs block.
+    ["brief", "clientName", "cv", "engagement", "interviewAt", "task", "visibleFields"],
+    "#79 added no channel into the prompt; the note is not one of these and cannot become one " +
+      "without this line changing",
+  );
+});
+
 /* ── the engagement stamp (#50) ────────────────────────────────────────────────────────── */
 
 test("engagement is computed from the cleaned inputs, stamped on the payload, and told to the prompt", async () => {
@@ -195,6 +408,13 @@ test("a fabricated competency quote comes back demoted, marked, and not dropped"
     primer_sourced: 0,
     primer_unsourced: 0,
     primer_total: 0,
+    // #79: the CV reached verifyBrief, so the fixture's evidenced concern stands up and the
+    // honest gap is counted as itself. Both would read `concern_unsourced: 2` if generate.js
+    // had forgotten the second haystack — which is the failure this line actually guards.
+    concern_sourced: 1,
+    concern_unsourced: 0,
+    concern_no_material: 1,
+    concern_total: 2,
   });
 });
 
@@ -309,7 +529,7 @@ test("an empty visible slice STILL calls the model — the divergence from note_
   const db = fakeAnthropic(ok());
   const result = await generateBrief(db, { ...INPUTS, visibleFields: [] });
 
-  assert.equal(db.calls.length, 1, "the call happens");
+  assert.equal(db.calls.length, 2, "the call happens — and #79's second one after it");
   assert.equal(result.payload.competencies.length, 3);
   // Every panel claim is unsourceable now, and says so rather than throwing.
   assert.equal(result.failures.filter((f) => f.kind === "panel_source").length, 2);
