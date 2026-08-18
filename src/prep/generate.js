@@ -68,7 +68,15 @@ export const CONCERNS_MAX_TOKENS = 16_000;
  * the failure onto the same list a demoted quote lands on, so nothing about it is silent.
  */
 async function generateConcerns(client, { inputs, engagement, competencies }) {
-  const named = (competencies ?? []).filter((c) => typeof c?.id === "string" && c.id);
+  // `Array.isArray`, not `?? []`: this line is OUTSIDE the try below, so a `competencies` that is
+  // an object or a string throws `TypeError: .filter is not a function` straight out of a
+  // function whose contract is NEVER THROWS, past generateBrief unwrapped, and lands as
+  // `500 internal` — which DEPLOY.md's triage table reads as "the migration did not run" and
+  // sends the operator to `npm run db:remote` for a model output problem. Coerced here, the same
+  // input reaches assertBrief and gets the `502 bad_brief` it had before this call existed.
+  const named = (Array.isArray(competencies) ? competencies : []).filter(
+    (c) => typeof c?.id === "string" && c.id,
+  );
   // No competencies means nothing to hang a concern on. Not a failure — assertBrief is about to
   // reject the payload for its own reasons, and reporting a second one would misdirect.
   if (!named.length) return { extra: null, failure: null };
@@ -225,19 +233,55 @@ export async function generateBrief(
   // DEGRADES RATHER THAN THROWS. The brief is the product of this route; the two extra surfaces
   // are additive. Killing a prep brief the recruiter has already promised a candidate, because a
   // secondary call timed out, would be the same dead Send button MAX_TOKENS is sized to avoid.
-  // It is not silent either — `concerns_call` lands in `failures`, which is what
-  // scripts/gen-brief.js prints and exits 1 on, and briefSummary then counts zero concerns.
-  const { extra, failure: concernsFailure } = await generateConcerns(client, {
+  //
+  // NOT SILENT — but only because both callers were made to read it. `concerns_call` lands in
+  // `failures`; scripts/gen-brief.js prints that and exits 1, and functions/api/prep/prepare.js
+  // logs it. Returning it here is half the contract: for a whole PR the HTTP route put `failures`
+  // in a 200 body nothing read, so the recruiter's copy of this loss was silent. A new caller
+  // of this function inherits that trap unless it reads the list.
+  let { extra, failure: concernsFailure } = await generateConcerns(client, {
     inputs,
     engagement,
     competencies: parsed?.competencies,
   });
 
+  // THE DEGRADE COVERS CONTENT, NOT ONLY CALLS. `generateConcerns` never throws, but a second
+  // call that answers PERFECTLY WELL by its own schema can still answer wrongly for this brief:
+  // `competency_id` is a free string, so it can name an id the first call never emitted, and
+  // structured outputs reject `minItems`, so `concerns` and `concern_questions` cannot be paired
+  // by length. `foldConcerns` cross-checks what it can; `assertBrief` then enforces the rest and
+  // throws — on the FOLDED payload, which means a fault in the cheap second call takes the
+  // expensive first call's brief down with it.
+  //
+  // That is the wrong way round. The recruiter has already promised this candidate their prep,
+  // has already paid for both calls, and a retry pays for both again — to recover a brief that
+  // was correct the first time. So: fold, and if the fold will not assert, assert the first
+  // call's payload ALONE and report the second call as failed. The blocks are additive; the
+  // brief is the product.
   let shaped;
   try {
     shaped = assertBrief(foldConcerns(parsed, extra));
-  } catch (err) {
-    throw new StoreError("bad_brief", 502, String(err?.message ?? "the model's answer is not a prep brief"));
+  } catch {
+    try {
+      shaped = assertBrief(parsed);
+    } catch (err) {
+      // Now it IS the first call's brief that is unshaped, and there is nothing left to ship.
+      throw new StoreError(
+        "bad_brief",
+        502,
+        String(err?.message ?? "the model's answer is not a prep brief"),
+      );
+    }
+    // `??=`: a call-level failure already recorded is the more specific diagnosis and keeps it.
+    // The reason is HAND-WRITTEN and never the fold error's message, which can quote model output
+    // — the same rule generateConcerns' catch keeps, and for the same reason.
+    concernsFailure ??= {
+      kind: "concerns_call",
+      // All three of the second call's blocks are lost together, because all three come out of
+      // the one `extra` this fold just dropped.
+      block: "LikelyConcerns / QuestionsToAsk / FirstDayPrimer",
+      reason: "the second call's answer did not fit the brief",
+    };
   }
 
   const { payload, failures } = verifyBrief(shaped, {

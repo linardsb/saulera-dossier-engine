@@ -30,17 +30,28 @@
 // "Five" is this schema's number, not a documented API limit; treat any addition as unmeasured
 // until this file says otherwise.
 //
-// A gate that probes on easier settings than production runs on is not a gate. `EFFORT`,
-// `max_tokens` and the real prompt are held here for the same reason; only `max_tokens` is
-// dropped to 16, because grammar compilation happens before generation and the rest of a real
-// answer is not worth paying for on every run.
+// A gate that probes on easier settings than production runs on is not a gate. `EFFORT` and the
+// thinking mode are read off the modules that send them, so this file cannot drift from
+// production by editing a literal here. Two parameters are DELIBERATELY not production's:
+// `max_tokens` is 16, and the prompt is `system: "x"` / `content: "hi"`, because the grammar is
+// compiled before a single token is generated — the schema is the whole subject of this file, and
+// the rest of a real request would be paid for on every run to prove nothing extra.
 //
-// WHY THIS FILE IS NOT PART OF `npm test`'s CONTRACT. It needs a real key and it costs a live
-// request, so it SKIPS without ANTHROPIC_API_KEY — the same skip idiom test/helpers/sqlite-d1.js
-// uses for the real-SQL tests. A skipped run proves nothing; that is the honest state of it, and
-// it is why the skip says so out loud rather than passing quietly.
+// WHY THIS FILE IS NOT IN `npm test`. It needs a real key and it costs a live request per test.
+// `npm test` is `node --test test/*.test.js` — a shell glob, and `*` does not cross a `/` — so
+// living in `test/live/` is what makes "not part of npm test's contract" true in the WIRING and
+// not only in a comment. #33's rule is that a run which skipped anything proves less than it
+// says, and CI enforces it by refusing any skip; a key-gated file inside the glob made that gate
+// red on every PR, including its own.
 //
-//   ANTHROPIC_API_KEY=sk-ant-... node --test test/prep-schema-fits.test.js
+//   ANTHROPIC_API_KEY=sk-ant-... npm run test:live
+//
+// And it does not skip without a key. The skip idiom existed because this file was in the glob;
+// out of it, the command is only ever run deliberately, so a keyless run is a MISTAKE and says so
+// — the same shape as test/node-version.test.js, the loud half of #33's gate. Nothing here runs
+// automatically: after a schema change, this is a command someone has to type. There is no
+// scheduled job yet (a `pull_request` run from a fork receives no secrets, so a repo secret does
+// not solve it) — that gap is #90, tracked rather than forgotten.
 //
 // A rejection costs nothing: the request is refused before a single token is generated.
 
@@ -50,12 +61,27 @@ import { readFileSync } from "node:fs";
 
 import Anthropic from "@anthropic-ai/sdk";
 
-import { BRIEF_SCHEMA, CONCERNS_SCHEMA } from "../src/prep/schema.js";
-import { MODEL, EFFORT, FALLBACK_BETA } from "../src/generate.js";
-import { MAX_TOKENS } from "../src/prep/generate.js";
+import { BRIEF_SCHEMA, CONCERNS_SCHEMA } from "../../src/prep/schema.js";
+import { MODEL, EFFORT, FALLBACK_BETA } from "../../src/generate.js";
+import { MAX_TOKENS } from "../../src/prep/generate.js";
 
 const key = process.env.ANTHROPIC_API_KEY;
 const skip = key ? false : "no ANTHROPIC_API_KEY: the ceiling is UNCHECKED on this run";
+
+/**
+ * The loud half. Without this, a keyless `npm run test:live` exits 0 over four skips — a run that
+ * reports success while the ceiling went entirely unprobed, which is #33's failure mode and the
+ * one this whole file exists to stop.
+ */
+test("this gate was asked for, so it needs the key it runs on", () => {
+  assert.ok(
+    key,
+    "ANTHROPIC_API_KEY is unset, so nothing below can run and this command proved NOTHING about " +
+      "the grammar ceiling. It is not part of `npm test` precisely so that it is never a silent " +
+      "skip: run it with a key, or do not count it.\n\n" +
+      "  ANTHROPIC_API_KEY=sk-ant-... npm run test:live",
+  );
+});
 
 /**
  * Compile the schema at the parameters `generateBrief` sends — the thinking mode above all,
@@ -88,14 +114,29 @@ async function compiles(schema) {
 }
 
 /** The mode the product sends, read off the module rather than trusted to a comment. */
-test("this gate probes the thinking mode generateBrief actually uses", { skip }, async () => {
-  const source = readFileSync(new URL("../src/prep/generate.js", import.meta.url), "utf8");
-  assert.match(
-    source,
-    /thinking:\s*\{\s*type:\s*"adaptive"\s*\}/,
-    "generateBrief no longer sends adaptive thinking. The ceiling moves with the thinking mode, " +
-      "so `compiles()` above has to move with it or this whole file goes back to passing while " +
-      "production 400s — which is exactly how #50's outage survived for weeks.",
+test("this gate probes the thinking mode BOTH calls actually use", { skip }, async () => {
+  const source = readFileSync(new URL("../../src/prep/generate.js", import.meta.url), "utf8");
+  const sent = source.match(/thinking:\s*\{\s*type:\s*"adaptive"\s*\}/g) ?? [];
+
+  // THE COUNT, NOT THE PRESENCE. #79 gave this module a SECOND call, and a bare `assert.match`
+  // passes as soon as EITHER literal matches. The silent pass that buys: a later ticket reads
+  // this file's own table ("six branches, thinking: disabled ....... OK"), switches the
+  // BRIEF_SCHEMA call to `disabled` to win a sixth branch back, and leaves generateConcerns on
+  // adaptive. One literal still matches, `compiles()` still probes adaptive, and the gate stays
+  // green while production sends a mode nothing measured — verbatim the failure the assertion
+  // below describes. Counting is what closes it.
+  //
+  // An `assert.match` on the SOURCE, deliberately: a refactor to a shared constant fails here
+  // loudly rather than passing vacuously, and being told to update this gate is the point.
+  assert.equal(
+    sent.length,
+    2,
+    `src/prep/generate.js sends adaptive thinking on ${sent.length} call(s), not 2. The ceiling ` +
+      "moves with the thinking mode, and `compiles()` below probes ONE mode for both calls — so " +
+      "either a call changed mode (re-measure the table at the top of this file, and give " +
+      "`compiles()` the mode each schema is actually sent at) or a call was added or removed " +
+      "(update this count). Left alone, this whole file goes back to passing while production " +
+      "400s, which is exactly how #50's outage survived for weeks.",
   );
 });
 
@@ -146,12 +187,24 @@ test("#50's SIXTH BRANCH IS STILL AN OUTAGE — the actual bug, reproduced", { s
     required: ["name", "props"],
   });
 
-  const { ok } = await compiles(probe);
+  const { ok, why } = await compiles(probe);
   assert.equal(
     ok,
     false,
     "BRIEF_SCHEMA now has room for #50's FirstDayPrimer branch, which it did not have on " +
       "18 Aug 2026. Re-measure the table at the top of this file, and reconsider whether it, " +
       "LikelyConcerns and QuestionsToAsk still need the second call.",
+  );
+
+  // AND FOR THE RIGHT REASON. This is the one test in the file whose assertion is SATISFIED by
+  // things going wrong: `compiles()` catches every exception, so a 401, a 429, a 529, a model
+  // rename or a typo in the probe branch above all make it green — including runs where the
+  // grammar ceiling was never exercised at all. Checking the message is what separates "the
+  // ceiling still bites" from "the request never got there".
+  assert.match(
+    why,
+    /grammar is too large/i,
+    "the probe failed, but not on the ceiling — so #50's branch is UNMEASURED on this run rather " +
+      `than proven fatal. Read the error before trusting the green above it.\n\n${why}`,
   );
 });

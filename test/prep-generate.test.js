@@ -288,6 +288,134 @@ test("#79: a failed second call degrades to a brief without the blocks, and says
   }
 });
 
+test("#79: a second call that ANSWERS but mispairs degrades too — the brief is not lost", async () => {
+  // The five cases above are all CALL failures. This is the other half, and the one the degrade
+  // contract missed: a second call that succeeds, returns valid JSON, and satisfies
+  // CONCERNS_SCHEMA completely — while saying something that cannot be folded into THIS brief.
+  //
+  // CONCERNS_SCHEMA cannot prevent any of it. `competency_id` is a free string (there is no way
+  // to say "an id from that other array"), and structured outputs reject `minItems`, so the two
+  // arrays cannot be length-paired. `assertBrief` catches what the schema could not — and used to
+  // do it by throwing, which meant a cheap second call took the expensive first call's brief with
+  // it. The recruiter loses a brief that was CORRECT, in front of a candidate they have already
+  // promised, and the retry pays for both calls again.
+  const base = CONCERNS();
+  const cases = [
+    [
+      "a concern with no counter",
+      { ...base, concerns: [base.concerns[0]], concern_questions: [] },
+    ],
+    [
+      "a concern under an id the first call never emitted",
+      {
+        ...base,
+        concerns: [{ ...base.concerns[0], competency_id: "comp-invented" }],
+        concern_questions: [{ competency_id: "comp-invented", text: "How would you cope?" }],
+      },
+    ],
+    [
+      "a counter tagged under a different competency",
+      {
+        ...base,
+        concerns: [base.concerns[0]],
+        concern_questions: [{ competency_id: "comp-documentation", text: "How do you record it?" }],
+      },
+    ],
+    [
+      "a counter with an empty question",
+      {
+        ...base,
+        concerns: [base.concerns[0]],
+        concern_questions: [{ competency_id: base.concerns[0].competency_id, text: "" }],
+      },
+    ],
+  ];
+
+  for (const [why, extra] of cases) {
+    const db = fakeAnthropic([ok(briefOnly()), ok(extra)]);
+    const result = await generateBrief(db, INPUTS);
+
+    assert.ok(result.payload.blocks.length, `${why}: the first call's brief still ships`);
+    assert.ok(
+      !result.payload.blocks.some((b) =>
+        ["LikelyConcerns", "QuestionsToAsk", "FirstDayPrimer"].includes(b.name),
+      ),
+      `${why}: nothing from the unassertable answer was folded in`,
+    );
+    assert.ok(
+      !result.payload.questions.some((q) => q.type === "concern"),
+      `${why}: and no counter survived without its block`,
+    );
+
+    // Degraded, never silent — same entry the five call failures produce, so every reader of
+    // `failures` handles one case rather than two.
+    const failure = result.failures.find((f) => f.kind === "concerns_call");
+    assert.ok(failure, `${why}: the loss was not recorded`);
+    assert.equal(result.provenance.concern_total, 0, `${why}: and it counts as zero concerns`);
+  }
+});
+
+test("#79: the fold's own error message never reaches the failure entry", async () => {
+  // `assertBrief` quotes the offending value, and the offending value is model output — a
+  // competency id, or the concern text itself. The degrade's reason is hand-written for exactly
+  // that reason, the same rule generateConcerns' catch keeps.
+  const base = CONCERNS();
+  const db = fakeAnthropic([
+    ok(briefOnly()),
+    ok({
+      ...base,
+      concerns: [{ ...base.concerns[0], competency_id: "comp-weald-valley-secret" }],
+      concern_questions: [{ competency_id: "comp-weald-valley-secret", text: "How would you cope?" }],
+    }),
+  ]);
+  const result = await generateBrief(db, INPUTS);
+
+  const wire = JSON.stringify(result.failures.find((f) => f.kind === "concerns_call"));
+  assert.ok(!wire.includes("comp-weald-valley-secret"), "the fold error's message was passed through");
+  assert.ok(!wire.includes("brief:"), "and so was assertBrief's prefix");
+});
+
+test("#79: a malformed competencies list is a 502 bad_brief, not a 500", async () => {
+  // `generateConcerns` reads `competencies` OUTSIDE its own try, so `(competencies ?? [])
+  // .filter(...)` threw a TypeError on anything that is neither null nor an array — out of a
+  // function documented NEVER THROWS, past generateBrief unwrapped, and into errorResponse as
+  // `500 internal`. DEPLOY.md's triage table reads that as "the migration did not run" and sends
+  // the operator to `npm run db:remote` for what is a model output problem. Reachability is low
+  // (the decoder constrains the field) — the cost is an operator's hour on the wrong wall.
+  for (const competencies of [{ id: "comp-x" }, "comp-x", 7, true]) {
+    const broken = briefOnly();
+    broken.competencies = competencies;
+
+    const db = fakeAnthropic([ok(broken), ok(CONCERNS())]);
+    const err = await generateBrief(db, INPUTS).then(
+      () => null,
+      (e) => e,
+    );
+
+    assert.ok(err instanceof StoreError, `${JSON.stringify(competencies)}: not a StoreError`);
+    assert.equal(err.code, "bad_brief", `${JSON.stringify(competencies)}: wrong code`);
+    assert.equal(err.status, 502, `${JSON.stringify(competencies)}: wrong status`);
+  }
+});
+
+test("#79: a first call that is itself unshaped is still a 502 — the degrade is not a swallow", async () => {
+  // The degrade must not become a catch-all. If the FIRST call's payload cannot assert on its
+  // own, there is no brief to ship and 502 bad_brief is the honest answer — including when the
+  // second call is perfectly fine, which is the case a naive fallback would hide.
+  const broken = briefOnly();
+  broken.questions = broken.questions.filter((q) => q.competency_id !== "comp-documentation");
+
+  const db = fakeAnthropic([ok(broken), ok(CONCERNS())]);
+  const err = await generateBrief(db, INPUTS).then(
+    () => null,
+    (e) => e,
+  );
+
+  assert.ok(err instanceof StoreError, "an unshaped first call still throws");
+  assert.equal(err.code, "bad_brief");
+  assert.equal(err.status, 502);
+});
+
 test("#79: no candidate text reaches a degraded second call's failure entry", async () => {
   // The rule this file already holds for every other model failure. An SDK error can carry the
   // request body, and the request body is the candidate's CV.

@@ -16,6 +16,19 @@
 // generateBrief — the same place generatePack runs it. Guarding in both would be a second
 // definition of what a valid input is, which is how the two drift.
 
+/**
+ * The system prompt on BOTH calls, and therefore the cached prefix — it may only ever gain
+ * UNCONDITIONAL text (test/prep-prompt.test.js's engagement-free rule).
+ *
+ * The rules stop at six. #79's concerns and questions-to-ask were rules 7 and 8 here until they
+ * asked the first call for `LikelyConcerns` and `QuestionsToAsk` — two blocks its `anyOf` does not
+ * carry, because a sixth branch is a 400 (src/prep/schema.js's CALL_ONE_BLOCK_NAMES). Instructing
+ * a decoder to emit a variant it cannot express is how a model spends tokens on an answer that
+ * gets rejected, so both rules now live in `concernsTaskBlock` — the closing instruction of the
+ * call whose schema actually carries those fields, and after the cache breakpoint, exactly where
+ * #50's primer instruction went. NOTHING that names a block, a field or a question `type` belongs
+ * in here, because "here" is every call.
+ */
 export const PREP_SYSTEM = `You write interview preparation for a candidate a recruitment agency has
 already submitted to a client. The client has offered them an interview. Your reader is that
 candidate, not the recruiter and not the client.
@@ -56,24 +69,6 @@ Rules, in order of importance:
    this one usually does. If the material does not say, say it does not say. When you attribute
    something to the client knowledge, name the field it came from.
 
-7. Name the objections this interviewer is most likely to raise, in a LikelyConcerns block.
-   Derive each one from the GAP between the candidate's CV and the client brief — a first post
-   of this kind, unfamiliar kit, a gap in the record — and put it as an interviewer would put
-   it: about the record, never about the person. The evidence for each concern is a VERBATIM
-   span of THEIR CV and never a sentence of your own. If their material holds no genuine
-   counter, leave the quote EMPTY and write nothing further: the page has its own reviewed
-   words for that, and inventing a counter is rule 2 broken where it does the most damage,
-   because they will rehearse it and an interviewer who probes will hear the seam. Every
-   concern also gets at least one question of type "concern" against the SAME competency, and
-   every one of those is difficulty "probing" — a counter is not the first thing you put in
-   front of someone, it is what they come to once they have had a win.
-
-8. Give the candidate a short QuestionsToAsk block: questions they could ask the interviewer,
-   drawn from the brief and the client knowledge above and specific to THIS role and THIS
-   client. Raw material for their own, never a script — a memorised question sounds memorised
-   too. Never one whose answer is already in the brief, and never one that would reveal what
-   the agency knows privately.
-
 In a clinical staffing context these are not stylistic preferences. A candidate who walks into a
 room having rehearsed a fabricated answer, or having been told they are ready when nobody can
 know that, is carrying our mistake into their own interview.`;
@@ -110,6 +105,12 @@ export const visibleNoteBlock = (clientName, fields = []) =>
  * The engagement branch (#50), rendered per candidate and therefore strictly AFTER the cache
  * breakpoint — src/domain.js's deterministic read decides it, never the model. PREP_SYSTEM must
  * not carry any of this: it sits inside the cached prefix and may only gain unconditional text.
+ *
+ * The question types here are the FIRST call's bank, and `"concern"` is deliberately not among
+ * them: a counter is minted by `foldConcerns` from the second call's answer, with its `type` and
+ * its `difficulty` written in code. Neither schema has a field for it, so asking either call for
+ * one is asking for something no decoder can return. This block is composed onto both calls, so
+ * an exception carved here would land on both.
  */
 const engagementBlock = (engagement) =>
   engagement === "locum"
@@ -117,14 +118,11 @@ const engagementBlock = (engagement) =>
       "informal call with the manager at most. Keep the question bank " +
       'slim: mostly type "client" questions drawn from what this manager tends to probe, a few ' +
       'type "competency" questions phrased to verify experience rather than teach it ("Which ' +
-      'scanners have you run solo?"), one or two type "screening" questions on availability, ' +
-      "rate and compliance logistics, and the concern counters rule 7 asks for, which are type " +
-      '"concern" — a booking has its own likely concerns, unfamiliar kit and a site this ' +
-      "candidate has not worked. Never generic clinical coaching — the " +
+      'scanners have you run solo?"), and one or two type "screening" questions on availability, ' +
+      "rate and compliance logistics. Never generic clinical coaching — the " +
       "reader is an expert, and this page only tells them what the agency knows that they " +
       "cannot.\n\n"
-    : 'This is not a locum booking: give every question type "competency" — except the concern ' +
-      'counters rule 7 asks for, which are type "concern".\n\n';
+    : 'This is not a locum booking: give every question type "competency".\n\n';
 
 /**
  * The second call's closing instruction, and the competencies it has to reference.
@@ -141,6 +139,17 @@ const engagementBlock = (engagement) =>
  * The first-day paragraph is CONDITIONAL on the engagement and appears only for a locum booking
  * — the same branch `engagementBlock` makes, in the same place relative to the breakpoint, and
  * for the same reason: this text is per-candidate and must never reach the cached prefix.
+ *
+ * THE TWO RULES LIVE HERE, NOT IN PREP_SYSTEM. They were rules 7 and 8 there, and there they were
+ * read by the first call, whose `anyOf` carries neither block. Everything they ask for is named by
+ * the FIELD `CONCERNS_SCHEMA` actually has — `concerns`, `concern_questions`, `questions_to_ask` —
+ * and never by the block, for the same reason the primer paragraph says `first_day_items`: the
+ * second call returns bare fields and `foldConcerns` writes the block names in code. A prompt that
+ * names a block no decoder can mint is the bug this move exists to close.
+ *
+ * `difficulty` is not asked for either. Every counter is minted `"probing"` by `foldConcerns`, off
+ * the schema entirely, so that a counter can never be the easiest unattempted question on a
+ * competency — CONCERNS_SCHEMA's own note has the reasoning.
  */
 export const concernsTaskBlock = (competencies = [], engagement) =>
   `Now write the remaining parts of this same brief, and nothing else.\n\n` +
@@ -148,11 +157,25 @@ export const concernsTaskBlock = (competencies = [], engagement) =>
   `name one of these ids exactly:\n\n<competencies>\n` +
   competencies.map((c) => `<competency id="${attr(c?.id)}">${c?.label ?? ""}</competency>`).join("\n") +
   `\n</competencies>\n\n` +
-  `Rule 7's likely concerns, with a counter question for each, and rule 8's questions to ask ` +
-  `them. Both rules apply exactly as stated above — in particular, a concern whose counter is ` +
-  `not literally in the CV gets an EMPTY evidence_quote rather than a sentence of yours.\n\n` +
+  `First, in concerns: name the objections this interviewer is most likely to raise. Derive each ` +
+  `one from the GAP between the candidate's CV and the client brief — a first post of this kind, ` +
+  `unfamiliar kit, a gap in the record — and put it as an interviewer would put it: about the ` +
+  `record, never about the person. The evidence for each concern is a VERBATIM span of THEIR CV ` +
+  `and never a sentence of your own. If their material holds no genuine counter, leave an ` +
+  `EMPTY evidence_quote and write nothing further: the page has its own reviewed words for ` +
+  `that, and inventing a counter is rule 2 broken where it does the most damage, because they ` +
+  `will rehearse it and an interviewer who probes will hear the seam.\n\n` +
+  `Then, in concern_questions: one question per concern, against that concern's OWN competency ` +
+  `id — the counter, phrased as an interviewer would actually ask it, so a named objection is ` +
+  `something the candidate can practise rather than something they only read.\n\n` +
+  `Then, in questions_to_ask: a SHORT list of questions the candidate could ask the interviewer, ` +
+  `drawn from the brief and the client knowledge above and specific to THIS role and THIS ` +
+  `client. Raw material for their own, never a script — a memorised question sounds memorised ` +
+  `too. Never one whose answer is already in the brief, and never one that would reveal what the ` +
+  `agency knows privately.\n\n` +
   (engagement === "locum"
-    ? "This is a locum booking, so also fill first_day_items from the client knowledge above: " +
+    ? "This is a locum booking, so the concerns are a booking's own — unfamiliar kit, and a site " +
+      "this candidate has not worked. Also fill first_day_items from the client knowledge above: " +
       "how to get in on day one, the scanner fleet and its protocols, PACS and RIS, who to " +
       "report to. Each item names the field it came from, exactly as the panel does. If the " +
       "client knowledge holds nothing practical, return an EMPTY list — an empty block is worse " +

@@ -31,8 +31,12 @@ export const BLOCK_NAMES = [
 
 /**
  * THE FIVE THIS CALL'S DECODER MAY BE ASKED FOR. Five, not eight, and the gap is a live bug's
- * scar tissue — read this before adding a block variant, because adding one to `BLOCK_NAMES`
- * alone is safe and adding one HERE is an outage.
+ * scar tissue.
+ *
+ * READ THIS BEFORE ADDING A BLOCK VARIANT. `CALL_ONE_BLOCK_NAMES` is DERIVED below, so there is
+ * no "here" to avoid: a name added to `BLOCK_NAMES` alone falls straight through the filter into
+ * this call's `anyOf` as a SIXTH branch, which is the outage. Adding it to
+ * `SECOND_CALL_BLOCK_NAMES` as well is what makes it safe — that is the list that subtracts.
  *
  * MEASURED 18 Aug 2026 against the live API, at the parameters this product actually sends:
  *
@@ -45,8 +49,9 @@ export const BLOCK_NAMES = [
  * because the middle line was true in production for weeks: #50 added `FirstDayPrimer` as a
  * sixth branch (b4a06df) and every prep Send 400'd from that commit until this one. Nothing
  * caught it — the suite drives generateBrief with a fake client, so the request was asserted and
- * never sent. test/prep-schema-fits.test.js is the gate that would have, and it probes at these
- * parameters for exactly this reason.
+ * never sent. test/live/prep-schema-fits.test.js is the gate that would have, and it probes at
+ * these parameters for exactly this reason. It is NOT in `npm test` — it costs a live request —
+ * so after touching this file, run `ANTHROPIC_API_KEY=... npm run test:live`.
  *
  * `effort` does not move the ceiling. `thinking: {type: "enabled", budget_tokens: N}` is not an
  * escape hatch: Opus 5 rejects that parameter shape outright.
@@ -237,8 +242,9 @@ const BLOCKS = {
                 "objection about the record, never about the person.",
             ),
             competency_id: str(
-              "The id of the competency this concern sits under. The question bank must carry " +
-                'at least one type "concern" question against this same competency.',
+              "The id of the competency this concern sits under. `concern_questions` must carry " +
+                "a counter against this same id — a concern with nothing to drill is an " +
+                "objection the candidate can only read.",
             ),
             evidence_quote: str(
               "A VERBATIM span copied character-for-character out of the CANDIDATE'S CV that " +
@@ -319,17 +325,19 @@ const question = {
     // #50: what a question is FOR, orthogonal to axis/difficulty. Required in the schema so
     // fresh calls always carry it; assertBrief tolerates absence, because stored pre-#50
     // payloads re-assert on every brief read and must not start failing.
+    //
+    // THREE VALUES, NOT FOUR. `"concern"` is a counter to an objection, and objections live on
+    // the second call — this decoder cannot emit a `LikelyConcerns` block to hang one on, so a
+    // counter minted here is an orphan by construction. `foldConcerns` mints every counter, with
+    // its `type` and its `difficulty` written in code where no prompt can drift them.
+    // `assertBrief` still ACCEPTS `"concern"`, because that is what it is asserting.
     type: {
       type: "string",
-      enum: ["client", "competency", "screening", "concern"],
+      enum: ["client", "competency", "screening"],
       description:
         '"client" = what THIS manager or client tends to probe, sourced from the client ' +
         'knowledge. "competency" = verify the candidate\'s experience — never teach it. ' +
-        '"screening" = availability, rate, compliance logistics. "concern" = the counter to a ' +
-        "likely objection, drilled as an ordinary question. One per entry in a LikelyConcerns " +
-        'block, under the same competency, and ALWAYS difficulty "probing" so it is not the ' +
-        "first question a candidate meets. Permanent-role briefs use " +
-        '"competency" throughout, apart from those concern counters.',
+        '"screening" = availability, rate, compliance logistics.',
     },
   },
   required: ["competency_id", "text", "axis", "difficulty", "type"],
@@ -346,7 +354,7 @@ export const BRIEF_SCHEMA = {
       description:
         "The prep brief, as blocks the portal renders. Use the vocabulary as it fits the material; " +
         "an empty block is worse than an absent one.",
-      // The six this call can be asked for — see CALL_ONE_BLOCK_NAMES for why it is not eight.
+      // The five this call can be asked for — see CALL_ONE_BLOCK_NAMES for why it is not eight.
       items: { anyOf: CALL_ONE_BLOCK_NAMES.map((name) => BLOCKS[name]) },
     },
     competencies: {
@@ -375,11 +383,16 @@ export const BRIEF_SCHEMA = {
  * pinned in code where a decoder cannot mint a ninth one, which is the same guarantee `const`
  * was buying and arguably a firmer one.
  *
- * `first_day_items` is REQUIRED here and empty for a permanent role — `foldConcerns` mints no
- * block from an empty list, so "emit this block only for a locum booking" survives the move as
- * a rule about the FOLD rather than a rule the schema states. Every item still carries its
- * `source_field_key` and still demotes through the same check in verify.js: the provenance
- * mechanism is untouched by which call fetched the item.
+ * `first_day_items` is REQUIRED here and expected to be empty for a permanent role. THE FOLD
+ * DOES NOT ENFORCE THAT, and the distinction matters to anyone changing either half: the fold's
+ * only rule is EMPTINESS — no block from an empty list — and it never reads `engagement`.
+ * "Locum bookings only" is a prompt instruction (`concernsTaskBlock`'s branch), exactly as it
+ * was before the move, and a model that filled the list for a permanent role would get its
+ * block. Not a regression, and not a guarantee either; if it needs to become one, the fold is
+ * where it goes, because that is the half a prompt cannot drift.
+ *
+ * Every item still carries its `source_field_key` and still demotes through the same check in
+ * verify.js: the provenance mechanism is untouched by which call fetched the item.
  *
  * Every description is read off the block defs above rather than restated, so the prompt text
  * for a field lives in exactly one place whichever call carries it.
@@ -458,7 +471,16 @@ export function foldConcerns(brief, extra) {
       name: "LikelyConcerns",
       props: { intro: String(extra.concerns_intro ?? ""), concerns },
     });
+    // A COUNTER WITHOUT ITS CONCERN IS AN ORPHAN, and this is the only place the second call's
+    // two lists can be checked against each other: `competency_id` is a free string on
+    // CONCERNS_SCHEMA (structured outputs cannot express "an id from that other array"), and the
+    // arrays cannot be length-paired either, because `minItems` is rejected too. So a
+    // schema-valid answer can carry a counter for a competency it named no concern under.
+    // Folded, that is a "probing" question the candidate drills against an objection the brief
+    // never shows them. Dropped, they lose nothing they were ever told about.
+    const named = new Set(concerns.map((c) => c?.competency_id));
     for (const q of Array.isArray(extra.concern_questions) ? extra.concern_questions : []) {
+      if (!named.has(q?.competency_id)) continue;
       questions.push({
         competency_id: q?.competency_id,
         text: q?.text,
@@ -627,14 +649,24 @@ export function assertBrief(brief) {
     if (q.type !== undefined && !["client", "competency", "screening", "concern"].includes(q.type)) {
       throw new Error(`brief: questions[${i}].type is ${q.type}`);
     }
-    asked.add(q.competency_id);
+    // COUNTERS DO NOT COUNT. A `type:"concern"` question is minted by `foldConcerns`, always
+    // `difficulty: "probing"`, and `nextQuestion` serves the EASIEST unattempted core question —
+    // so a competency whose ONLY question is its own counter opens the drill with "how would you
+    // answer, never having done this?". That is the exact regression test/prep-targeting.test.js
+    // calls the one nothing else would catch, and the rule below is the only thing standing in
+    // front of it: this check runs AFTER the fold, so call one's bank is never inspected alone.
+    // Counting a counter here would let a first call that skipped a competency ship anyway.
+    if (q.type !== "concern") asked.add(q.competency_id);
   }
 
   // A competency with no questions passes every shape check and hands #23 something it cannot
   // drill. The bank is minted per competency or it is not minted.
   for (const [i, c] of brief.competencies.entries()) {
     if (!asked.has(c.id)) {
-      throw new Error(`brief: competencies[${i}] (${c.id}) has no questions`);
+      throw new Error(
+        `brief: competencies[${i}] (${c.id}) has no questions of its own — a concern counter is ` +
+          `not a question bank`,
+      );
     }
   }
 
@@ -649,14 +681,33 @@ export function assertBrief(brief) {
   const concernDrilled = new Set(
     brief.questions.filter((q) => q.type === "concern").map((q) => q.competency_id),
   );
+  const concernNamed = new Set();
   for (const [i, b] of brief.blocks.entries()) {
     if (b?.name !== "LikelyConcerns") continue;
     for (const [j, c] of b.props.concerns.entries()) {
+      concernNamed.add(c.competency_id);
       if (!concernDrilled.has(c.competency_id)) {
         throw new Error(
           `brief: blocks[${i}].props.concerns[${j}] (${c.competency_id}) has no concern question`,
         );
       }
+    }
+  }
+
+  // AND THE SAME RULE FROM THE OTHER SIDE. The loop above only catches a concern with nothing to
+  // drill; the reverse — a counter whose objection appears nowhere in the brief — is a "probing"
+  // question the candidate is asked to answer without ever being shown what it answers. That is
+  // the worse half, because the pairing is what makes a named objection practisable rather than
+  // just alarming.
+  //
+  // `foldConcerns` filters these at the mint and BRIEF_SCHEMA's `type` enum no longer offers the
+  // value, so reaching here means a stored payload or a future minting path. Checked anyway: this
+  // function is the contract, and the mint is only one of its callers.
+  for (const [i, q] of brief.questions.entries()) {
+    if (q.type === "concern" && !concernNamed.has(q.competency_id)) {
+      throw new Error(
+        `brief: questions[${i}] counters ${q.competency_id}, which no concern names`,
+      );
     }
   }
 

@@ -162,6 +162,34 @@ test("the visible_fields projection carries key, heading and chars — and nothi
   );
 });
 
+/* ── #79: a degraded second call is visible to somebody ─────────────────────────────────── */
+
+test("a degraded concerns call reaches the log, and carries nothing but the hand-written reason", () => {
+  // Register 2, for this file's stated reason: the line sits AFTER the model call. What it
+  // defends is a property of the source, so the source is what is read.
+  //
+  // The gap it closes: `failures` rides the 200 body, the only browser read of it is the
+  // `not_sendable` ERROR branch filtered to `kind: "competency"`, and there was no log line — so
+  // a recruiter could be handed a brief missing "where they may push back" and "questions worth
+  // asking" with nothing anywhere saying so. src/prep/generate.js's degrade comment claimed the
+  // opposite, and was right only about scripts/gen-brief.js.
+  assert.match(source, /kind !== "concerns_call"/, "the log is filtered to the concerns failure");
+  assert.match(source, /console\.error\(/, "and it actually reaches the log");
+
+  // THE PAYLOAD OF THAT LINE. `reason` and `block` are hand-written in src/prep/generate.js
+  // exactly so a log line cannot carry candidate text or an SDK error quoting a request body.
+  // Interpolating anything off `result` here would undo that at the last step — this Function
+  // holds a CV.
+  const logged = source.match(/console\.error\(([^;]*)\);/s);
+  assert.ok(logged, "the log call is still readable by this gate");
+  for (const forbidden of ["result.payload", "body.cv", "body.brief", "slice", "client.note"]) {
+    assert.ok(
+      !logged[1].includes(forbidden),
+      `${forbidden} reached a log line; only the hand-written reason may`,
+    );
+  }
+});
+
 test("the client note appears in this file exactly once, as the gate's first argument", () => {
   // src/note-fields.js:5-12 states the rule and a Level 1 grep enforces it; this is the same
   // rule as a test, so it survives a refactor that moves the grep. A bug of omission must hide,

@@ -42,13 +42,25 @@ function projectPanelEntry(entry) {
   return { ...entry, failed_field_key: "" };
 }
 
-/** A concern with the model's invented span blanked, and the demotion marker intact (#79). The
- *  KEY stays and only the VALUE goes, for projectPanelEntry's reason: registry.js decides what a
- *  candidate reads from the BLANK QUOTE, and the marker is what a later reader of the stored row
- *  can still tell a demotion from an honest gap by. */
+/**
+ * A concern with the demotion marker REMOVED entirely (#79) — key and value, not just the value.
+ *
+ * The opposite of `projectPanelEntry` above, and deliberately: there, `panelUnsourced` reads
+ * `"failed_field_key" in entry` on the PROJECTED object, so the key is load-bearing on the wire.
+ * Nothing reads this one there. `verifyBrief` counts demotions before the projection runs, and
+ * the STORED row keeps its marker regardless — the projection is a copy made for the response,
+ * so a later reader of the row loses nothing by this.
+ *
+ * What it buys: public/prep/registry.js's LikelyConcerns says "a demoted quote and an honest gap
+ * render identically to a candidate ... the difference is a diagnostic for us rather than news
+ * for them". An empty-string KEY makes them distinguishable to anyone reading the response,
+ * which is the candidate. Removing it makes the claim true of the wire and not only of the
+ * pixels — the same standard the rest of this file holds.
+ */
 function projectConcern(entry) {
   if (!entry || typeof entry !== "object" || !("failed_evidence_quote" in entry)) return entry;
-  return { ...entry, failed_evidence_quote: "" };
+  const { failed_evidence_quote: _demoted, ...rest } = entry;
+  return rest;
 }
 
 /** One block, projected. Recurses into `CompetencyMap.children`. */

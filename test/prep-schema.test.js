@@ -422,6 +422,126 @@ test("a concern question is not itself enough — it has to be under the concern
   assert.match(messageOf(() => assertBrief(p)), /has no concern question/);
 });
 
+test("foldConcerns mints FirstDayPrimer on EMPTINESS alone — it never reads engagement", () => {
+  // CHARACTERISATION, not an endorsement. CONCERNS_SCHEMA's note used to claim "emit this block
+  // only for a locum booking" survived the move to the second call "as a rule about the FOLD".
+  // It did not (PR #89 review, F17): the fold's only rule is emptiness, and "locum only" is a
+  // prompt instruction in `concernsTaskBlock`'s branch — exactly as it was before the move.
+  //
+  // So this pins what the code ACTUALLY does, in both directions, because the comment alone had
+  // already drifted once. If a model ever fills `first_day_items` for a permanent role, the block
+  // ships; the prompt is the only thing saying it shouldn't. Making that structural is a
+  // behaviour change with its own question behind it — a misclassified locum would silently lose
+  // a good primer — so it is left as it is, and left VISIBLE here rather than asserted in prose.
+  const base = () => {
+    const p = payload();
+    p.blocks = p.blocks.filter((b) => !["LikelyConcerns", "QuestionsToAsk"].includes(b.name));
+    p.questions = p.questions.filter((q) => q.type !== "concern");
+    return p;
+  };
+  const items = [{ item: "Ask at the desk for a badge", source_field_key: "getting-in" }];
+
+  // Non-empty mints the block. `foldConcerns` takes no engagement argument at all, so there is
+  // no branch to exercise — that IS the finding.
+  const filled = foldConcerns(base(), { first_day_intro: "Day one.", first_day_items: items });
+  const primer = filled.blocks.find((b) => b.name === "FirstDayPrimer");
+  assert.ok(primer, "a non-empty list mints the block, whatever the engagement");
+  assert.deepEqual(primer.props.items, items);
+
+  // Empty mints nothing — the half that IS structural, and the half the locum rule leans on.
+  for (const extra of [{ first_day_items: [] }, { first_day_items: null }, {}]) {
+    const folded = foldConcerns(base(), { first_day_intro: "Day one.", ...extra });
+    assert.ok(
+      !folded.blocks.some((b) => b.name === "FirstDayPrimer"),
+      `${JSON.stringify(extra)} minted an empty block, which is worse than an absent one`,
+    );
+  }
+});
+
+test("a competency whose ONLY question is its own counter is rejected", () => {
+  // THE PRODUCT REGRESSION #79 OPENED. `assertBrief` runs only AFTER the fold, so call one's bank
+  // is never inspected on its own — and a counter counted toward "every competency has questions"
+  // would let a first call that skipped a competency ship anyway. `nextQuestion` then serves the
+  // easiest unattempted core question, and if the only one is the counter (always "probing"),
+  // the candidate's FIRST question on that competency is "how would you answer, never having
+  // done this?" — the exact thing test/prep-targeting.test.js calls the one regression nothing
+  // else would catch. Before #79 this same call-one output threw `has no questions`. It has to
+  // keep throwing.
+  const p = payload();
+  const block = p.blocks.find((b) => b.name === "LikelyConcerns");
+  const drilled = block.props.concerns[0].competency_id;
+
+  // Everything ordinary for that competency removed; the counter left in place, so the pairing
+  // rule above is still satisfied and this rule is the only one that can fire.
+  p.questions = p.questions.filter((q) => q.competency_id !== drilled || q.type === "concern");
+  assert.ok(
+    p.questions.some((q) => q.competency_id === drilled && q.type === "concern"),
+    "the counter has to survive, or this tests the wrong rule",
+  );
+
+  assert.match(
+    messageOf(() => assertBrief(p)),
+    new RegExp(`\\(${drilled}\\) has no questions of its own`),
+  );
+});
+
+test("foldConcerns drops a counter no concern names, rather than folding an orphan", () => {
+  // `competency_id` is a free string on CONCERNS_SCHEMA — structured outputs cannot express "an
+  // id from that other array" — and `minItems` is rejected, so the two lists cannot be paired by
+  // length either. This fold is the only place they meet. A counter to an objection the brief
+  // never shows is a "probing" question the candidate cannot place; dropped, they lose nothing
+  // they were ever told about.
+  const p = payload();
+  p.blocks = p.blocks.filter((b) => b.name !== "LikelyConcerns" && b.name !== "QuestionsToAsk");
+  p.questions = p.questions.filter((q) => q.type !== "concern");
+
+  const folded = foldConcerns(p, {
+    concerns_intro: "One thing they will test.",
+    concerns: [
+      { concern: "You came from a ward.", competency_id: "comp-lone-working", evidence_quote: "x" },
+    ],
+    concern_questions: [
+      { competency_id: "comp-lone-working", text: "What makes you different?" },
+      // Valid against CONCERNS_SCHEMA, and an orphan: no concern sits under this id.
+      { competency_id: "comp-documentation", text: "How do you keep records under pressure?" },
+    ],
+    questions_intro: "A few worth asking.",
+    questions_to_ask: ["How is the caseload split?"],
+  });
+
+  const counters = folded.questions.filter((q) => q.type === "concern");
+  assert.deepEqual(
+    counters.map((q) => q.competency_id),
+    ["comp-lone-working"],
+    "the orphan was folded in",
+  );
+  assert.doesNotThrow(() => assertBrief(folded));
+});
+
+test("an orphan counter that reaches assertBrief anyway is rejected", () => {
+  // The fold filters these at the mint and BRIEF_SCHEMA's `type` enum no longer offers the value,
+  // so this is the backstop for a stored payload or a future minting path. assertBrief is the
+  // contract; the fold is one of its callers.
+  const p = payload();
+  const block = p.blocks.find((b) => b.name === "LikelyConcerns");
+  const named = new Set(block.props.concerns.map((c) => c.competency_id));
+  const unnamed = p.competencies.find((c) => !named.has(c.id));
+  assert.ok(unnamed, "the fixture needs a competency with no concern for this to mean anything");
+
+  p.questions.push({
+    competency_id: unnamed.id,
+    text: "How would you answer, never having done this?",
+    axis: "core",
+    difficulty: "probing",
+    type: "concern",
+  });
+
+  assert.match(
+    messageOf(() => assertBrief(p)),
+    new RegExp(`counters ${unnamed.id}, which no concern names`),
+  );
+});
+
 test("#79: a pre-#79 stored payload still asserts — the regression that matters most", () => {
   // Every stored brief re-asserts on EVERY candidate page load
   // (functions/prep/api/brief.js:49, where a throw is a 502 on a page the candidate can do
