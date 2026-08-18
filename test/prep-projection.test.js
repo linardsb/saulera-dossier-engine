@@ -30,16 +30,18 @@ const shipped = () =>
 
 /**
  * #19's raw payload, put through verifyBrief against a brief that does NOT contain the third
- * competency's quote and a field-key list that does not contain the panel's keys — so the
- * result carries both a demoted competency and a demoted panel entry, which is the pair the
- * fixture alone cannot give.
+ * competency's quote, a field-key list that does not contain the panel's keys, and (#79) no CV
+ * at all — so the result carries a demoted competency, a demoted panel entry AND a demoted
+ * concern, which is the set the fixture alone cannot give.
  */
 function demoted() {
   const raw = JSON.parse(readFileSync(join(here, "fixtures", "prep-payload.json"), "utf8"));
   const brief = readFileSync(join(here, "fixtures", "prep-brief.md"), "utf8");
   // No field keys at all: every panel entry demotes, which is the "recruiter shared nothing"
-  // case from the plan's edge list.
-  return verifyBrief(assertBrief(raw), { brief, fieldKeys: [] });
+  // case from the plan's edge list. The empty CV is the same move for #79's concerns, and it is
+  // deliberate here rather than an omission of the new argument: a demoted concern is what this
+  // file needs to prove `failed_evidence_quote` never reaches the wire.
+  return verifyBrief(assertBrief(raw), { brief, cv: "", fieldKeys: [] });
 }
 
 test("the fixtures are the shape these tests claim to exercise", () => {
@@ -60,6 +62,41 @@ test("THE NAMED ASSERTION: the serialised projection contains failed_quote nowhe
     const wire = JSON.stringify(candidateProjection(payload));
     assert.ok(!wire.includes("failed_quote"), `${label}: failed_quote reached the wire`);
   }
+});
+
+test("#79: a demoted concern is INDISTINGUISHABLE from an honest gap on the wire", () => {
+  // public/prep/registry.js's LikelyConcerns states the rule: "a demoted quote and an honest gap
+  // render identically to a candidate ... the difference is a diagnostic for us rather than news
+  // for them." That was true of the PIXELS and false of the WIRE — the projection shipped
+  // `failed_evidence_quote: ""`, so the KEY's presence told a reader of the response which
+  // concerns the model had invented an answer for.
+  //
+  // The reason the panel branch keeps ITS key does not apply here: `panelUnsourced` reads
+  // `"failed_field_key" in entry` on the projected object, and nothing reads this one. The
+  // demotion count is taken before the projection, and the STORED row keeps its marker — the
+  // projection is a copy made for the response.
+  const { payload } = demoted();
+  const stored = payload.blocks.find((b) => b.name === "LikelyConcerns");
+  assert.ok(
+    stored.props.concerns.some((c) => "failed_evidence_quote" in c),
+    "the demoted payload needs a demoted concern for this to mean anything",
+  );
+
+  const projection = candidateProjection(payload);
+  const shippedConcerns = projection.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+  for (const concern of shippedConcerns) {
+    assert.ok(
+      !("failed_evidence_quote" in concern),
+      `${concern.competency_id} still carries the demotion marker as a key`,
+    );
+  }
+  assert.ok(
+    !JSON.stringify(projection).includes("failed_evidence_quote"),
+    "and the name is nowhere on the wire",
+  );
+
+  // The rest of the concern is untouched — this removes a diagnostic, not the content.
+  assert.ok(shippedConcerns.every((c) => c.concern && c.competency_id), "the concerns still ship");
 });
 
 test("the invented quote text itself is absent, not merely its key", () => {
@@ -95,13 +132,46 @@ test("questions are gone entirely — this endpoint does not serve them", () => 
 
   const projection = candidateProjection(fixture);
   assert.ok(!("questions" in projection), "the key is absent, not empty");
-  assert.ok(!JSON.stringify(projection).includes("questions"), "and nothing on the wire mentions them");
-  // The sharp version: no question TEXT survives, which an empty-array projection would also
-  // satisfy but a passthrough with a renamed key would not.
+
+  // TWO NETS, because neither contains the other.
+  //
+  // This was a bare scan for the WORD "questions" anywhere on the wire until #79's QuestionsToAsk
+  // block arrived carrying a prop of that name — the questions the candidate ASKS, which this
+  // endpoint does serve. The scan had to stop being global. It did not have to stop existing,
+  // and swapping it for the text loop alone was a TRADE described as a sharpening:
+  //
+  //  · the text loop catches a passthrough of the BANK under a renamed key, which the word scan
+  //    never did — genuinely sharper, and kept;
+  //  · the word scan catches what the text loop cannot, and both cases are live. A future
+  //    `projectBlock` branch emitting `props.questions = payload.questions.map((q) => ({
+  //    difficulty: q.difficulty }))` ships every question's difficulty score to the candidate
+  //    with no question TEXT in it at all. So does a leak of the bank's `id`, `competency_id` or
+  //    `axis`. And `wire.includes(q.text)` needs a byte-identical match, so a truncated or
+  //    reworded question passes it.
+  //
+  // Scoping the word scan to everything OUTSIDE the one block entitled to the word keeps it.
   const wire = JSON.stringify(projection);
   for (const q of fixture.questions) {
     assert.ok(!wire.includes(q.text), `a question reached the candidate: ${q.text.slice(0, 40)}…`);
   }
+
+  const withoutAsks = {
+    ...projection,
+    blocks: projection.blocks.filter((b) => b.name !== "QuestionsToAsk"),
+  };
+  assert.ok(
+    !JSON.stringify(withoutAsks).includes("questions"),
+    "the bank travelled under some key outside QuestionsToAsk — nested, renamed, or transformed",
+  );
+
+  // And the exemption is not a hole: the block it carves out is checked to be exactly the one
+  // that serves the candidate's own questions, so a future block cannot hide behind the name.
+  const asks = projection.blocks.filter((b) => b.name === "QuestionsToAsk");
+  assert.equal(asks.length, 1, "one block is exempt from the word scan, and this is it");
+  assert.ok(
+    asks[0].props.questions.every((q) => typeof q === "string"),
+    "QuestionsToAsk carries bare strings; a bank question is an object, and would be visible here",
+  );
 });
 
 test("the projection keeps exactly the fields the page reads", () => {
@@ -211,6 +281,13 @@ test("a locum payload's questions are served as {text, type} and nothing else", 
 test("a locum question without a type defaults to competency — belt and braces only", () => {
   const fixture = shipped();
   fixture.engagement = "locum";
+  // The pre-#50 case has to be MADE now rather than found: #79 typed every question in the
+  // source fixture, so the untyped payload this branch exists for is no longer lying around.
+  // Stripping it here keeps the test about the default instead of passing because the fixture
+  // happened to say "competency" anyway.
+  fixture.questions.forEach((q) => {
+    delete q.type;
+  });
   const projection = candidateProjection(fixture);
   assert.ok(projection.questions.every((q) => q.type === "competency"));
 });

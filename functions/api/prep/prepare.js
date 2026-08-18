@@ -87,6 +87,22 @@ export async function onRequestPost(context) {
       interviewAt,
     });
 
+    // #79 DEGRADED, AND SOMEBODY HAS TO BE ABLE TO SEE IT. `failures` rides the 200 body, but
+    // the only browser read of it is the `not_sendable` ERROR branch, filtered to
+    // `kind: "competency"` (public/app.js) — so on the happy path a recruiter gets a brief with
+    // no "where they may push back" and no "questions worth asking", is told nothing, and
+    // nothing reaches the logs either. scripts/gen-brief.js prints these and exits 1; this route
+    // is where a recruiter actually works, and it was the silent one. src/prep/registry.js's
+    // "never dropped, nothing vanishes in silence" is the rule being kept here.
+    //
+    // The `reason` is safe to log: every one is hand-written in src/prep/generate.js precisely so
+    // that no candidate text, and no SDK error carrying a request body, can reach a log line.
+    // Nothing else from the result goes in — this Function holds a CV.
+    for (const failure of result.failures) {
+      if (failure.kind !== "concerns_call") continue;
+      console.error(`prep brief degraded — ${failure.block} missing: ${failure.reason}`);
+    }
+
     return json({
       payload: result.payload,
       provenance: result.provenance,

@@ -94,6 +94,35 @@
         "bring": "NMC PIN, driving licence, and the dates of your community roles.",
         "note": "The brief does not say how long the second stage runs. Ask when you confirm."
       }
+    },
+    {
+      "name": "LikelyConcerns",
+      "props": {
+        "intro": "Two things this brief suggests they will want to test before they offer.",
+        "concerns": [
+          {
+            "concern": "You came out of an acute ward, and the two people they hired before you found the autonomy hard.",
+            "competency_id": "comp-lone-working",
+            "evidence_quote": "Community Staff Nurse — Weald Valley Community Trust, 2022–2026"
+          },
+          {
+            "concern": "The caseload includes IV therapy in the community, and your CV does not mention it.",
+            "competency_id": "comp-wound-management",
+            "evidence_quote": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestionsToAsk",
+      "props": {
+        "intro": "A few worth having in your pocket. Ask the ones you actually want answered.",
+        "questions": [
+          "What did the two hires who found the autonomy hard say they were missing?",
+          "How is the caseload split across the Crawley corridor, and how often does it move?",
+          "Who is on the end of the phone when a visit turns into a decision?"
+        ]
+      }
     }
   ],
   "competencies": [
@@ -125,37 +154,57 @@
       "competency_id": "comp-lone-working",
       "text": "Tell me about the last clinical decision you made with nobody available to check it.",
       "axis": "core",
-      "difficulty": "standard"
+      "difficulty": "standard",
+      "type": "competency"
     },
     {
       "competency_id": "comp-lone-working",
       "text": "How do you decide, in someone's home, that a situation needs escalating now rather than at the end of the round?",
       "axis": "core",
-      "difficulty": "probing"
+      "difficulty": "probing",
+      "type": "competency"
+    },
+    {
+      "competency_id": "comp-lone-working",
+      "text": "Two people we hired from acute wards found the autonomy hard. What makes you different?",
+      "axis": "core",
+      "difficulty": "probing",
+      "type": "concern"
     },
     {
       "competency_id": "comp-wound-management",
       "text": "Walk me through how you assess a wound you are seeing for the first time.",
       "axis": "core",
-      "difficulty": "gentle"
+      "difficulty": "gentle",
+      "type": "competency"
     },
     {
       "competency_id": "comp-wound-management",
       "text": "Describe a wound that did not respond to the regime you chose. What did you change?",
       "axis": "core",
-      "difficulty": "standard"
+      "difficulty": "standard",
+      "type": "competency"
+    },
+    {
+      "competency_id": "comp-wound-management",
+      "text": "How would you get up to speed on IV therapy in the community?",
+      "axis": "core",
+      "difficulty": "probing",
+      "type": "concern"
     },
     {
       "competency_id": "comp-documentation",
       "text": "What goes into your write-up of a visit, and when do you do it?",
       "axis": "core",
-      "difficulty": "gentle"
+      "difficulty": "gentle",
+      "type": "competency"
     },
     {
       "competency_id": "comp-documentation",
       "text": "A colleague picks up your caseload tomorrow. What would they struggle to find in your notes?",
       "axis": "core",
-      "difficulty": "probing"
+      "difficulty": "probing",
+      "type": "competency"
     }
   ]
 }

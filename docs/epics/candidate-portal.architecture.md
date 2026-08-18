@@ -90,7 +90,23 @@ Two call sites, both server-side behind the existing single-boundary rule and th
 `ANTHROPIC_API_KEY` (28 Jul amendment):
 
 - **At Send** (`claude-opus-5`): compose the prep brief blocks, extract competencies with quotes,
-  mint the core question bank. One call, prompt-cached on the client note. ~30p.
+  mint the core question bank. **Two calls** (18 Aug amendment, #79), prompt-cached on the client
+  note. ~30p for the first; the second is a fraction of it — a smaller `max_tokens`, and it READS
+  the prefix the first call wrote rather than writing a second one.
+
+  *Why two, since "one call" was the decision.* Not a design choice. `BRIEF_SCHEMA` had reached
+  Claude Opus 5's structured-outputs grammar ceiling, and under `thinking: {type: "adaptive"}` —
+  the mode this product sends — a **sixth block variant is a `400 "The compiled grammar is too
+  large"`**, i.e. a dead Send button. #50 shipped one and every prep Send 400'd for weeks. So
+  three of the eight block names are minted by a second, small call and folded in before
+  `assertBrief` runs; everything downstream sees one ordinary payload. The measurements are at
+  `src/prep/schema.js`'s `CALL_ONE_BLOCK_NAMES`, and `test/live/prep-schema-fits.test.js`
+  (`npm run test:live`, needs a key) is the gate that re-measures them.
+
+  *Open, and not yet measured:* the two calls send different `output_config.format.schema`. Whether
+  that invalidates a message-tier cache entry is documented nowhere either way, so "the second call
+  reads the first call's cache" is reasoned, not observed. `usage.cache_read_input_tokens` on the
+  second call of a real run settles it. Worst case is a cost regression against this paragraph.
 - **In session** (`claude-sonnet-5`): feedback on an attempt, lateral/vertical variants, nudges.
   Request/response, one POST per turn. Instant core questions come from the cached bank.
 

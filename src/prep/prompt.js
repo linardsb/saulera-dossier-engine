@@ -16,6 +16,19 @@
 // generateBrief — the same place generatePack runs it. Guarding in both would be a second
 // definition of what a valid input is, which is how the two drift.
 
+/**
+ * The system prompt on BOTH calls, and therefore the cached prefix — it may only ever gain
+ * UNCONDITIONAL text (test/prep-prompt.test.js's engagement-free rule).
+ *
+ * The rules stop at six. #79's concerns and questions-to-ask were rules 7 and 8 here until they
+ * asked the first call for `LikelyConcerns` and `QuestionsToAsk` — two blocks its `anyOf` does not
+ * carry, because a sixth branch is a 400 (src/prep/schema.js's CALL_ONE_BLOCK_NAMES). Instructing
+ * a decoder to emit a variant it cannot express is how a model spends tokens on an answer that
+ * gets rejected, so both rules now live in `concernsTaskBlock` — the closing instruction of the
+ * call whose schema actually carries those fields, and after the cache breakpoint, exactly where
+ * #50's primer instruction went. NOTHING that names a block, a field or a question `type` belongs
+ * in here, because "here" is every call.
+ */
 export const PREP_SYSTEM = `You write interview preparation for a candidate a recruitment agency has
 already submitted to a client. The client has offered them an interview. Your reader is that
 candidate, not the recruiter and not the client.
@@ -92,30 +105,91 @@ export const visibleNoteBlock = (clientName, fields = []) =>
  * The engagement branch (#50), rendered per candidate and therefore strictly AFTER the cache
  * breakpoint — src/domain.js's deterministic read decides it, never the model. PREP_SYSTEM must
  * not carry any of this: it sits inside the cached prefix and may only gain unconditional text.
+ *
+ * The question types here are the FIRST call's bank, and `"concern"` is deliberately not among
+ * them: a counter is minted by `foldConcerns` from the second call's answer, with its `type` and
+ * its `difficulty` written in code. Neither schema has a field for it, so asking either call for
+ * one is asking for something no decoder can return. This block is composed onto both calls, so
+ * an exception carved here would land on both.
  */
 const engagementBlock = (engagement) =>
   engagement === "locum"
     ? "This is a locum booking, not an interview process: there is usually no panel — an " +
-      "informal call with the manager at most. Compose a FirstDayPrimer block from the client " +
-      "knowledge above: how to get in on day one, the scanner fleet and its protocols, PACS " +
-      "and RIS, who to report to. If the client knowledge holds nothing practical, omit the " +
-      "block entirely — an empty block is worse than an absent one. Keep the question bank " +
+      "informal call with the manager at most. Keep the question bank " +
       'slim: mostly type "client" questions drawn from what this manager tends to probe, a few ' +
       'type "competency" questions phrased to verify experience rather than teach it ("Which ' +
-      'scanners have you run solo?"), and one or two type "screening" questions on ' +
-      "availability, rate and compliance logistics. Never generic clinical coaching — the " +
+      'scanners have you run solo?"), and one or two type "screening" questions on availability, ' +
+      "rate and compliance logistics. Never generic clinical coaching — the " +
       "reader is an expert, and this page only tells them what the agency knows that they " +
       "cannot.\n\n"
-    : 'This is not a locum booking: give every question type "competency", and do not emit a ' +
-      "FirstDayPrimer block.\n\n";
+    : 'This is not a locum booking: give every question type "competency".\n\n';
+
+/**
+ * The second call's closing instruction, and the competencies it has to reference.
+ *
+ * These three surfaces cannot ride the first call: six block variants is a 400 under the
+ * thinking mode this product uses, and `src/prep/schema.js`'s CALL_ONE_BLOCK_NAMES carries the
+ * measurements. The call is SECOND rather than concurrent because every concern names a
+ * `competency_id`, and those ids do not exist until the first call has answered — so the first
+ * call's competencies are handed back in, as the ids-and-labels the model must choose from.
+ *
+ * It appends to the SAME per-candidate block, after the cache breakpoint, so the expensive prefix
+ * (PREP_SYSTEM plus the visible slice) is a cache READ on this call rather than a second write.
+ *
+ * The first-day paragraph is CONDITIONAL on the engagement and appears only for a locum booking
+ * — the same branch `engagementBlock` makes, in the same place relative to the breakpoint, and
+ * for the same reason: this text is per-candidate and must never reach the cached prefix.
+ *
+ * THE TWO RULES LIVE HERE, NOT IN PREP_SYSTEM. They were rules 7 and 8 there, and there they were
+ * read by the first call, whose `anyOf` carries neither block. Everything they ask for is named by
+ * the FIELD `CONCERNS_SCHEMA` actually has — `concerns`, `concern_questions`, `questions_to_ask` —
+ * and never by the block, for the same reason the primer paragraph says `first_day_items`: the
+ * second call returns bare fields and `foldConcerns` writes the block names in code. A prompt that
+ * names a block no decoder can mint is the bug this move exists to close.
+ *
+ * `difficulty` is not asked for either. Every counter is minted `"probing"` by `foldConcerns`, off
+ * the schema entirely, so that a counter can never be the easiest unattempted question on a
+ * competency — CONCERNS_SCHEMA's own note has the reasoning.
+ */
+export const concernsTaskBlock = (competencies = [], engagement) =>
+  `Now write the remaining parts of this same brief, and nothing else.\n\n` +
+  `These are the competencies you just extracted. Every concern and every counter question must ` +
+  `name one of these ids exactly:\n\n<competencies>\n` +
+  competencies.map((c) => `<competency id="${attr(c?.id)}">${c?.label ?? ""}</competency>`).join("\n") +
+  `\n</competencies>\n\n` +
+  `First, in concerns: name the objections this interviewer is most likely to raise. Derive each ` +
+  `one from the GAP between the candidate's CV and the client brief — a first post of this kind, ` +
+  `unfamiliar kit, a gap in the record — and put it as an interviewer would put it: about the ` +
+  `record, never about the person. The evidence for each concern is a VERBATIM span of THEIR CV ` +
+  `and never a sentence of your own. If their material holds no genuine counter, leave an ` +
+  `EMPTY evidence_quote and write nothing further: the page has its own reviewed words for ` +
+  `that, and inventing a counter is rule 2 broken where it does the most damage, because they ` +
+  `will rehearse it and an interviewer who probes will hear the seam.\n\n` +
+  `Then, in concern_questions: one question per concern, against that concern's OWN competency ` +
+  `id — the counter, phrased as an interviewer would actually ask it, so a named objection is ` +
+  `something the candidate can practise rather than something they only read.\n\n` +
+  `Then, in questions_to_ask: a SHORT list of questions the candidate could ask the interviewer, ` +
+  `drawn from the brief and the client knowledge above and specific to THIS role and THIS ` +
+  `client. Raw material for their own, never a script — a memorised question sounds memorised ` +
+  `too. Never one whose answer is already in the brief, and never one that would reveal what the ` +
+  `agency knows privately.\n\n` +
+  (engagement === "locum"
+    ? "This is a locum booking, so the concerns are a booking's own — unfamiliar kit, and a site " +
+      "this candidate has not worked. Also fill first_day_items from the client knowledge above: " +
+      "how to get in on day one, the scanner fleet and its protocols, PACS and RIS, who to " +
+      "report to. Each item names the field it came from, exactly as the panel does. If the " +
+      "client knowledge holds nothing practical, return an EMPTY list — an empty block is worse " +
+      "than an absent one, and an empty list is how you say there is nothing to say here."
+    : "This is not a locum booking, so first_day_items is an EMPTY list and first_day_intro is " +
+      "an empty string. Do not invent a first day for a permanent role.");
 
 /** The per-candidate half, and the instruction that closes the prompt. */
-export const prepInputsBlock = ({ brief, cv, interviewAt, engagement }) =>
+export const prepInputsBlock = ({ brief, cv, interviewAt, engagement, task }) =>
   `Here is the client's brief for the role:\n\n<brief>\n${brief}\n</brief>\n\n` +
   `Here is the candidate's CV:\n\n<cv>\n${cv}\n</cv>\n\n` +
   `The interview is on ${interviewAt}.\n\n` +
   engagementBlock(engagement) +
-  `Compose the candidate's prep brief.`;
+  (task ?? `Compose the candidate's prep brief.`);
 
 /**
  * The visible slice goes FIRST and is the cache breakpoint: it is the one input reused across
@@ -123,7 +197,7 @@ export const prepInputsBlock = ({ brief, cv, interviewAt, engagement }) =>
  * The brief, the CV, the date and the engagement branch vary per candidate and therefore come
  * after it.
  */
-export function buildPrepMessages({ clientName, visibleFields, brief, cv, interviewAt, engagement }) {
+export function buildPrepMessages({ clientName, visibleFields, brief, cv, interviewAt, engagement, task }) {
   return [
     {
       role: "user",
@@ -135,7 +209,11 @@ export function buildPrepMessages({ clientName, visibleFields, brief, cv, interv
         },
         {
           type: "text",
-          text: prepInputsBlock({ brief, cv, interviewAt, engagement }),
+          // `task` swaps only the CLOSING instruction, which sits after the breakpoint — so #79's
+          // second call reads the same cached prefix rather than writing a second one. It is a
+          // choice between instructions this file already holds, never a channel a caller can
+          // put text through: nothing here interpolates it into the note or the inputs.
+          text: prepInputsBlock({ brief, cv, interviewAt, engagement, task }),
         },
       ],
     },

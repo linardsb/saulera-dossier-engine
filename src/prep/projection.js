@@ -42,6 +42,27 @@ function projectPanelEntry(entry) {
   return { ...entry, failed_field_key: "" };
 }
 
+/**
+ * A concern with the demotion marker REMOVED entirely (#79) — key and value, not just the value.
+ *
+ * The opposite of `projectPanelEntry` above, and deliberately: there, `panelUnsourced` reads
+ * `"failed_field_key" in entry` on the PROJECTED object, so the key is load-bearing on the wire.
+ * Nothing reads this one there. `verifyBrief` counts demotions before the projection runs, and
+ * the STORED row keeps its marker regardless — the projection is a copy made for the response,
+ * so a later reader of the row loses nothing by this.
+ *
+ * What it buys: public/prep/registry.js's LikelyConcerns says "a demoted quote and an honest gap
+ * render identically to a candidate ... the difference is a diagnostic for us rather than news
+ * for them". An empty-string KEY makes them distinguishable to anyone reading the response,
+ * which is the candidate. Removing it makes the claim true of the wire and not only of the
+ * pixels — the same standard the rest of this file holds.
+ */
+function projectConcern(entry) {
+  if (!entry || typeof entry !== "object" || !("failed_evidence_quote" in entry)) return entry;
+  const { failed_evidence_quote: _demoted, ...rest } = entry;
+  return rest;
+}
+
 /** One block, projected. Recurses into `CompetencyMap.children`. */
 function projectBlock(block) {
   if (!block || typeof block !== "object") return block;
@@ -54,6 +75,19 @@ function projectBlock(block) {
   // same treatment: the invented slug goes, the demotion marker stays.
   if (block.name === "FirstDayPrimer" && Array.isArray(block.props?.items)) {
     return { ...block, props: { ...block.props, items: block.props.items.map(projectPanelEntry) } };
+  }
+
+  // #79's concerns need only the diagnostic stripped, and that is the whole difference from the
+  // competency branch below. `verifyBrief` demotes a concern by BLANKING `evidence_quote` and
+  // recording `failed_evidence_quote`, so the header's "the quote and the failed quote hold the
+  // same invented sentence" problem cannot recur here — there is no second name under which the
+  // model's guess could travel. A SOURCED concern's quote is the candidate's own CV and goes
+  // untouched, which is the whole point of quoting the CV rather than the note.
+  if (block.name === "LikelyConcerns" && Array.isArray(block.props?.concerns)) {
+    return {
+      ...block,
+      props: { ...block.props, concerns: block.props.concerns.map(projectConcern) },
+    };
   }
 
   // A PanelBrief cannot legally nest here — assertBrief:263 rejects anything but a

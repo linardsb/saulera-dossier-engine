@@ -38,9 +38,11 @@ State: `story (id, candidate_role_id, title, sketch, created_at)` and
 From the gap between the candidate's own material and the brief, name the objections an interviewer
 is most likely to raise — first post of this kind, unfamiliar kit, a gap in the record — and drill
 the counters as ordinary questions through the existing loop. Same discipline as ethos: if the
-material holds no genuine counter, say so plainly. Concerns draw only on the candidate's material
-and the shareable brief, never on unshared parts of the recruiter's note — a concern phrased from
-text the candidate cannot see leaks that text.
+material holds no genuine counter, say so plainly. That is structural rather than instructed: a
+concern's counter is a verbatim span of the candidate's own CV, checked literally, or it is the
+empty string — there is no prose field a fabricated answer could live in. Concerns draw only on the
+candidate's material and the shareable brief, never on unshared parts of the recruiter's note — a
+concern phrased from text the candidate cannot see leaks that text.
 
 ### Questions to ask the interviewer
 

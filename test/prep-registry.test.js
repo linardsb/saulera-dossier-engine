@@ -42,6 +42,10 @@ const root = join(here, "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
 
 const BRIEF_MD = read("test/fixtures/prep-brief.md");
+// #79's second haystack. Omitting it here would demote every concern quote, the fixture would
+// regenerate with `failed_evidence_quote` on both, and the byte-identity assertion below would
+// pass over a demo page telling a candidate their CV answers nothing.
+const CV_MD = read("test/fixtures/prep-cv.md");
 const FIELD_KEYS = JSON.parse(read("test/fixtures/prep-visible-fields.json")).map((f) => f.key);
 const SOURCE_PAYLOAD = JSON.parse(read("test/fixtures/prep-payload.json"));
 const STORED = JSON.parse(read("public/prep/brief.fixture.json"));
@@ -83,11 +87,12 @@ function countBlocks(blocks) {
 
 /* ── group 1: the export surface ───────────────────────────────────────────────────────── */
 
-test("REGISTRY is exactly decision 22's ten names plus #50's two", () => {
+test("REGISTRY is exactly decision 22's ten names plus #50's two and #79's two", () => {
   // Written out literally rather than derived from the arrays above: this is the assertion that
   // catches a name being added to BOTH the array and the registry without a decision behind it.
   // #50 (epic #45, slice 3) extended the vocabulary deliberately: FirstDayPrimer on the brief
-  // side, LocumQuestions on the session side. Twelve names.
+  // side, LocumQuestions on the session side. #79 extended it again, both on the brief side:
+  // LikelyConcerns and QuestionsToAsk. Fourteen names.
   const DECIDED = [
     "PrimerCard",
     "CompetencyMap",
@@ -101,6 +106,8 @@ test("REGISTRY is exactly decision 22's ten names plus #50's two", () => {
     "DayBeforeMode",
     "FirstDayPrimer",
     "LocumQuestions",
+    "LikelyConcerns",
+    "QuestionsToAsk",
   ];
   assert.deepEqual(Object.keys(REGISTRY).sort(), [...DECIDED].sort());
 });
@@ -207,6 +214,11 @@ const VISIBLE_PROPS = {
   DayBeforeMode: ["intro", "note"],
   FirstDayPrimer: ["intro"],
   LocumQuestions: [],
+  // `concerns` is an array of OBJECTS, so it belongs in neither list below — a walk over it
+  // would assert `html.includes("[object Object]")` and pass on a page that rendered nothing.
+  // Group 3b covers the entries themselves.
+  LikelyConcerns: ["intro"],
+  QuestionsToAsk: ["intro"],
 };
 
 /** The props that are arrays of display strings. */
@@ -215,7 +227,8 @@ const VISIBLE_LISTS = {
   HelpLadder: ["structure"],
   ProgressStrip: ["covered", "queued"],
   DayBeforeMode: ["focus"],
-  LocumQuestions: ["client", "competency", "screening"],
+  LocumQuestions: ["client", "competency", "screening", "concern"],
+  QuestionsToAsk: ["questions"],
 };
 
 /** Assert every visible string of every block in `blocks` reached `html`. */
@@ -266,6 +279,26 @@ test("the stored payload renders every block it carries", () => {
   assert.equal(result.rendered, countBlocks(payload.blocks));
   assert.deepEqual(result.skipped, []);
   assert.deepEqual(result.unresolved, []);
+  assert.equal(assertLandmarks(mount).length, result.rendered);
+  assertPropsRendered(payload.blocks, html);
+});
+
+test("#79: a pre-#79 stored payload renders exactly as it did before", () => {
+  // The other half of the regression prep-schema.test.js asserts: a stored brief that asserts
+  // but renders as a blank page is the same outage by another route. Both new names are simply
+  // absent, and the walker must skip nothing and warn about nothing.
+  const payload = stored();
+  payload.blocks = payload.blocks.filter(
+    (b) => b.name !== "LikelyConcerns" && b.name !== "QuestionsToAsk",
+  );
+  const before = countBlocks(payload.blocks);
+  assert.ok(before >= 5, "there is still a brief to render");
+
+  const { mount, result, html, warnings } = renderCapturingWarnings(payload);
+  assert.equal(result.rendered, before, "every block it does carry still rendered");
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(result.unresolved, []);
+  assert.deepEqual(warnings, [], "and nothing was reported as unrenderable");
   assert.equal(assertLandmarks(mount).length, result.rendered);
   assertPropsRendered(payload.blocks, html);
 });
@@ -686,6 +719,129 @@ test("LocumQuestions renders its groups under COPY headings, skips empty ones, a
   assert.equal(labels.length, 2, "exactly the two non-empty groups rendered labels");
 });
 
+/** A LikelyConcerns payload: one concern the CV answers, one it does not, one demoted. */
+const CONCERNS = () => ({
+  blocks: [
+    {
+      name: "LikelyConcerns",
+      props: {
+        intro: "Two things they will want to test before they offer.",
+        concerns: [
+          {
+            concern: "You came out of an acute ward.",
+            competency_id: "c1",
+            evidence_quote: "Community Staff Nurse — Weald Valley, 2022–2026",
+          },
+          {
+            concern: "The caseload includes IV therapy and your CV does not mention it.",
+            competency_id: "c1",
+            evidence_quote: "",
+          },
+          {
+            concern: "You have never run a rural patch this size.",
+            competency_id: "c1",
+            evidence_quote: "",
+            failed_evidence_quote: "Ran a caseload of ninety across three counties",
+          },
+        ],
+      },
+    },
+  ],
+  competencies: [],
+});
+
+test("a concern with a quote renders the quote and says whose words it is", () => {
+  const { mount, html } = render(CONCERNS());
+
+  assert.ok(html.includes("What they may push back on"), "the COPY heading renders");
+  assert.ok(html.includes("Two things they will want to test before they offer."), "the intro");
+  assert.ok(html.includes("You came out of an acute ward."), "the objection itself");
+  assert.ok(html.includes("Community Staff Nurse — Weald Valley, 2022–2026"), "their own line");
+  assert.ok(html.includes("In your own words, from your CV"), "and whose words it is");
+
+  const entries = findAll(mount, (n) => n.classes.includes("prep-entry"));
+  assert.equal(entries.length, 3, "every concern rendered — including the two with no counter");
+});
+
+test("a concern with no material renders the reviewed sentence and NO quote element", () => {
+  // The sentence a candidate reads when their record has a hole in it is ours, written and
+  // reviewed once (registry.js:67-69) rather than generated fresh per candidate. There is no
+  // prose counter prop for a model to fill, so this is the whole of what that case can say.
+  const { mount, html } = render(CONCERNS());
+  const entries = findAll(mount, (n) => n.classes.includes("prep-entry"));
+
+  assert.ok(html.includes("Nothing in what you gave us answers this one."), "the honest sentence");
+  for (const entry of entries.slice(1)) {
+    assert.equal(
+      findAll(entry, (n) => n.classes.includes("claim-source")).length,
+      0,
+      "a concern with nothing behind it renders no quote element at all",
+    );
+    assert.ok(
+      !serialize(entry).includes("mark-unverified"),
+      "no Unverified pill: the CONCERN is real, and a mark here would say the opposite",
+    );
+  }
+});
+
+test("a demoted concern's failed_evidence_quote never reaches the screen", () => {
+  // provenanceNode:195-202's rule, applied to #79: a candidate's next move after reading a
+  // quote is to prepare against it, so a span the model invented is the one thing that must
+  // not travel. The demoted concern and the honest gap read identically here, which is correct
+  // — in both cases their material holds nothing we could stand up.
+  const { html } = render(CONCERNS());
+  assert.ok(!html.includes("Ran a caseload of ninety across three counties"), "the invented span rendered");
+  assert.ok(!html.includes("failed_evidence_quote"), "and neither did its key");
+});
+
+test("QuestionsToAsk renders its list and the note that says it is not a script", () => {
+  const { mount, html } = render({
+    blocks: [
+      {
+        name: "QuestionsToAsk",
+        props: {
+          intro: "A few worth having in your pocket.",
+          questions: ["How is the caseload split?", "Who is on the end of the phone?"],
+        },
+      },
+    ],
+    competencies: [],
+  });
+
+  assert.ok(html.includes("Questions worth asking them"), "the COPY heading renders");
+  assert.ok(html.includes("A few worth having in your pocket."), "the intro");
+  assert.ok(html.includes("How is the caseload split?"));
+  assert.ok(html.includes("Who is on the end of the phone?"));
+  assert.ok(html.includes("Raw material, not a script."), "the note that makes them the candidate's");
+  assert.equal(findAll(mount, (n) => n.tag === "li").length, 2);
+});
+
+test("LocumQuestions renders #79's fourth group, and still skips it when empty", () => {
+  const withConcerns = render({
+    blocks: [
+      {
+        name: "LocumQuestions",
+        props: {
+          client: [],
+          competency: [],
+          screening: [],
+          concern: ["How would you get up to speed on kit you have not run?"],
+        },
+      },
+    ],
+    competencies: [],
+  });
+  assert.ok(withConcerns.html.includes("Where they may push back"), "the concern group heading");
+  assert.ok(withConcerns.html.includes("How would you get up to speed on kit you have not run?"));
+  assert.ok(!withConcerns.html.includes("concern\""), "a raw type slug reached the page");
+
+  const without = render({
+    blocks: [{ name: "LocumQuestions", props: { client: ["x"], competency: [], screening: [], concern: [] } }],
+    competencies: [],
+  });
+  assert.ok(!without.html.includes("Where they may push back"), "an empty group renders no heading");
+});
+
 test("no field key from the stored payload reaches the page either", () => {
   const payload = stored();
   const { html } = render(payload);
@@ -821,6 +977,7 @@ test("the shipped fixture is derived from #19's own fixtures, never drawn by han
   // directions: a hand-edited fixture, or a change under src/prep/.
   const { payload } = verifyBrief(assertBrief(structuredClone(SOURCE_PAYLOAD)), {
     brief: BRIEF_MD,
+    cv: CV_MD,
     fieldKeys: FIELD_KEYS,
   });
   assert.deepEqual(STORED, payload);

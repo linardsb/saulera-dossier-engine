@@ -27,11 +27,17 @@ import { at, d1Shape, openMigrated, skip } from "./helpers/sqlite-d1.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const PAYLOAD = () => JSON.parse(readFileSync(join(here, "fixtures", "prep-payload.json"), "utf8"));
 
-/** The fixture cut down to ONE competency, so targeting cannot wander mid-test. */
+/** The fixture cut down to ONE competency and its two ordinary questions, so targeting cannot
+ *  wander mid-test and the core bank empties in a known number of turns. #79's concern question
+ *  is dropped with the blocks it pairs with: it is an ordinary core row to this loop (that IS
+ *  the ticket's claim, asserted at "a concern question drills through the existing loop" below),
+ *  so here it would only make the bank one turn deeper. */
 function SINGLE() {
   const payload = PAYLOAD();
   payload.competencies = payload.competencies.filter((c) => c.id === "comp-lone-working");
-  payload.questions = payload.questions.filter((q) => q.competency_id === "comp-lone-working");
+  payload.questions = payload.questions.filter(
+    (q) => q.competency_id === "comp-lone-working" && q.type !== "concern",
+  );
   payload.blocks = [];
   return payload;
 }

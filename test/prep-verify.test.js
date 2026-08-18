@@ -22,12 +22,15 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), "utf8");
 
 const BRIEF = read("fixtures/prep-brief.md");
+// #79's second haystack. Every call below passes it, so a test asserting a failure COUNT is
+// counting the failure it named rather than two demoted concerns it never mentioned.
+const CV = read("fixtures/prep-cv.md");
 const FIXTURE = JSON.parse(read("fixtures/prep-payload.json"));
 const FIELD_KEYS = JSON.parse(read("fixtures/prep-visible-fields.json")).map((f) => f.key);
 
 const payload = () => structuredClone(FIXTURE);
 const run = (p = payload(), keys = FIELD_KEYS) =>
-  verifyBrief(assertBrief(p), { brief: BRIEF, fieldKeys: keys });
+  verifyBrief(assertBrief(p), { brief: BRIEF, cv: CV, fieldKeys: keys });
 
 /* ── the competency quotes ─────────────────────────────────────────────────────────────── */
 
@@ -71,7 +74,7 @@ test("an empty quote is its own reason, not the same failure as a wrong one", ()
   // re-verify path, #22 re-verifying a stored payload).
   const p = payload();
   p.competencies[0].source_quote = "";
-  const { failures } = verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const { failures } = verifyBrief(p, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(failures[0].reason, "empty quote");
 });
@@ -84,7 +87,7 @@ test("whitespace, curly quotes and case do not defeat a genuine quote", () => {
   p.competencies[0].source_quote = "  COMFORTABLE   lone working\n  with a rural caseload  ";
   p.competencies[1].source_quote = "genuinely used to working alone in people’s homes";
 
-  const { payload: out, failures } = verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const { payload: out, failures } = verifyBrief(p, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
   assert.equal(out.competencies[0].verified, true, "collapsed whitespace and case");
   assert.equal(out.competencies[1].verified, true, "a curly apostrophe folded to ASCII");
   assert.equal(failures.length, 1, "and the paraphrase is still the only failure");
@@ -95,7 +98,7 @@ test("nothing fuzzy gets through: a near-miss is still a miss", () => {
   // different from the brief is exactly the case a semantic check would wave through.
   const p = payload();
   p.competencies[0].source_quote = "Comfortable lone working with a rural workload";
-  const { payload: out } = verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const { payload: out } = verifyBrief(p, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(out.competencies[0].verified, false, '"workload" is not "caseload"');
 });
@@ -114,7 +117,7 @@ test("a panel claim naming a field that was not handed in is blanked and reporte
   // render a source attribution pointing at nothing, which reads to a candidate as provenance.
   const p = payload();
   p.blocks[2].props.panel[0].source_field_key = "their-processes";
-  const { payload: out, failures } = verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const { payload: out, failures } = verifyBrief(p, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(out.blocks[2].props.panel[0].source_field_key, "");
   assert.equal(out.blocks[2].props.panel[0].failed_field_key, "their-processes");
@@ -141,7 +144,7 @@ test("the idempotence guard cannot be forged into a way past the allow-list", ()
   const forged = payload();
   forged.blocks[2].props.panel[0].source_field_key = "why-candidates-have-been-turned-down";
   forged.blocks[2].props.panel[0].failed_field_key = null;
-  const { payload: out, failures } = verifyBrief(forged, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const { payload: out, failures } = verifyBrief(forged, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(out.blocks[2].props.panel[0].source_field_key, "", "a hidden key does not verify");
   assert.ok(
@@ -218,6 +221,172 @@ test("primer counts are additive and read off the payload's own markers", () => 
   );
 });
 
+/* ── the concern half (#79): the same rule, against the CV instead of the brief ─────────── */
+
+/** Where the fixture's LikelyConcerns block sits, and its entries after a run. */
+const concernIndex = () => FIXTURE.blocks.findIndex((b) => b.name === "LikelyConcerns");
+const concernsOf = (p) => p.blocks[concernIndex()].props.concerns;
+
+test("the fixture is the shape these concern tests claim to exercise", () => {
+  // A guard on the guard, in this file's own register: one concern quotes the CV verbatim and
+  // one is the honest gap. Lose either and half the assertions below pass vacuously.
+  const concerns = concernsOf(FIXTURE);
+  assert.equal(concerns.length, 2);
+  assert.ok(concerns[0].evidence_quote.trim(), "one concern the CV answers");
+  assert.equal(concerns[1].evidence_quote, "", "one concern it does not");
+});
+
+test("a concern quoting the CV verbatim survives with no marker", () => {
+  const { payload: out, failures } = run();
+  const concern = concernsOf(out)[0];
+
+  assert.deepEqual(concern, concernsOf(FIXTURE)[0], "untouched, byte for byte");
+  assert.equal("failed_evidence_quote" in concern, false);
+  assert.equal(failures.filter((f) => f.kind === "concern_source").length, 0);
+});
+
+test("AC4: an empty evidence_quote is untouched and is NOT a failure", () => {
+  // THE ONE THAT MATTERS. SPEC Amendment 1: "if the material holds no genuine counter, say so
+  // plainly." An empty quote IS that plain statement. quoteAppears returns false for an empty
+  // needle (provenance.js:37-39), so without the guard in demoteConcern every honest gap would
+  // be recorded as a hallucination — and the page would then tell a candidate we invented
+  // something, over a model that behaved exactly as instructed.
+  const { payload: out, failures } = run();
+  const gap = concernsOf(out)[1];
+
+  assert.equal(gap.evidence_quote, "");
+  assert.equal("failed_evidence_quote" in gap, false, "no marker: nothing was demoted");
+  assert.deepEqual(failures.filter((f) => f.kind === "concern_source"), []);
+});
+
+test("a concern quoting something that is not in the CV is blanked, marked and reported", () => {
+  const p = payload();
+  concernsOf(p)[0].evidence_quote = "Twelve years of IV therapy in the community";
+  const { payload: out, failures } = run(p);
+  const concern = concernsOf(out)[0];
+
+  assert.equal(concern.evidence_quote, "", "the invented span does not travel under its own name");
+  assert.equal(concern.failed_evidence_quote, "Twelve years of IV therapy in the community");
+  assert.equal(concern.concern, concernsOf(FIXTURE)[0].concern, "the objection itself stays");
+  assert.deepEqual(
+    failures.filter((f) => f.kind === "concern_source"),
+    [
+      {
+        kind: "concern_source",
+        block_index: concernIndex(),
+        concern_index: 0,
+        quote: "Twelve years of IV therapy in the community",
+        reason: "quote not found in the CV",
+      },
+    ],
+    "the failure names the block, the entry and the quote",
+  );
+});
+
+test("re-verifying a demoted concern preserves its diagnostic and re-reports nothing", () => {
+  const p = payload();
+  concernsOf(p)[0].evidence_quote = "Ten years running an IV therapy service";
+
+  const pass1 = run(p);
+  const pass2 = run(pass1.payload);
+
+  assert.equal(
+    concernsOf(pass2.payload)[0].failed_evidence_quote,
+    "Ten years running an IV therapy service",
+    "the span the model invented survives the second pass",
+  );
+  assert.equal(pass2.failures.filter((f) => f.kind === "concern_source").length, 0, "not re-reported");
+  assert.deepEqual(briefSummary(pass2.payload), briefSummary(pass1.payload), "and the counts hold");
+});
+
+test("a forged failed_evidence_quote does not buy a quote past the CV check", () => {
+  // The panel half's lesson, applied here: `{"failed_evidence_quote": null}` is legal JSON that
+  // survives readJson and assertBrief. Keyed on mere PRESENCE, the guard would return early and
+  // a span that is nowhere in the CV would travel to the candidate wearing no mark at all. The
+  // guard is on the BLANK quote instead, so a non-blank one is always checked.
+  const forged = payload();
+  concernsOf(forged)[0].evidence_quote = "Led the trust's IV therapy rollout";
+  concernsOf(forged)[0].failed_evidence_quote = null;
+
+  const { payload: out, failures } = run(forged);
+  assert.equal(concernsOf(out)[0].evidence_quote, "", "the forged marker bought nothing");
+  assert.equal(concernsOf(out)[0].failed_evidence_quote, "Led the trust's IV therapy rollout");
+  assert.equal(failures.filter((f) => f.kind === "concern_source").length, 1);
+});
+
+test("THE TWO HAYSTACKS DO NOT CROSS", () => {
+  // The whole reason there are two. A competency is what the ROLE demands and can only come
+  // from the brief; a concern's evidence is what the CANDIDATE has and can only come from their
+  // own material. One haystack, or a verifier that tried both, would wave through exactly these
+  // two — and each is a category error wearing the shape of a valid citation.
+  const cvIntoBrief = payload();
+  cvIntoBrief.competencies[0].source_quote = "Ward link nurse for tissue viability from 2021";
+  const a = run(cvIntoBrief);
+  assert.equal(a.payload.competencies[0].verified, false, "a CV span is no competency source");
+
+  const briefIntoCv = payload();
+  concernsOf(briefIntoCv)[0].evidence_quote = "Comfortable lone working with a rural caseload";
+  const b = run(briefIntoCv);
+  assert.equal(concernsOf(b.payload)[0].evidence_quote, "", "a brief span is no counter");
+  assert.equal(b.failures.filter((f) => f.kind === "concern_source").length, 1);
+});
+
+test("a quote whose whitespace differs from the CV's still stands up", () => {
+  // normalise()'s latitude, held to exactly the same standard as the competency half: a model
+  // that collapsed a line wrap has not fabricated anything.
+  const p = payload();
+  concernsOf(p)[0].evidence_quote = "  COMMUNITY   Staff Nurse\n — Weald Valley Community Trust,  2022–2026 ";
+  const { payload: out, failures } = run(p);
+
+  assert.equal("failed_evidence_quote" in concernsOf(out)[0], false);
+  assert.equal(failures.filter((f) => f.kind === "concern_source").length, 0);
+});
+
+test("no CV at all demotes every non-empty concern — fail closed, and loudly", () => {
+  // A caller that forgot the new argument. Fail-closed is correct, and it is worth pinning:
+  // silently verifying against `undefined` would be the alternative, and it would mean a stored
+  // payload could carry any span at all past this check.
+  const { payload: out, failures } = verifyBrief(assertBrief(payload()), {
+    brief: BRIEF,
+    fieldKeys: FIELD_KEYS,
+  });
+
+  assert.equal(concernsOf(out)[0].evidence_quote, "");
+  assert.ok("failed_evidence_quote" in concernsOf(out)[0]);
+  assert.equal(concernsOf(out)[1].evidence_quote, "", "the honest gap is still not a failure");
+  assert.equal("failed_evidence_quote" in concernsOf(out)[1], false);
+  assert.equal(failures.filter((f) => f.kind === "concern_source").length, 1);
+});
+
+test("concern counts are additive, three-way, and read off the payload's own markers", () => {
+  const p = payload();
+  concernsOf(p)[0].evidence_quote = "Ran an IV therapy clinic";
+  const summary = briefSummary(run(p).payload);
+
+  assert.equal(summary.concern_sourced, 0);
+  assert.equal(summary.concern_unsourced, 1, "the demoted one");
+  assert.equal(summary.concern_no_material, 1, "the honest gap, counted as itself");
+  assert.equal(summary.concern_total, 2);
+  assert.equal(
+    summary.concern_sourced + summary.concern_unsourced + summary.concern_no_material,
+    summary.concern_total,
+    "the three partition the total — a concern is in exactly one of them",
+  );
+  // Every pre-existing counter is untouched by the concerns' arrival.
+  assert.deepEqual(
+    { sourced: summary.sourced, panel_total: summary.panel_total, primer_total: summary.primer_total },
+    { sourced: 2, panel_total: 2, primer_total: 0 },
+  );
+});
+
+test("a demoted concern payload still passes assertBrief, so it can be re-verified at all", () => {
+  const p = payload();
+  concernsOf(p)[0].evidence_quote = "not in the CV anywhere";
+  const { payload: demoted } = run(p);
+
+  assert.equal(assertBrief(demoted), demoted, "the marked payload is still a valid brief");
+});
+
 /* ── the caller's copy is not the verifier's copy ───────────────────────────────────────── */
 
 test("verifyBrief does not mutate the payload it was handed", () => {
@@ -225,10 +394,12 @@ test("verifyBrief does not mutate the payload it was handed", () => {
   // alias the parsed one, and "the fabricated quote came back marked" would be unfalsifiable.
   const p = payload();
   p.blocks[2].props.panel[0].source_field_key = "invented";
-  verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  concernsOf(p)[0].evidence_quote = "invented span";
+  verifyBrief(p, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(p.blocks[2].props.panel[0].source_field_key, "invented");
   assert.equal(p.competencies[2].verified, undefined);
+  assert.equal(concernsOf(p)[0].evidence_quote, "invented span", "#79's branch clones down too");
 });
 
 /* ── the summary ───────────────────────────────────────────────────────────────────────── */
@@ -247,6 +418,12 @@ test("briefSummary counts what the recruiter is being asked to stand behind", ()
     primer_sourced: 0,
     primer_unsourced: 0,
     primer_total: 0,
+    // #79's three-way split, on the fixture's two concerns: one quotes the CV verbatim, one is
+    // the honest gap. Neither is a failure, and the middle number is what says so.
+    concern_sourced: 1,
+    concern_unsourced: 0,
+    concern_no_material: 1,
+    concern_total: 2,
   });
 });
 
@@ -294,7 +471,7 @@ test("a demoted payload still passes assertBrief, so it can be re-verified at al
   // #22 reloading this payload both depend on it and neither would notice it breaking.
   const p = payload();
   p.blocks[2].props.panel[0].source_field_key = "invented-key";
-  const { payload: demoted } = verifyBrief(assertBrief(p), { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const { payload: demoted } = verifyBrief(assertBrief(p), { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(demoted.blocks[2].props.panel[0].failed_field_key, "invented-key");
   assert.equal(assertBrief(demoted), demoted, "the marked payload is still a valid brief");
@@ -308,8 +485,8 @@ test("re-verifying an already-verified payload changes nothing", () => {
   const p = payload();
   p.blocks[2].props.panel[0].source_field_key = "their-processes";
 
-  const pass1 = verifyBrief(p, { brief: BRIEF, fieldKeys: FIELD_KEYS });
-  const pass2 = verifyBrief(pass1.payload, { brief: BRIEF, fieldKeys: FIELD_KEYS });
+  const pass1 = verifyBrief(p, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
+  const pass2 = verifyBrief(pass1.payload, { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS });
 
   assert.equal(
     pass2.payload.blocks[2].props.panel[0].failed_field_key,
@@ -336,10 +513,14 @@ test("a brief with nothing extractable summarises as zero rather than crashing",
     primer_sourced: 0,
     primer_unsourced: 0,
     primer_total: 0,
+    concern_sourced: 0,
+    concern_unsourced: 0,
+    concern_no_material: 0,
+    concern_total: 0,
   });
   const { payload: out, failures } = verifyBrief(
     { role_title: "", blocks: [], competencies: [], questions: [] },
-    { brief: BRIEF, fieldKeys: FIELD_KEYS },
+    { brief: BRIEF, cv: CV, fieldKeys: FIELD_KEYS },
   );
   assert.deepEqual(failures, []);
   assert.deepEqual(out.competencies, []);

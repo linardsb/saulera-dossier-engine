@@ -5,6 +5,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   readiness,
@@ -259,6 +262,44 @@ test("no success yet -> the easiest unattempted core question", () => {
 
   const attempted = [attempt({ question_id: "a#1", rating: 1 })];
   assert.equal(nextQuestion({ questions, attempts: attempted }).question.id, "a#0");
+});
+
+test("#79: a concern counter is not the first question a candidate meets", () => {
+  // THE ONE PRODUCT REGRESSION ON THIS TICKET THAT NOTHING ELSE WOULD CATCH. A concern question
+  // reaches D1 with `axis` NULL — the tag rides brief_json and the question table is type-free —
+  // so it is an ORDINARY CORE ROW here, and step 1 serves the easiest unattempted one. A counter
+  // marked "gentle" would therefore become the first question ever served on its competency:
+  // "how do you answer never having done IV therapy?" as the opening screen, to someone SPEC
+  // describes as anxious, short on time, and ready to close the tab.
+  //
+  // Nothing in code can enforce it — `difficulty` is a free enum on every question — so it is
+  // stated in PREP_SYSTEM, repeated in the schema's description for "concern", pinned in the
+  // fixture, and asserted here on the behaviour that actually matters.
+  const questions = [core("a#0", 2), core("a#1", 3)]; // an ordinary standard, then the counter
+  assert.equal(
+    nextQuestion({ questions, attempts: [] }).question.id,
+    "a#0",
+    "probing sorts last, so the ordinary question opens and the counter comes after a win",
+  );
+
+  // And the failure it guards against, spelled out: the same bank with the counter pitched
+  // gentle opens ON the counter.
+  const mispitched = [core("a#0", 2), core("a#1", 1)];
+  assert.equal(nextQuestion({ questions: mispitched, attempts: [] }).question.id, "a#1");
+});
+
+test("#79: the fixture's own concern questions are pitched probing", () => {
+  // The prompt rule, pinned where a fixture edit would trip over it: every fixture derived from
+  // prep-payload.json feeds the drill, and a counter pitched gentle there is the regression
+  // above shipped rather than described.
+  const payload = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/prep-payload.json"), "utf8"),
+  );
+  const concerns = payload.questions.filter((q) => q.type === "concern");
+  assert.ok(concerns.length, "the fixture carries concern questions at all");
+  for (const q of concerns) {
+    assert.equal(q.difficulty, "probing", `${q.text.slice(0, 40)}… must not open a competency`);
+  }
 });
 
 test("with a success, an unattempted stored variant wins — lateral before vertical", () => {

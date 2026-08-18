@@ -35,6 +35,12 @@ function referencedIds(payload) {
       (block.children ?? []).forEach(walk);
     }
     if (block?.name === "StoryBankCard") found.push(...(block.props?.covers_competency_ids ?? []));
+    // #79. A reference this walk does not know about is invisible to the exhaustive subset test
+    // rather than a failure of it: `assertBrief` would still catch the dangling id, but the
+    // "nothing points at it any more" assertion would pass vacuously for concerns.
+    if (block?.name === "LikelyConcerns") {
+      found.push(...(block.props?.concerns ?? []).map((c) => c?.competency_id));
+    }
   };
   (payload.blocks ?? []).forEach(walk);
   found.push(...(payload.questions ?? []).map((q) => q.competency_id));
@@ -51,6 +57,14 @@ test("the fixture is the shape these tests claim to exercise", () => {
   assert.ok(
     payload.blocks.some((b) => b.name === "StoryBankCard"),
     "a top-level StoryBankCard, for the emptied-cover case",
+  );
+  // #79's two, and they have to point at DIFFERENT competencies or "prune one, drop the block"
+  // are the same case and only one of them is ever exercised.
+  const concerns = payload.blocks.find((b) => b.name === "LikelyConcerns")?.props.concerns ?? [];
+  assert.equal(new Set(concerns.map((c) => c.competency_id)).size, 2, "two concerns, two competencies");
+  assert.ok(
+    payload.blocks.some((b) => b.name === "QuestionsToAsk"),
+    "a QuestionsToAsk block, for the references-nothing case",
   );
 });
 
@@ -171,11 +185,56 @@ test("a StoryBankCard whose covers all strike is dropped", () => {
   assert.doesNotThrow(() => assertBrief(result));
 });
 
+test("#79: striking a competency removes the concern that sits under it, and its question", () => {
+  const payload = load();
+  const concerns = payload.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+  const target = concerns[0].competency_id;
+
+  const result = strikeCompetencies(payload, [target]);
+  const left = result.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+
+  assert.equal(left.length, concerns.length - 1, "the concern went with its competency");
+  assert.ok(!left.some((c) => c.competency_id === target));
+  // The pairing survives for free: `questions` is filtered by competency_id, so the concern and
+  // the question that drills it are removed together. Without this, assertBrief throws at
+  // send.js and the recruiter gets a 400 on a button they had every reason to press.
+  assert.ok(!result.questions.some((q) => q.competency_id === target && q.type === "concern"));
+  assert.doesNotThrow(() => assertBrief(result));
+});
+
+test("#79: a LikelyConcerns block whose every concern is struck is dropped, not kept empty", () => {
+  const payload = load();
+  const concerns = payload.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+  const ids = [...new Set(concerns.map((c) => c.competency_id))];
+  assert.ok(ids.length < payload.competencies.length, "at least one competency survives the strike");
+
+  const result = strikeCompetencies(payload, ids);
+
+  assert.ok(
+    !result.blocks.some((b) => b.name === "LikelyConcerns"),
+    "a concerns block naming no objection is a heading with nothing under it (R5)",
+  );
+  assert.doesNotThrow(() => assertBrief(result));
+});
+
+test("#79: a QuestionsToAsk block survives every strike untouched", () => {
+  // It references no competency — the questions are about the CLIENT, not about any one thing
+  // the recruiter can untick. Its absence from strike.js's branches is a decision, and this is
+  // where that decision is checked rather than assumed.
+  const payload = load();
+  const before = payload.blocks.find((b) => b.name === "QuestionsToAsk");
+
+  for (const c of payload.competencies.slice(0, -1)) {
+    const result = strikeCompetencies(load(), [c.id]);
+    assert.deepEqual(result.blocks.find((b) => b.name === "QuestionsToAsk"), before, `striking ${c.id}`);
+  }
+});
+
 test("blocks that reference no competency are untouched", () => {
   const payload = load();
   const result = strikeCompetencies(payload, [payload.competencies[0].id]);
 
-  for (const name of ["PrimerCard", "PanelBrief", "LogisticsRail"]) {
+  for (const name of ["PrimerCard", "PanelBrief", "LogisticsRail", "QuestionsToAsk"]) {
     assert.deepEqual(
       result.blocks.find((b) => b.name === name),
       payload.blocks.find((b) => b.name === name),
