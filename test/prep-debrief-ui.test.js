@@ -293,6 +293,26 @@ test("identical lines pick independently, and a deleted line retyped returns unp
   );
 });
 
+test("a paste that replaces several lines at once arrives unplaced, never pre-placed", async () => {
+  // #91 review. One input event, same line count, entirely different lines: the prefix and
+  // suffix are empty, and a positional middle pairing would carry the old second line's pick
+  // onto whatever line the paste put second. There is no evidence which old line became which
+  // new one, so the picks are dropped — an unplaced picker is visible on screen, a pick carried
+  // onto the wrong question is not.
+  const s = await boot({ payloads: [AVAILABLE()] });
+
+  s.node("asked").value = "Q1?\nQ2?";
+  s.node("asked").listeners.input[0]();
+  const second = pickersOf(s)[1];
+  second.value = "role:stakeholders";
+  second.listeners.change[0]();
+
+  s.node("asked").value = "Entirely new first?\nEntirely new second?";
+  s.node("asked").listeners.input[0]();
+
+  assert.deepEqual(pickersOf(s).map((p) => p.value), ["", ""]);
+});
+
 test("the change listener is a no-op when the line set has not changed", async () => {
   // #83 M7. `change` on a textarea fires during the blur of a focus transfer; an unconditional
   // rebuild at that moment destroys the <select> focus is moving TO, dropping a keyboard user

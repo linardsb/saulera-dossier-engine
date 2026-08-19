@@ -435,6 +435,26 @@ test("exactly at each cap the route accepts — its boundary and the page's must
   assert.equal(payload.fix_text.length, 2000);
 });
 
+test("a blank line does not count against the asked cap", { skip }, async () => {
+  // #91 review — the same count-before-normalise shape as the tick cap below. The cap ran on
+  // the raw list before the loop dropped blank entries, so twenty real questions plus one blank
+  // — exactly twenty questions by the route's own "a blank line is not a question" — answered
+  // 400 too_long. Unreachable from the page (linesOf filters blanks) — real for any other caller.
+  const d1 = d1Shape(openMigrated());
+  const { token } = await seed(d1);
+
+  const res = await postDebrief(d1, token, {
+    asked: [
+      ...Array.from({ length: 20 }, (_, i) => ({ text: `Question ${i}?`, competency_id: null })),
+      { text: "   ", competency_id: null },
+    ],
+  });
+  assert.equal(res.status, 200);
+
+  const payload = await (await getDebrief(d1, token)).json();
+  assert.equal(payload.asked.length, 20);
+});
+
 test("a tick said twice is one tick, not a refused save", { skip }, async () => {
   // #84 L4, fixed: the cap counted rawShaky BEFORE the dedupe, so [id, id, other] on a
   // two-competency role answered 400 too_long though every id was valid. Unreachable from the

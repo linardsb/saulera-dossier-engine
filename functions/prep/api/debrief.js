@@ -155,7 +155,6 @@ export async function onRequestPost(context) {
     // ── shape and caps, each its own answer ─────────────────────────────────────────────
     const rawAsked = body.asked ?? [];
     if (!Array.isArray(rawAsked)) return json({ error: "missing_fields", field: "asked" }, 400);
-    if (rawAsked.length > MAX_ASKED) return json({ error: "too_long", field: "asked" }, 400);
 
     const rawShaky = body.shaky ?? [];
     if (!Array.isArray(rawShaky)) return json({ error: "missing_fields", field: "shaky" }, 400);
@@ -181,6 +180,11 @@ export async function onRequestPost(context) {
       const competencyId = entry.competency_id == null ? null : String(entry.competency_id);
       asked.push({ text, competency_id: competencyId });
     }
+    // Counted AFTER the blank-drop, the same shape as shaky's dedupe-before-cap below (#84 L4):
+    // the cap means "more questions than the page allows", and by this loop a blank line is not
+    // a question. Counting the raw list answered 400 too_long for twenty real questions plus one
+    // blank — a body the page never sends, but the API means what it says (#91 review).
+    if (asked.length > MAX_ASKED) return json({ error: "too_long", field: "asked" }, 400);
 
     // ── the ownership check ─────────────────────────────────────────────────────────────
     // Anything id-shaped in the body is checked against THIS role before it is written, and a
