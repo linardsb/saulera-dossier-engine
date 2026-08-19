@@ -874,6 +874,16 @@ export async function shakyCompetencyIds(db, roleId) {
  * `question` has no stamp to order them by. The placement lives in `debrief.asked_json`, which is
  * why that column is JSON.
  *
+ * THE SAME WORDING NEVER LANDS TWICE UNDER ONE COMPETENCY (#84 L5). The derived id only collides
+ * with itself, so a candidate re-typing a question that already exists there word-for-word — a
+ * CORE question they were really asked being the ordinary way — used to mint a second row under
+ * the asked id shape, and the drill served identical wording as two questions. The NOT EXISTS
+ * guard skips that insert; `inserted: false`, and the standing row (whatever its id) is the one
+ * the drill serves. The stated cost: a line matching a core question creates no lateral row, so
+ * it is not the variant evidence `nextStage`'s can_answer → holds_up transition counts — the
+ * core row itself is what gets drilled, which is the same wording, so the candidate sees nothing
+ * missing; the ladder simply is not double-counted forward by a duplicate.
+ *
  * `axis = 'lateral'`, `variant_of` NULL. Lateral because targeting reads a non-null axis as "a
  * stored variant" and serves unattempted ones before it mints (targeting.js:146-150) — which is
  * exactly what a real question deserves, and it needs no new serving path. It is also TRUE in
@@ -892,11 +902,15 @@ export async function insertAskedQuestion(db, { competencyId, text } = {}) {
   const id = `${competencyId}#asked-${(await hashToken(String(text))).slice(0, 16)}`;
   const result = await db
     .prepare(
+      // The SELECT's WHERE is the same-wording guard; ON CONFLICT stays for the one case the
+      // guard cannot see — a digest collision between two different texts — where a silent no-op
+      // is still right and an error would 500 a save that succeeded.
       `INSERT INTO question (id, competency_id, text, variant_of, axis, difficulty)
-       VALUES (?, ?, ?, NULL, 'lateral', NULL)
+       SELECT ?, ?, ?, NULL, 'lateral', NULL
+       WHERE NOT EXISTS (SELECT 1 FROM question WHERE competency_id = ? AND text = ?)
        ON CONFLICT (id) DO NOTHING`,
     )
-    .bind(id, competencyId, String(text))
+    .bind(id, competencyId, String(text), competencyId, String(text))
     .run();
   return { id, inserted: (result.meta?.changes ?? 0) === 1 };
 }

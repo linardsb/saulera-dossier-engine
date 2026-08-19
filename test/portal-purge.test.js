@@ -87,6 +87,10 @@ function openMigrated() {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON"); // D1's default; SQLite's is OFF
   const files = readdirSync(migrations).filter((f) => f.endsWith(".sql")).sort();
+  // 0001 by NAME, not position (#84 L6): the seed below must land between init and 0002's ALTER,
+  // and a positional files[0] would silently seed after the wrong migration if a file ever sorts
+  // ahead of init — turning "the ALTER lands on populated events" into a test of nothing.
+  if (files[0] !== "0001_init.sql") throw new Error(`expected 0001_init.sql first, found ${files[0]}`);
   db.exec(readFileSync(join(migrations, files[0]), "utf8"));
   db.exec("INSERT INTO clients (id, name) VALUES ('c-1', 'Ashdown Park Community Healthcare')");
   db.exec("INSERT INTO events (client_id, duration_ms) VALUES ('c-1', 8200)");
@@ -176,18 +180,20 @@ const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).
 test("0002 applies clean after 0001 and the ALTER backfills kind on existing rows", { skip }, () => {
   const db = openMigrated();
 
-  // Every migration's tables, not 0001's and 0002's — see openMigrated's note. The list is the
-  // three regimes test/schema.test.js names, read off a database rather than off the files, so a
-  // migration that parses there and fails to APPLY here is caught by one of the two.
-  const names = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    .all()
-    .map((r) => r.name);
-  assert.deepEqual(names, [
-    "agency", "assignment", "attempt", "candidate", "candidate_otp", "candidate_role", "clients",
-    "competency", "compliance_item", "debrief", "debrief_competency", "events", "habit", "invite",
-    "note_visibility", "otp", "question", "story", "story_competency",
-  ]);
+  // What THIS file needs of the schema, and no more: every table its fixtures seed must exist
+  // after the walk. The closed table universe was pinned here too, as a third hand-maintained
+  // copy of the list schema.test.js computes and compliance-purge.test.js repeats — so a 0013
+  // adding a table failed this file with a message about `kind` backfilling, which invited the
+  // "just add the name" fix (#84 L6). The exact-universe claim lives in those two files.
+  const names = new Set(
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all()
+      .map((r) => r.name),
+  );
+  for (const table of PORTAL_TABLES) {
+    assert.ok(names.has(table), `${table}: seedInvite writes here and the migrations no longer create it`);
+  }
 
   // The legacy row was inserted before the ALTER ran; the DDL default is what makes
   // recordEvent's untouched SQL keep writing pack events.

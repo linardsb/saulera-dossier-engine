@@ -83,6 +83,16 @@ test("daysToInterview is whole UTC days and may be negative", () => {
   assert.equal(daysToInterview(stamp(0), now), 0);
 });
 
+test("an unparseable stamp reads as day zero — pinned, not endorsed (#84 L7)", () => {
+  // 0 is the PERMIT side of the debrief's `<= 0` gate, where dates.js's siblings fail closed.
+  // Unreachable today — invite.interview_at is NOT NULL with a datetime() CHECK and every writer
+  // goes through toSqliteUtc — so this pins the reading for the caller the schema cannot see.
+  // If this fails, someone changed the convention: go update daysToInterview's header and the
+  // debrief route's gate together, or the two will disagree about what garbage means.
+  assert.equal(daysToInterview("next Tuesday", now), 0);
+  assert.equal(daysToInterview(null, now), 0);
+});
+
 test("the cooldown buckets match SPEC's spacing table", () => {
   assert.equal(cooldownDays(2), 0);
   assert.equal(cooldownDays(-2), 0, "negative days is the <= 3 bucket too");

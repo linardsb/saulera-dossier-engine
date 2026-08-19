@@ -169,6 +169,16 @@ test("an available payload prefills both boxes and pre-ticks what was ticked", a
   const ticks = ticksOf(s);
   assert.deepEqual(ticks.map((t) => t.checked), [false, true]);
 
+  // #84 L11's other half: the double cannot click a label, so the id/for pairing that makes the
+  // whole label a tap target is asserted directly — break either and every UI test stayed green
+  // while a tap on the words ticked nothing.
+  const labels = findAll(s.node("shaky-list"), (n) => n.tag === "label");
+  assert.equal(labels.length, ticks.length);
+  ticks.forEach((box, index) => {
+    assert.equal(box.attrs.id, `shaky-${index}`);
+    assert.equal(labels[index].attrs.for, box.attrs.id, "the label points at its own tick");
+  });
+
   // Every label on the page comes from COPY — nothing is written in the markup where it could
   // drift from the object the tone rules are reviewed against.
   assert.equal(textOf(s.node("asked-label")), COPY.askedLabel);
@@ -189,6 +199,14 @@ test("typing lines renders one labelled picker each, carrying every competency p
       picker.children.map(textOf),
       [COPY.unplaced, "Lone working", "Working with stakeholders"],
       "'Not sure yet' is first, and is what an unplaced line means",
+    );
+    // #84 L11: the double has no <select> semantics, so the value ATTRIBUTE is the only thing
+    // standing between `picker.value = id` and every returning candidate's placements rendering
+    // as "Not sure yet" — which is this suite's stated reason to exist.
+    assert.deepEqual(
+      picker.children.map((option) => option.attrs.value),
+      ["", "role:lone-working", "role:stakeholders"],
+      "every option carries its value as an attribute",
     );
     assert.ok(picker.attrs["aria-label"], "every picker carries a label of its own");
   }
@@ -216,7 +234,115 @@ test("a pick survives an edit to the line above it", async () => {
   assert.deepEqual(pickersOf(s).map((p) => p.value), ["role:stakeholders"]);
 });
 
+test("a pick survives editing the placed line itself", async () => {
+  // #82. The old text key minted a new key on every keystroke, so fixing a typo in a placed line
+  // reset its picker to "Not sure yet" — and the corrected line saved unplaced, unnoticed, while
+  // renderLines' comment claimed a surviving line keeps its pick.
+  const s = await boot({ payloads: [AVAILABLE()] });
+
+  s.node("asked").value = "First question?\nSecond qeustion?";
+  s.node("asked").listeners.input[0]();
+  const second = pickersOf(s)[1];
+  second.value = "role:stakeholders";
+  second.listeners.change[0]();
+
+  s.node("asked").value = "First question?\nSecond question?";
+  s.node("asked").listeners.input[0]();
+
+  assert.deepEqual(pickersOf(s).map((p) => p.value), ["", "role:stakeholders"]);
+
+  await s.controller.save();
+  assert.deepEqual(JSON.parse(s.posts()[0].body).asked, [
+    { text: "First question?", competency_id: null },
+    { text: "Second question?", competency_id: "role:stakeholders" },
+  ], "and the save carries the corrected wording with the surviving pick");
+});
+
+test("identical lines pick independently, and a deleted line retyped returns unplaced", async () => {
+  // #82's other two consequences. Under the text key two identical lines collapsed to one entry —
+  // row two's picker read "Not sure yet" on screen while save() posted it placed — and a stale
+  // entry outlived its line, so retyping it resurrected a pick the candidate had removed.
+  const s = await boot({ payloads: [AVAILABLE()] });
+
+  s.node("asked").value = "Why this trust?\nWhy this trust?";
+  s.node("asked").listeners.input[0]();
+  const first = pickersOf(s)[0];
+  first.value = "role:lone-working";
+  first.listeners.change[0]();
+
+  await s.controller.save();
+  assert.deepEqual(JSON.parse(s.posts()[0].body).asked, [
+    { text: "Why this trust?", competency_id: "role:lone-working" },
+    { text: "Why this trust?", competency_id: null },
+  ], "what posts is what the two pickers showed — not one pick silently shared");
+
+  s.node("asked").value = "A question to delete?\nAnother question?";
+  s.node("asked").listeners.input[0]();
+  pickersOf(s)[0].value = "role:lone-working";
+  pickersOf(s)[0].listeners.change[0]();
+
+  s.node("asked").value = "Another question?";
+  s.node("asked").listeners.input[0]();
+  s.node("asked").value = "A question to delete?\nAnother question?";
+  s.node("asked").listeners.input[0]();
+
+  assert.deepEqual(
+    pickersOf(s).map((p) => p.value),
+    ["", ""],
+    "the pick went with the deleted line — a retyped line is a new line, not a resurrection",
+  );
+});
+
+test("the change listener is a no-op when the line set has not changed", async () => {
+  // #83 M7. `change` on a textarea fires during the blur of a focus transfer; an unconditional
+  // rebuild at that moment destroys the <select> focus is moving TO, dropping a keyboard user
+  // back to <body>. By blur time `input` has already rendered, so the guard makes it free. The
+  // double cannot model focus — node IDENTITY is the assertable half: same nodes, no rebuild.
+  const s = await boot({ payloads: [AVAILABLE()] });
+
+  s.node("asked").value = "First question?\nSecond question?";
+  s.node("asked").listeners.input[0]();
+  const before = pickersOf(s);
+
+  s.node("asked").listeners.change[0]();
+  const after = pickersOf(s);
+  assert.equal(after.length, 2);
+  assert.ok(before[0] === after[0] && before[1] === after[1], "same nodes — the blur-time change rebuilt nothing");
+
+  // And an edit that changes no trimmed line — a trailing blank line — rebuilds nothing either.
+  s.node("asked").value = "First question?\nSecond question?\n";
+  s.node("asked").listeners.input[0]();
+  assert.ok(pickersOf(s)[0] === before[0], "a blank line is not a new line set");
+});
+
 /* ── saving ────────────────────────────────────────────────────────────────────────────── */
+
+test("unpicking and unticking are erasures the next save carries", async () => {
+  // #84 L10 — the two UNSET branches. Drop `placements.delete` and a line moved back to "Not
+  // sure yet" posts its old pick; drop `shaky.delete` and unticking silently keeps dampening
+  // the queue for a competency the candidate said was fine. The server half is covered; this is
+  // the page's.
+  const s = await boot({ payloads: [AVAILABLE()] });
+
+  s.node("asked").value = "A question?";
+  s.node("asked").listeners.input[0]();
+  const picker = pickersOf(s)[0];
+  picker.value = "role:lone-working";
+  picker.listeners.change[0]();
+  const tick = ticksOf(s)[0];
+  tick.checked = true;
+  tick.listeners.change[0]();
+
+  picker.value = "";
+  picker.listeners.change[0]();
+  tick.checked = false;
+  tick.listeners.change[0]();
+
+  await s.controller.save();
+  const body = JSON.parse(s.posts()[0].body);
+  assert.deepEqual(body.asked, [{ text: "A question?", competency_id: null }]);
+  assert.deepEqual(body.shaky, [], "an untick is an erasure, not a merge");
+});
 
 test("save posts exactly the current form state, then re-fetches", async () => {
   const s = await boot({ payloads: [AVAILABLE()] });
@@ -439,6 +565,26 @@ test("a route failure says so rather than rendering an empty form", async () => 
   assert.equal(s.node("debrief-form").hidden, true);
 });
 
+test("the too-early answer is announced by a focus move, not left to silence", async () => {
+  // #83 M8. `nothingYet` clears #debrief-state — the page's only role="status" region — so a
+  // screen-reader user heard "Loading…" and then nothing. The answer is announced by moving
+  // focus to the note (session.js's approach for the feedback heading) rather than by
+  // `showState`, which would put the same copy on screen twice. The double does not move focus,
+  // so the call is spied; whether VoiceOver actually reads it is the manual pass.
+  const s = shell();
+  let focused = 0;
+  s.node("unavailable-note").focus = () => {
+    focused += 1;
+  };
+  const wire = net({ payloads: [{ available: false }] });
+  const controller = initDebrief({ doc: s.doc, fetchImpl: wire.fetchFn, navigate: () => {} });
+  await controller.ready;
+
+  assert.equal(s.node("unavailable-note").attrs.tabindex, "-1", "focusable, never in the tab order");
+  assert.equal(focused, 1, "the focus move IS the announcement");
+  assert.equal(textOf(s.node("debrief-state")), "", "and the state line carries no duplicate of the note");
+});
+
 test("a handover that was never written is a state, not a failure", async () => {
   // Nearly unreachable — neither entry link is shown without a handover — so a typed URL is how
   // you get here. It still gets brief.js's register rather than "something went wrong": nothing
@@ -518,6 +664,37 @@ test("debrief.html carries every id the controller reads", () => {
   for (const id of SHELL_IDS) {
     assert.ok(DEBRIEF_HTML.includes(`id="${id}"`), `debrief.html lost #${id}`);
   }
+});
+
+test("the two mounts are named groups, the footer takes the page's measure, the ticks hold the floor", () => {
+  // #83 L2, L3, M9 — the halves of the accessibility sweep a source scan can see. Whether the
+  // group names are announced and the targets are comfortable under a thumb is the manual pass.
+  assert.match(
+    DEBRIEF_HTML,
+    /id="asked-lines"[^>]*role="group"[^>]*aria-labelledby="place-label"/,
+    "tabbing into a picker should say what question the group answers (#83 L2)",
+  );
+  assert.match(
+    DEBRIEF_HTML,
+    /id="shaky-list"[^>]*role="group"[^>]*aria-labelledby="shaky-label"/,
+    "same for the ticks",
+  );
+  assert.match(
+    DEBRIEF_HTML,
+    /class="prep-footer debrief-footer"/,
+    "the footer must not hang past the 60ch form it sits under (#83 L3)",
+  );
+
+  const css = read("public/prep/prep.css");
+  const tickLabel = css.match(/\.debrief-tick-label\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.match(
+    tickLabel,
+    /min-height:\s*var\(--tap-target\)/,
+    "#83 M9: the comment above this block claimed a 44px floor the block did not hold — the " +
+      "block holds it now, and this is what keeps the comment honest",
+  );
+  const footer = css.match(/\.debrief-footer\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.match(footer, /max-width:\s*60ch/, "the class the markup gained must exist in the sheet");
 });
 
 test("COPY holds every visible string, and none of them is an instruction to a model", () => {
