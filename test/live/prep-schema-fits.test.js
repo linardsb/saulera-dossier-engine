@@ -48,10 +48,10 @@
 //
 // And it does not skip without a key. The skip idiom existed because this file was in the glob;
 // out of it, the command is only ever run deliberately, so a keyless run is a MISTAKE and says so
-// — the same shape as test/node-version.test.js, the loud half of #33's gate. Nothing here runs
-// automatically: after a schema change, this is a command someone has to type. There is no
-// scheduled job yet (a `pull_request` run from a fork receives no secrets, so a repo secret does
-// not solve it) — that gap is #90, tracked rather than forgotten.
+// — the same shape as test/node-version.test.js, the loud half of #33's gate. Since #90,
+// .github/workflows/live-gate.yml also runs this nightly on main and on manual dispatch, off a
+// repo secret. It is still not a PR gate (a `pull_request` run from a fork receives no secrets),
+// so after a schema change the pre-merge check is still this command, typed.
 //
 // A rejection costs nothing: the request is refused before a single token is generated.
 

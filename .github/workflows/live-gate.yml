@@ -1,0 +1,44 @@
+# #90 — the grammar-ceiling gate, run automatically. test/live/prep-schema-fits.test.js is the
+# only test that can see the structured-outputs grammar ceiling — the thing that 400'd every prep
+# Send from #50 (b4a06df) until #79 while 1,300 offline tests stayed green — and PR #89
+# deliberately moved it out of `npm test`'s glob so #33's no-skips rule stays honest. This
+# workflow is the automatic half: it probes main nightly and on demand, off a repo secret.
+#
+# NOT on pull_request or push, on purpose: `pull_request` runs from forks receive no secrets, so
+# a PR trigger would turn every fork PR red (issue #90 rejected that fix). The trade is that this
+# catches a ceiling regression after merge, not before — the pre-merge signal is still a human
+# running `npm run test:live` (the nudge lives in src/prep/schema.js's header and the PR
+# template).
+name: live-gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    # A run costs 3 live requests (~pennies): max_tokens is 16 over one-word prompts, and the one
+    # probe that is SUPPOSED to fail is refused before a single token is generated.
+    # 03:47 UTC — quiet, and off the top-of-hour cron spike.
+    - cron: "47 3 * * *"
+    # GitHub disables scheduled workflows after 60 days without repo activity, so a quiet spell
+    # shows NO runs — which is not a green one. If the nightly ticks stop, check the Actions tab
+    # for the "disabled" banner and re-enable before trusting the silence.
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      # A missing or dead ANTHROPIC_API_KEY is a RED run, not a skip: the suite's first test
+      # fails loudly without the key, so this gate can never read as passing while unprobed.
+      # The key is the only env the suite needs — model, effort, beta and max_tokens are read
+      # off the modules that send them.
+      - name: npm run test:live — probe the grammar ceiling at production's parameters
+        run: npm run test:live
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

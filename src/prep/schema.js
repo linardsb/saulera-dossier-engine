@@ -13,6 +13,12 @@
 // Structured outputs reject recursive schemas and numeric/length constraints, and every object
 // needs additionalProperties: false. `{name, props, children}` is a tree, so it is depth-limited
 // by hand below: only CompetencyMap nests, and its children are StoryBankCard leaves.
+//
+// AFTER ANY CHANGE TO THIS FILE, RUN `npm run test:live` (or dispatch the live-gate workflow,
+// .github/workflows/live-gate.yml). The structured-outputs grammar ceiling is invisible to the
+// offline suite — every other test drives a fake client — which is how #50's sixth branch 400'd
+// every prep Send in production from b4a06df until #79, under 1,300 green tests. The workflow's
+// nightly cron catches drift on main; only running the gate yourself catches it before merge.
 
 /**
  * The closed vocabulary (decision 22). #21's registry builds one entry per name; a name outside
@@ -51,7 +57,8 @@ export const BLOCK_NAMES = [
  * caught it — the suite drives generateBrief with a fake client, so the request was asserted and
  * never sent. test/live/prep-schema-fits.test.js is the gate that would have, and it probes at
  * these parameters for exactly this reason. It is NOT in `npm test` — it costs a live request —
- * so after touching this file, run `ANTHROPIC_API_KEY=... npm run test:live`.
+ * so after touching this file, run `ANTHROPIC_API_KEY=... npm run test:live` (or dispatch the
+ * live-gate workflow, which also runs it nightly on main — #90).
  *
  * `effort` does not move the ceiling. `thinking: {type: "enabled", budget_tokens: N}` is not an
  * escape hatch: Opus 5 rejects that parameter shape outright.
