@@ -15,11 +15,13 @@
 // the CSS cannot reach the real interface, the JS cannot reach the network or any store, and its
 // anchors are selectors those screens actually declare.
 //
-// SHOWCASE BRANCH ONLY: on demo/lewis-showcase the layer also annotates two CANDIDATE pages
-// (/prep/stories and /prep/debrief), because the person browsing the demo's candidate portal is
-// the recruiter learning the product. On main that is the wrong audience by guide.js's own
-// header, so a merge must not carry the two prep entries in guide.js's SCREENS, the tags on the
-// two prep pages, or their rows in this file's lists.
+// SHOWCASE BRANCH ONLY: on demo/lewis-showcase the layer also annotates the CANDIDATE portal —
+// every page under /prep a person can reach on the demo — because the person browsing it is the
+// recruiter learning the product. Those screens wear their own accent (guide-pill--candidate /
+// guide-card--candidate) so the two sides never read as one tool. On main that is the wrong
+// audience by guide.js's own header, so a merge must not carry the prep entries in guide.js's
+// SCREENS, the candidate-side accent, the tags on the prep pages, or their rows in this file's
+// lists.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +42,17 @@ const SCREENS = [
   // Demo branch only — candidate pages annotated for the recruiter browsing the showcase.
   "public/prep/stories.html",
   "public/prep/debrief.html",
+  "public/prep/brief.html",
+  "public/prep/session.html",
+  "public/prep/privacy.html",
+  "public/prep/compliance/index.html",
+  "public/prep/compliance/login.html",
 ];
+
+/** Demo branch only — screens with no script of their own. privacy.html is static prose on
+ *  purpose, so "the walkthrough loads after the screen's own script" has no subject there; the
+ *  ordering that still matters is that guide.js sits after the content its anchors point at. */
+const STATIC_SCREENS = new Set(["public/prep/privacy.html"]);
 
 const CSS = read("public/guide.css");
 const JS = read("public/guide.js");
@@ -80,9 +92,20 @@ test("the walkthrough loads AFTER the screen it annotates", () => {
       html.indexOf('href="/guide.css"') > html.indexOf('href="/app.css"'),
       `${screen}: guide.css must be last in the stylesheet chain`,
     );
-    // The two prep pages boot with an inline module script rather than a classic src tag;
-    // either counts as "the screen's own script" here.
-    const ownScript = html.search(/<script src="\/(?!guide)[a-z/]+\.js"><\/script>|<script type="module">/);
+    // privacy.html has no script at all — every anchor there is static markup, so the order
+    // that matters is guide.js after the content itself.
+    if (STATIC_SCREENS.has(screen)) {
+      assert.ok(
+        html.indexOf('src="/guide.js"') > html.indexOf("</main>"),
+        `${screen}: guide.js must come after the static content its anchors point at`,
+      );
+      continue;
+    }
+    // The prep pages boot with an inline module script or a module src tag rather than a
+    // classic src tag; any of the three counts as "the screen's own script" here.
+    const ownScript = html.search(
+      /<script (?:type="module" )?src="\/(?!guide)[a-z/]+\.js"><\/script>|<script type="module">/,
+    );
     assert.ok(ownScript > -1, `${screen} has no screen script of its own`);
     assert.ok(
       html.indexOf('src="/guide.js"') > ownScript,
@@ -157,6 +180,11 @@ test("every anchor the layer points at actually exists on that screen", () => {
     // Demo branch only — see the header.
     "/prep/stories": "public/prep/stories.html",
     "/prep/debrief": "public/prep/debrief.html",
+    "/prep/brief": "public/prep/brief.html",
+    "/prep/session": "public/prep/session.html",
+    "/prep/privacy": "public/prep/privacy.html",
+    "/prep/compliance": "public/prep/compliance/index.html",
+    "/prep/compliance/login": "public/prep/compliance/login.html",
   };
 
   const anchors = [...JS.matchAll(/anchor:\s*"([^"]+)"/g)].map((m) => m[1]);

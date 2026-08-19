@@ -275,11 +275,13 @@
     ],
 
     /* ── SHOWCASE BRANCH ONLY (demo/lewis-showcase) ─────────────────────────────────────────
-       The two /prep entries below put pills on CANDIDATE pages, which the header above calls
+       Every /prep entry below puts pills on CANDIDATE pages, which the header above calls
        the wrong audience entirely — and on main it is: a locum's portal must not carry learning
        material for the agency. On this demo the person browsing the candidate portal IS the
-       recruiter learning the product, so here it is right. A merge to main must not carry these
-       two entries, nor the guide tags on public/prep/stories.html and debrief.html. */
+       recruiter learning the product, so here it is right. A merge to main must not carry any
+       of these entries, the guide tags on the pages under public/prep/, the candidate-side
+       accent (`candidateSide` below and the --candidate rules in guide.css), or their rows in
+       test/guide.test.js. */
 
     "/prep/stories": [
       {
@@ -385,19 +387,252 @@
             "caption's reason: <ui>It is easier to change one thing than five.</ui>"
         ]
       }
+    ],
+
+    "/prep/brief": [
+      {
+        anchor: ".page-head",
+        pill: "Their front door",
+        title: "What their invite opens",
+        body: [
+          "The page a candidate's invite opens: their prep for one interview. The line under " +
+            "the title says where it comes from: <ui>Built from what this agency knows about " +
+            "the client, not from the job advert.</ui> That means your client note and the " +
+            "brief you pasted, nothing else.",
+          "<ui>Practise for it</ui> opens their drill, and <ui>Your stories</ui> their " +
+            "storybank; both are theirs from day one."
+        ],
+        watch: "The third button, <ui>How did the interview go?</ui>, stays hidden until the " +
+          "interview day arrives, because a debrief before the interview is meaningless. You " +
+          "can see it because the demo candidate's day has come."
+      },
+      {
+        anchor: "#blocks",
+        pill: "The five blocks",
+        title: "What fills the page, in pack order",
+        body: [
+          "Everything below renders from the pack: <ui>What this role is really about</ui>, " +
+            "<ui>What they keep coming back to</ui>, <ui>Who you are likely to meet</ui>, " +
+            "<ui>A story worth bringing</ui>, then <ui>The practical details</ui>.",
+          "It is a projection of the stored pack, not the pack itself. The model's failed " +
+            "guesses, the importance scores and the question bank never leave the server, so " +
+            "this page could not show them even by mistake."
+        ]
+      },
+      {
+        anchor: "#blocks",
+        pill: "The marks travel",
+        title: "Claims name their source on this side too",
+        body: [
+          "The rule your pack lives by follows the candidate here. A claim they can lean on " +
+            "carries the quoted line and where it came from: <ui>From the client's brief</ui> " +
+            "or <ui>From our notes on this client</ui>.",
+          "A guess stays on the page and wears <ui>Unverified</ui>, with a caption saying " +
+            "what to do with it: <ui>Do not quote it back to them.</ui> The candidate gets " +
+            "the same honesty about sources that you do."
+        ]
+      }
+    ],
+
+    "/prep/session": [
+      {
+        anchor: ".page-head",
+        pill: "Never a mark",
+        title: "Practice, on their side only",
+        body: [
+          "The drill that <ui>Practise for it</ui> opens. The promise under the heading is " +
+            "the page's whole posture: <ui>You are preparing here, never being marked, and " +
+            "nothing you do is shown to your recruiter.</ui>",
+          "Their answers are read to write feedback and to decide what to serve next, and " +
+            "that is all. No mark is ever shown, to them or to you, and nothing they type " +
+            "ever reaches your side."
+        ]
+      },
+      {
+        anchor: "#act-prime",
+        pill: "Before you start",
+        title: "Where they pick up from",
+        body: [
+          "<ui>Before you start</ui> is what returning makes useful: the role primer again, " +
+            "then <ui>Where you have got to</ui>, listing <ui>Covered so far</ui> and " +
+            "<ui>Still to come</ui>, so no session starts from nothing.",
+          "<ui>Start practising</ui> is the only button. A session already under way skips " +
+            "this act entirely and reopens the drill where it stopped, which is what the page " +
+            "means by <ui>This page brings you back to where you stopped.</ui>"
+        ]
+      },
+      {
+        anchor: "#act-prime",
+        pill: "How the queue thinks",
+        title: "What gets served, and when",
+        body: [
+          "One question at a time, chosen rather than listed: the part of the job most in " +
+            "need of work is served first. A part the candidate ticked under <ui>Anything " +
+            "that felt shaky?</ui> after an interview sinks in readiness, so it comes round " +
+            "sooner.",
+          "The interview date sets the pace. Weeks out, each part rests a few days between " +
+            "goes; inside the final three days the resting stops and only the most pressing " +
+            "half of the list stays in play, trading depth for coverage. The day before, the " +
+            "session becomes a short run-through: <ui>Your interview is tomorrow. This is a " +
+            "short run through what you already have, not new practice.</ui>"
+        ]
+      },
+      {
+        anchor: "#act-prime",
+        pill: "Help, then the close",
+        title: "Two rungs of help, and an honest ending",
+        body: [
+          "<ui>If you get stuck</ui> sits under every question with two rungs: <ui>A " +
+            "nudge</ui>, then <ui>A structure to follow</ui>. Opening one is never held " +
+            "against them; it changes only what a later session serves. With the structure " +
+            "open, sending an empty answer is a legal way to move on.",
+          "<ui>Wrap up for now</ui> appears once there is something worth closing on, and " +
+            "ends at <ui>Where you got to</ui>: <ui>What improved today</ui> when something " +
+            "moved, <ui>Queued for next time</ui> naming the next thing, and when nothing " +
+            "moved, the honest line instead: <ui>It will not always feel like progress while " +
+            "you are doing it.</ui>"
+        ],
+        watch: "An empty send with no help open is refused: <ui>Type your answer first.</ui> " +
+          "That is the guard working, not a fault. And an empty send after opening the " +
+          "structure earns no invented praise; <ui>Nothing to look at this time.</ui> is all " +
+          "that comes back."
+      }
+    ],
+
+    "/prep/privacy": [
+      {
+        anchor: ".page-head",
+        pill: "The whole promise",
+        title: "What is held, why, and when it goes",
+        body: [
+          "Every page in the portal ends with a link here. Two tables carry the substance: " +
+            "what is held, why, and when it is deleted. Prep data is erased 30 days after " +
+            "the interview date; the compliance record, kept separately, goes 12 months " +
+            "after the last booking ends. Both deletions are automatic and permanent: " +
+            "<ui>there is no archive and no copy kept</ui>.",
+          "One line under the first table answers the question a candidate is most likely " +
+            "to ask you: <ui>Your recruiter sees whether the invite was sent and opened. " +
+            "That is all.</ui>"
+        ]
+      },
+      {
+        anchor: "#delete-now",
+        pill: "The delete-now door",
+        title: "Sooner than the timetable, no reason needed",
+        body: [
+          "<ui>Delete it now</ui> is the early exit: the same data the automatic deletion " +
+            "would take, removed the moment the candidate asks. The compliance checklist " +
+            "carries its own control at its foot, and the two records are separate, so " +
+            "deleting one leaves the other standing.",
+          "The page states the terms plainly: <ui>You do not have to give a reason, and " +
+            "nobody is told you pressed it.</ui>"
+        ]
+      }
+    ],
+
+    "/prep/compliance": [
+      {
+        anchor: ".page-head",
+        pill: "The other checklist",
+        title: "The same eight items, in their words",
+        body: [
+          "A locum's own view of what your <ui>Compliance</ui> screen tracks: the eight " +
+            "things the agency needs on file before a booking. The page asks for exactly two " +
+            "facts per item and says so up front: <ui>Send us the reference number and the " +
+            "date each one runs out.</ui>",
+          "The count line reads like <ui>3 of 8 done</ui>: a list with items left on it, " +
+            "never a mark out of eight. When something is sent in and unchecked, <ui>1 is " +
+            "with the agency to check</ui> joins it, and that item is the one your side " +
+            "lists as <ui>Waiting for you</ui>."
+        ]
+      },
+      {
+        anchor: "#items",
+        pill: "A word and a sentence",
+        title: "Where each item stands",
+        body: [
+          "Each card carries a short word for the state: <ui>Not started</ui>, <ui>Sent " +
+            "in</ui>, <ui>Checked</ui>, and when a date presses, <ui>Expiring</ui> or " +
+            "<ui>Out of date</ui>. The sentence under it says the same thing properly, like " +
+            "<ui>We do not have this yet.</ui>",
+          "Anything not yet <ui>Checked</ui> keeps a form: <ui>Reference or certificate " +
+            "number</ui> for all of them, <ui>Date it runs out</ui> for the six that lapse. " +
+            "References and the 48-hour week choice never ask for a date, because neither " +
+            "expires. <ui>Send this</ui> hands the item over."
+        ],
+        watch: "A card already <ui>Sent in</ui> keeps its form too. That is deliberate: a " +
+          "reference typed wrongly is fixed by typing it again, and the newest send is what " +
+          "the agency checks."
+      },
+      {
+        anchor: "#items",
+        pill: "Never a document",
+        title: "Reference numbers, never the documents",
+        body: [
+          "Under every form sits the same caption: <ui>We do not store your documents.</ui> " +
+            "There is no upload control on this page at all, which is structural rather than " +
+            "polite: what is stored is a reference, a date, and whether it has been checked. " +
+            "The documents keep going to the agency the way they always have.",
+          "At the very foot, <ui>Delete everything you hold about me</ui> erases the whole " +
+            "compliance record after one confirmation. It is a button rather than a link so " +
+            "that nothing, scanner or browser, can fire it by fetching a URL."
+        ]
+      }
+    ],
+
+    "/prep/compliance/login": [
+      {
+        anchor: ".page-head",
+        pill: "The real door",
+        title: "How a locum signs in when it is not a demo",
+        body: [
+          "Every compliance email the tool sends, the expiry nudges included, points at this " +
+            "page. The demo never showed it to you because the demo door signs you straight " +
+            "in; a real locum lands here, types the email address the agency has for them, " +
+            "and presses <ui>Send me a code</ui>.",
+          "One task at a time: the <ui>6-digit code</ui> box appears only after a code has " +
+            "been asked for, and the cursor is put in it."
+        ]
+      },
+      {
+        anchor: "#act-email",
+        pill: "Codes, never links",
+        title: "Six digits, and deliberately no link",
+        body: [
+          "The lede carries the promise: <ui>We will not send you a link to click.</ui> The " +
+            "email that arrives holds a 6-digit code and no link, so a locum never learns to " +
+            "trust one.",
+          "The code box is built for a phone: it offers the code straight from the " +
+            "notification, and a pasted code survives a stray space in the middle."
+        ],
+        watch: "The code email is titled <ui>Your interview-prep sign-in code</ui> even when " +
+          "it is asked for from this page. There is one code email, worded for the prep " +
+          "side; a locum who says they got the wrong email did not."
+      }
     ]
   };
 
   /* `/clients.html` and `/clients` are the same screen: Pages serves the pretty path, a local
-     file open does not. `/index.html` and `/` likewise. Normalised so the layer appears in both. */
+     file open does not. `/index.html` and `/` likewise — and any `/index` tail folds into its
+     directory, so `/prep/compliance/` and `/prep/compliance/index.html` share one entry. */
   function screenKey() {
     var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
-    if (path === "" || path === "/index") return "/";
+    if (path.slice(-6) === "/index") path = path.slice(0, -6);
+    if (path === "") return "/";
     return path;
   }
 
-  var steps = SCREENS[screenKey()];
+  var key = screenKey();
+  var steps = SCREENS[key];
   if (!steps || !steps.length) return;
+
+  /* SHOWCASE BRANCH ONLY (demo/lewis-showcase): which side of the tool this screen sits on.
+     Everything under /prep is the candidate's portal; everything else is the recruiter's tool.
+     The pills and the card wear a different accent per side (guide.css's --candidate rules),
+     and the card's eyebrow names the side in words, so the split never rests on colour alone.
+     On main the layer never loads on a candidate page, so this is always false there — delete
+     with the /prep entries above. */
+  var candidateSide = key.lastIndexOf("/prep", 0) === 0;
 
   /* Built with createElement and textContent throughout, the same rule every script on this
      deployment keeps. The one exception is `body` and `theirSide`, which carry <ui> and <em>
@@ -432,7 +667,7 @@
   /* One card, reused. It lives on <body> rather than beside its pill because two of the
      containers annotated here carry `overflow-x: auto`, which would clip a card positioned
      inside them — on the two screens with the most to explain. */
-  var card = el("div", "guide-card");
+  var card = el("div", candidateSide ? "guide-card guide-card--candidate" : "guide-card");
   card.hidden = true;
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "false");
@@ -513,7 +748,11 @@
   function openCard(pill, step, number) {
     closeCard(false);
 
-    eyebrow.textContent = "Step " + number + " of " + steps.length;
+    // The candidate eyebrow says whose side the page is on, so the accent never carries the
+    // split by colour alone (SHOWCASE BRANCH ONLY — see `candidateSide` above).
+    eyebrow.textContent = candidateSide
+      ? "The candidate's side · step " + number + " of " + steps.length
+      : "Step " + number + " of " + steps.length;
     title.textContent = step.title;
 
     bodyWrap.textContent = "";
@@ -582,7 +821,7 @@
     if (!target || !target.parentNode) return;
 
     var number = index + 1;
-    var pill = el("button", "guide-pill");
+    var pill = el("button", candidateSide ? "guide-pill guide-pill--candidate" : "guide-pill");
     pill.type = "button";
     pill.setAttribute("aria-expanded", "false");
     pill.setAttribute("aria-controls", "guide-card");

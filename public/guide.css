@@ -274,3 +274,49 @@
     box-shadow: 0 -4px 0 rgba(22, 24, 28, 0.16);
   }
 }
+
+/* ── the candidate side · SHOWCASE BRANCH ONLY (demo/lewis-showcase) ──────────────────────── */
+
+/* On this demo the layer also annotates the candidate portal (every /prep page), and those
+   pills wear a different accent so the reader always knows which side of the tool they are
+   standing on. The green is the product's own measured pair, lifted from tokens.css:
+   --verified (#0b5c46) on --tint-verified (#c4ece1), the sourced-claim green — the palette's
+   other family, unreadable as the recruiter rust. The card's eyebrow also SAYS the side in
+   words ("The candidate's side · step N of M", written by guide.js), so the split never rests
+   on colour alone. Pairings measured the same way as the header's list, against the 4.5:1
+   body floor:
+
+       green #0b5c46 on paper #faf8f4   7.52:1
+       paper #faf8f4 on green #0b5c46   7.52:1   (the pill once pressed, and the number disc)
+       green #0b5c46 on tint  #c4ece1   6.24:1   (hover — the pairing tokens.css itself records)
+
+   The watch block stays rust on both sides: a warning ranks the same wherever it appears.
+   Delete this whole section with the /prep entries in guide.js when the showcase comes down. */
+
+.guide-pill--candidate {
+  border-color: #0b5c46;
+  color: #0b5c46;
+}
+
+.guide-pill--candidate:hover {
+  background: #c4ece1;
+}
+
+.guide-pill--candidate[aria-expanded="true"] {
+  background: #0b5c46;
+  color: #faf8f4;
+}
+
+.guide-pill--candidate .guide-pill-mark {
+  background: #0b5c46;
+  color: #faf8f4;
+}
+
+.guide-pill--candidate[aria-expanded="true"] .guide-pill-mark {
+  background: #faf8f4;
+  color: #0b5c46;
+}
+
+.guide-card--candidate .guide-card-eyebrow {
+  color: #0b5c46;
+}

@@ -396,20 +396,25 @@ test("every content page is served by the one stylesheet chain, in order", () =>
   // sheet the other two do not — a loop would have to encode that exception anyway, and would
   // silently stop asserting order for any page added to the map without a chain of its own.
   const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css"];
-  assert.deepEqual(stylesheetsOf(BRIEF_HTML), chain, "brief.html's stylesheet chain or its order");
-  assert.deepEqual(
-    stylesheetsOf(SESSION_HTML),
-    [...chain, "/prep/session.css"],
-    "session.html's stylesheet chain or its order — it links the portal's four plus its own, last",
-  );
-  // SHOWCASE BRANCH ONLY: the two pages below carry the temporary walkthrough layer
-  // (public/guide.css) LAST in their chains, because on this demo the person reading the
+  // SHOWCASE BRANCH ONLY: every page below carries the temporary walkthrough layer
+  // (public/guide.css) LAST in its chain, because on this demo the person reading the
   // candidate portal is the recruiter learning the product. The four-sheet product chain and
   // its order are still pinned exactly, and the "no fifth" reason still holds where it was
   // aimed: the 16px floor lives in prep.css, where the colour and size gates can see it, and
   // guide.css cannot reach it — every selector in it is scoped under `.guide`, which
   // test/guide.test.js asserts rather than trusts. On main the walkthrough must not be on a
-  // candidate page, and these two expectations go back to `chain` alone.
+  // candidate page, and these expectations go back to the product chains alone.
+  assert.deepEqual(
+    stylesheetsOf(BRIEF_HTML),
+    [...chain, "/guide.css"],
+    "brief.html's stylesheet chain or its order — the portal's four, then the demo walkthrough last",
+  );
+  assert.deepEqual(
+    stylesheetsOf(SESSION_HTML),
+    [...chain, "/prep/session.css", "/guide.css"],
+    "session.html's stylesheet chain or its order — the portal's four plus its own, then the " +
+      "demo walkthrough last",
+  );
   assert.deepEqual(
     stylesheetsOf(DEBRIEF_HTML),
     [...chain, "/guide.css"],

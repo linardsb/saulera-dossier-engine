@@ -103,7 +103,19 @@ test("the portal shell is served by one stylesheet chain", () => {
   // index deliberately did not: its whole vocabulary is app.css's, and a fourth blocking
   // stylesheet on a page that exists for one round trip delays the only thing it does.
   const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css"];
-  assert.deepEqual(stylesheetsOf(PRIVACY_HTML), chain, "privacy.html's stylesheet chain or its order");
+  // SHOWCASE BRANCH ONLY: privacy.html carries the temporary walkthrough layer
+  // (public/guide.css) LAST in its chain, because on this demo the person reading the candidate
+  // portal is the recruiter learning the product. The four-sheet product chain and its order are
+  // still pinned exactly; guide.css cannot reach the page's own rules — every selector in it is
+  // scoped under `.guide`, which test/guide.test.js asserts rather than trusts. On main the
+  // walkthrough must not be on a candidate page, and this expectation goes back to `chain` alone.
+  // The junction is deliberately NOT annotated: it replaces itself within one round trip, so a
+  // pill there would never be read.
+  assert.deepEqual(
+    stylesheetsOf(PRIVACY_HTML),
+    [...chain, "/guide.css"],
+    "privacy.html's stylesheet chain or its order — the portal's four, then the demo walkthrough last",
+  );
   assert.deepEqual(
     stylesheetsOf(INDEX_HTML),
     chain.slice(0, 3),

@@ -174,7 +174,14 @@ test("both pages are served by the one stylesheet chain, in order", () => {
   // Order is the assertion, not just membership: prep.css supplements app.css and its compliance
   // section relies on winning the cascade against it. Swap two links and the chips lose their
   // ground while every other test stays green.
-  const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css"];
+  //
+  // SHOWCASE BRANCH ONLY: both pages carry the temporary walkthrough layer (public/guide.css)
+  // LAST in their chains, because on this demo the person reading the candidate portal is the
+  // recruiter learning the product. The four-sheet product chain and its order are still pinned
+  // exactly; guide.css cannot reach these pages' own rules — every selector in it is scoped
+  // under `.guide`, which test/guide.test.js asserts rather than trusts. On main the walkthrough
+  // must not be on a candidate page, and this expectation goes back to `chain` alone.
+  const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css", "/guide.css"];
   for (const [page, html] of Object.entries(PAGES)) {
     assert.deepEqual(stylesheetsOf(html), chain, `${page}'s stylesheet chain or its order`);
   }
