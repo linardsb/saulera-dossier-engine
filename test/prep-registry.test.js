@@ -283,7 +283,10 @@ test("the stored payload renders every block it carries", () => {
   assertPropsRendered(payload.blocks, html);
 });
 
-test("#79: a pre-#79 stored payload renders exactly as it did before", () => {
+test("#79: a pre-#79 stored payload still renders every block it carries, skipping and warning about nothing", () => {
+  // (#88: named "renders exactly as it did before" until it was, honestly, not asserting that —
+  // no pre-#79 output is pinned here. What it holds is the outage half: nothing skipped, nothing
+  // warned, nothing blank.)
   // The other half of the regression prep-schema.test.js asserts: a stored brief that asserts
   // but renders as a blank page is the same outage by another route. Both new names are simply
   // absent, and the walker must skip nothing and warn about nothing.

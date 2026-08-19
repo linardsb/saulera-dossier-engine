@@ -121,9 +121,12 @@ test("every element debrief.js reaches by id exists in debrief.html", () => {
   // find the helper's single call, whose argument is a VARIABLE, extract nothing, and loop over
   // an empty set. The non-empty assertion is what turns that into a failure instead of silence.
   const reached = [...DEBRIEF_JS.matchAll(/\$\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
+  // An is-the-scan-alive check, nothing more: it exists so the loop below can never pass over an
+  // empty set. Deliberately about half the real call-site count (#88) — a floor at the exact
+  // count made removing any one `$()` call fail a gate that was never about `$()` counts.
   assert.ok(
-    reached.length >= 18,
-    `parsed ${reached.length} id lookups out of debrief.js, expected at least 18 — the helper ` +
+    reached.length >= 9,
+    `parsed ${reached.length} id lookups out of debrief.js, expected at least 9 — the helper ` +
       `this regex follows has changed shape, and this gate is now asserting nothing`,
   );
 
@@ -142,12 +145,14 @@ test("every element stories.js reaches by id exists in stories.html", () => {
   // matching getElementById here would find the helper's single call, whose argument is a
   // VARIABLE, extract nothing, and loop over an empty set.
   //
-  // The 20 is COUNTED, not guessed: it is every `$("…")` call site in the finished controller. A
-  // guessed floor produces an off-by-N failure that reads exactly like a real one.
+  // The floor is an is-the-scan-alive check, nothing more: it exists so the loop below can never
+  // pass over an empty set. Deliberately about half the real call-site count (#88) — the floor
+  // used to sit at the exact count, so removing any one `$()` call failed a gate that was never
+  // about `$()` counts.
   const reached = [...STORIES_JS.matchAll(/\$\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
   assert.ok(
-    reached.length >= 20,
-    `parsed ${reached.length} id lookups out of stories.js, expected at least 20 — the helper ` +
+    reached.length >= 10,
+    `parsed ${reached.length} id lookups out of stories.js, expected at least 10 — the helper ` +
       `this regex follows has changed shape, and this gate is now asserting nothing`,
   );
 

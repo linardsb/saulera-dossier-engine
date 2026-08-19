@@ -162,7 +162,7 @@ test("an empty storybank invites a first story rather than showing a blank", asy
 
   assert.equal(s.controller.state.phase, "ready");
   assert.equal(rowsOf(s).length, 0);
-  assert.match(textOf(s.node("stories-list")), /Nothing here yet/);
+  assert.ok(textOf(s.node("stories-list")).includes(COPY.empty));
   assert.equal(textOf(s.node("add-story")), COPY.add);
   assert.equal(s.node("editor").hidden, true, "the editor is shut until they ask for it");
 });
@@ -183,14 +183,14 @@ test("a story with no covers says so in words, rather than showing a blank", asy
   // re-handover removed the competency I linked it to" (0012's cascade takes the tick). The
   // candidate cannot act on a blank.
   const s = await boot({ payloads: [PAYLOAD({ stories: [STORY({ competency_ids: [] })] })] });
-  assert.match(textOf(rowsOf(s)[0]), /not linked to any part of the job yet/);
+  assert.ok(textOf(rowsOf(s)[0]).includes(COPY.noCovers));
 });
 
 test("a tick pointing at a competency that no longer exists renders as no covers, not as a blank", async () => {
   const s = await boot({
     payloads: [PAYLOAD({ stories: [STORY({ competency_ids: ["role:deleted-by-a-re-handover"] })] })],
   });
-  assert.match(textOf(rowsOf(s)[0]), /not linked to any part of the job yet/);
+  assert.ok(textOf(rowsOf(s)[0]).includes(COPY.noCovers));
   assert.ok(!serialize(rowsOf(s)[0]).includes("role:deleted"), "and the dead id is not shown either");
 });
 
@@ -203,10 +203,10 @@ test("every row button names the story it acts on", async () => {
 
   const labels = buttonsOf(s).map((b) => b.attrs["aria-label"]);
   assert.deepEqual(labels, [
-    'Edit “The escalation on nights”',
-    'Delete “The escalation on nights”',
-    'Edit “The audit nobody wanted”',
-    'Delete “The audit nobody wanted”',
+    COPY.editFor("The escalation on nights"),
+    COPY.deleteFor("The escalation on nights"),
+    COPY.editFor("The audit nobody wanted"),
+    COPY.deleteFor("The audit nobody wanted"),
   ]);
 });
 
@@ -365,13 +365,13 @@ test("delete takes two taps, and the first one arms nothing else", async () => {
     payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" })] })],
   });
 
-  const deleteA = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
+  const deleteA = () => buttonsOf(s).filter((b) => b.attrs["aria-label"] === COPY.deleteFor("A"))[0];
   assert.equal(textOf(deleteA()), COPY.remove);
 
   deleteA().listeners.click[0]();
   assert.equal(s.posts().length, 0, "the first tap asks rather than deletes");
   assert.equal(textOf(deleteA()), COPY.confirmRemove);
-  const deleteB = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[1];
+  const deleteB = () => buttonsOf(s).filter((b) => b.attrs["aria-label"] === COPY.deleteFor("B"))[0];
   assert.equal(textOf(deleteB()), COPY.remove, "and it arms one row, never both");
 
   deleteA().listeners.click[0]();
@@ -384,7 +384,8 @@ test("arming a second row disarms the first", async () => {
   const s = await boot({
     payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" })] })],
   });
-  const deletes = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"));
+  const deletes = () =>
+    buttonsOf(s).filter((b) => [COPY.deleteFor("A"), COPY.deleteFor("B")].includes(b.attrs["aria-label"]));
   const [first, second] = deletes();
 
   first.listeners.click[0]();
@@ -408,7 +409,7 @@ test("the first delete tap changes the button's own words in place, and the page
 
   const rowsBefore = rowsOf(s);
   const buttonsBefore = buttonsOf(s);
-  const deleteA = buttonsBefore.filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
+  const deleteA = buttonsBefore.filter((b) => b.attrs["aria-label"] === COPY.deleteFor("A"))[0];
 
   deleteA.listeners.click[0]();
 
@@ -446,7 +447,7 @@ test("after a successful delete, focus is moved to Add a story rather than dropp
     focused += 1;
   };
 
-  const deleteA = buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
+  const deleteA = buttonsOf(s).filter((b) => b.attrs["aria-label"] === COPY.deleteFor("A"))[0];
   deleteA.listeners.click[0]();
   await deleteA.listeners.click[0]();
 
@@ -472,7 +473,7 @@ test("deleting ANOTHER story does not discard what is typed in the open editor",
   s.node("sketch").value = "The rewritten version, five minutes of typing.";
   s.controller.state.covers.add("role:stakeholders");
 
-  const deleteB = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === 'Delete “B”')[0];
+  const deleteB = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === COPY.deleteFor("B"))[0];
   deleteB().listeners.click[0]();
   await deleteB().listeners.click[0]();
 
@@ -495,7 +496,7 @@ test("an editor with nothing typed in it DOES take the server's row on someone e
   });
 
   await s.controller.openEditor("a");
-  const deleteB = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === 'Delete “B”')[0];
+  const deleteB = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === COPY.deleteFor("B"))[0];
   deleteB().listeners.click[0]();
   await deleteB().listeners.click[0]();
 
@@ -559,7 +560,7 @@ test("a primed Delete does not survive the editor opening over it", async () => 
   // stayed on "Really delete?" while the state behind it said otherwise — and the next tap on it
   // deleted a story the candidate believed they had backed out of.
   const s = await boot({ payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" })] })] });
-  const deleteA = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === 'Delete “A”')[0];
+  const deleteA = () => buttonsOf(s).filter((n) => n.attrs["aria-label"] === COPY.deleteFor("A"))[0];
 
   deleteA().listeners.click[0]();
   assert.equal(textOf(deleteA()), COPY.confirmRemove, "primed");
@@ -694,7 +695,7 @@ test("a failed delete disarms the button and says so", async () => {
   s.node("add-story").focus = () => {
     focused += 1;
   };
-  const deleteA = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
+  const deleteA = () => buttonsOf(s).filter((b) => b.attrs["aria-label"] === COPY.deleteFor("A"))[0];
 
   const pressed = deleteA();
   pressed.listeners.click[0]();
@@ -736,7 +737,7 @@ test("the story cap is the ROUTE's number, not a constant in this file", async (
   const s = await boot({ payloads: [PAYLOAD({ stories, max_stories: 3 })] });
 
   await s.controller.openEditor(null);
-  assert.match(textOf(s.node("stories-state")), /There is room for 3 stories/);
+  assert.equal(textOf(s.node("stories-state")), COPY.tooMany(3));
   assert.equal(s.node("editor").hidden, true, "and the editor does not open on a story that cannot be saved");
   assert.equal(s.posts().length, 0);
 });
@@ -765,7 +766,7 @@ test("the cap is re-checked at save, not only when the editor opens", async () =
   );
   await s.controller.save();
 
-  assert.match(textOf(s.node("stories-state")), /There is room for 2 stories/);
+  assert.equal(textOf(s.node("stories-state")), COPY.tooMany(2));
   assert.equal(s.posts().length, 0, "nothing was sent");
   assert.equal(
     s.node("title").value,

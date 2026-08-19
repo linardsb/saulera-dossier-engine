@@ -62,9 +62,12 @@ test("every element login.js reaches by id exists in login.html", () => {
   // set — green, and checking nothing. The non-empty assertion below is what keeps that from
   // happening again if `$` is ever refactored.
   const reached = [...LOGIN_JS.matchAll(/\$\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
+  // An is-the-scan-alive check, nothing more: it exists so the loop below can never pass over an
+  // empty set. Deliberately about half the real call-site count (#88) — a floor at the exact
+  // count made removing any one `$()` call fail a gate that was never about `$()` counts.
   assert.ok(
-    reached.length >= 12,
-    `parsed ${reached.length} id lookups out of login.js, expected at least 12 — the helper this ` +
+    reached.length >= 6,
+    `parsed ${reached.length} id lookups out of login.js, expected at least 6 — the helper this ` +
       `regex follows has changed shape, and this gate is now asserting nothing`,
   );
 

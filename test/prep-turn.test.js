@@ -612,7 +612,7 @@ test("the reveal rung is handed no story titles at all", { skip }, async () => {
   assert.doesNotMatch(prompt, /The escalation on nights/);
 });
 
-test("a candidate with no storybank gets the nudge prompt unchanged", { skip }, async () => {
+test("a candidate with no storybank gets a nudge prompt with no story block in it", { skip }, async () => {
   const d1 = d1Shape(openMigrated());
   const { token, roleId } = await seed(d1);
   const question = (await questionsByRole(d1, roleId))[0];

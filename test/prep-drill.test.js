@@ -335,9 +335,14 @@ test("the candidate's own ANSWER is deliberately not fenced, and that is the rig
   );
 });
 
-test("with no stories the nudge prompt is byte-for-byte the one it was before #78", async () => {
+test("with no stories the nudge prompt carries no trace of the storybank, and empty means absent", async () => {
   // EMPTY MEANS ABSENT, not an empty block — otherwise every existing nudge's prompt changes shape
   // under a feature nobody has enabled, and the greps above start asserting a different string.
+  //
+  // #88: this test used to claim the prompt was "byte-for-byte the one it was before #78" while
+  // pinning no pre-#78 bytes — it asserted self-consistency, not the claim in its name. And the
+  // claim has since stopped being true in general: #85's fence() deliberately changed those bytes
+  // for adversarial questions. The name now says only what the assertions below establish.
   const withDefault = fakeAnthropic(ok({ nudge: "n" }));
   await mintNudge(withDefault, { question: "Q", competencyLabel: "L" });
   const explicit = fakeAnthropic(ok({ nudge: "n" }));
