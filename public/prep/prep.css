@@ -73,8 +73,11 @@
   margin-bottom: var(--space-2);
 }
 
-/* One tick. The 44px target CRAFT asks for comes from the label's own padding rather than from
-   the box, which no browser lets you resize honestly. */
+/* One tick. The 44px target CRAFT asks for comes from the LABEL's min-height rather than from
+   the box, which no browser lets you resize honestly — the label is tied to its checkbox by
+   `for`, so its whole height is tappable. app.css's .radio-row label is the same fix, measured:
+   a bare flex label is the height of its text, about 40px here with the row's padding, under
+   the floor (#83 M9). */
 .debrief-tick {
   display: flex;
   align-items: center;
@@ -83,12 +86,20 @@
 }
 
 .debrief-tick-label {
+  display: flex;
+  align-items: center;
   font-family: var(--font-body);
   font-size: var(--text-note);
+  min-height: var(--tap-target);
 }
 
 /* The three fields, held apart so the page reads as three questions rather than one wall. */
 .debrief-field { margin: 0 0 var(--space-10); }
+
+/* The shared footer is sized for .brief's 72ch, so under this 60ch form the privacy link hung
+   ~6ch past each edge on desktop (#83 L3). `.passport-footer` below is the same fix for the
+   same page shape. */
+.debrief-footer { max-width: 60ch; }
 
 /* ── the storybank (#78) ───────────────────────────────────────────────────────────────── */
 

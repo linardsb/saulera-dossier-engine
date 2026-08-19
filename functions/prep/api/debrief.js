@@ -188,9 +188,12 @@ export async function onRequestPost(context) {
     // invite is not found. Nothing is written before this passes.
     const competencies = await competenciesByRole(env.DB, role.role_id);
     const known = new Set(competencies.map((c) => c.id));
-    if (rawShaky.length > competencies.length) return json({ error: "too_long", field: "shaky" }, 400);
+    // Deduped BEFORE the cap (#84 L4): the cap means "more ticks than this role has boxes", and
+    // [id, id] is one tick said twice, not two. Counting the raw list answered 400 too_long for
+    // a body every id of which was valid.
+    const shaky = [...new Set(rawShaky.map((id) => String(id)))];
+    if (shaky.length > competencies.length) return json({ error: "too_long", field: "shaky" }, 400);
 
-    const shaky = rawShaky.map((id) => String(id));
     for (const id of [...shaky, ...asked.map((a) => a.competency_id)]) {
       if (id !== null && !known.has(id)) return json({ error: "not_found" }, 404);
     }
@@ -207,7 +210,7 @@ export async function onRequestPost(context) {
     // back with the next save of a page the candidate is looking at, and the store's header
     // argues why closing that window is not worth its own branch.
     const { id: debriefId } = await upsertDebrief(env.DB, { roleId: role.role_id, asked, fixText });
-    await setShakyCompetencies(env.DB, { debriefId, competencyIds: [...new Set(shaky)] });
+    await setShakyCompetencies(env.DB, { debriefId, competencyIds: shaky });
 
     try {
       for (const line of asked) {

@@ -218,6 +218,30 @@ test("insertAskedQuestion is idempotent by construction, and keys on (competency
   assert.match(once.id, /#asked-[0-9a-f]{16}$/, "16 hex of the digest — it collides with neither #index nor #v-uuid");
 });
 
+test("a line matching an existing question's wording mints no twin row", { skip }, async () => {
+  // #84 L5, fixed. Core ids are `${competency}#${index}` and asked ids `${competency}#asked-…`,
+  // so re-typing a core question the interviewer really asked collided with nothing and minted a
+  // second row — and the drill served the same wording as two questions. The NOT EXISTS guard is
+  // what this pins; the same-text-other-competency case in the idempotency test above still
+  // inserts, which is the difference between deduping wording and losing a real placement.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId, ids } = await seed(d1);
+  const coreText = "A core lone-working question.";
+  const before = db.prepare("SELECT COUNT(*) AS n FROM question").get().n;
+
+  const result = await insertAskedQuestion(d1, { competencyId: ids[0], text: coreText });
+  assert.equal(result.inserted, false, "the standing core row IS the question; a twin is not minted");
+
+  // And through the route, where the ordinary path arrives.
+  await postDebrief(d1, token, { asked: [{ text: coreText, competency_id: ids[0] }] });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM question").get().n, before);
+
+  const rows = (await questionsByRole(d1, roleId)).filter((q) => q.text === coreText);
+  assert.equal(rows.length, 1);
+  assert.ok(!rows[0].id.includes("#asked-"), "and it is the core row that stands");
+});
+
 test("an asked question is what the next session serves for its competency", { skip }, async () => {
   // The AC, asserted THROUGH targeting rather than by reading the row back: "the next session can
   // drill it" is the claim, and nothing in nextQuestion knows this row came from a debrief.
@@ -292,6 +316,29 @@ test("the gate is the interview DAY, in both directions", { skip }, async () => 
   // the stamp carried a real time. Days are what makes "same-day" true.
   const today = await seed(d1, { inviteId: "inv-today", interviewAt: at(0) });
   assert.equal((await (await getDebrief(d1, today.token)).json()).available, true);
+
+  // #84 L8: at(3)/at(0) never discriminated day from instant — at(0) IS now, so an instant
+  // comparison answers it the same way. These two stamps are where the two readings diverge,
+  // and at(1) is the ±1 boundary the route header's `<= 0` turns on.
+  const dayString = new Date().toISOString().slice(0, 10);
+  const lateToday = await seed(d1, { inviteId: "inv-late", interviewAt: `${dayString} 23:59:00` });
+  assert.equal(
+    (await (await getDebrief(d1, lateToday.token)).json()).available,
+    true,
+    "a booking later today is still the interview DAY — an instant comparison keeps this shut until tonight",
+  );
+  const midnightToday = await seed(d1, { inviteId: "inv-midnight", interviewAt: `${dayString} 00:00:00` });
+  assert.equal(
+    (await (await getDebrief(d1, midnightToday.token)).json()).available,
+    true,
+    "a date-only booking, stored as midnight, opens on the day",
+  );
+  const tomorrow = await seed(d1, { inviteId: "inv-tomorrow", interviewAt: at(1) });
+  assert.equal(
+    (await (await getDebrief(d1, tomorrow.token)).json()).available,
+    false,
+    "and one day out is still shut — the boundary is exactly the day",
+  );
 });
 
 test("the door: no session, a cross-origin post, and a body that grew a field", { skip }, async () => {
@@ -344,6 +391,97 @@ test("the caps answer 400, each for its own field", { skip }, async () => {
 
   const notAList = await postDebrief(d1, token, { asked: "one per line" });
   assert.deepEqual(await notAList.json(), { error: "missing_fields", field: "asked" });
+});
+
+test("the shaky and fix_text shapes, and a malformed asked entry, each answer their own 400", { skip }, async () => {
+  // #84 L9 — the failing side of every shape guard the caps test does not reach. Each guard
+  // exists so the page's "try again in a moment" copy is never shown for a body that can never
+  // succeed; delete any one of them and the route 500s (or worse, half-writes) instead.
+  const d1 = d1Shape(openMigrated());
+  const { token } = await seed(d1);
+
+  const shakyNotList = await postDebrief(d1, token, { shaky: "lone-working" });
+  assert.equal(shakyNotList.status, 400);
+  assert.deepEqual(await shakyNotList.json(), { error: "missing_fields", field: "shaky" });
+
+  const fixNotString = await postDebrief(d1, token, { fix_text: 42 });
+  assert.equal(fixNotString.status, 400);
+  assert.deepEqual(await fixNotString.json(), { error: "missing_fields", field: "fix_text" });
+
+  for (const entry of [null, ["a", "list"], { text: 42 }, "a bare string"]) {
+    const res = await postDebrief(d1, token, { asked: [entry] });
+    assert.equal(res.status, 400, `${JSON.stringify(entry)} is not a line`);
+    assert.deepEqual(await res.json(), { error: "missing_fields", field: "asked" });
+  }
+});
+
+test("exactly at each cap the route accepts — its boundary and the page's must agree", { skip }, async () => {
+  // #84 L9's tail: 501/21/2001 pin only the refusing side, so a `>` typed as `>=` here would
+  // refuse the exact twenty-line panel interview MAX_ASKED was chosen to hold, while the page's
+  // own at-the-cap test (which never reaches the route) stayed green.
+  const d1 = d1Shape(openMigrated());
+  const { token } = await seed(d1);
+
+  const res = await postDebrief(d1, token, {
+    asked: Array.from({ length: 20 }, (_, i) =>
+      i === 0 ? { text: "x".repeat(500), competency_id: null } : { text: `Question ${i}?`, competency_id: null },
+    ),
+    fix_text: "y".repeat(2000),
+  });
+  assert.equal(res.status, 200);
+
+  const payload = await (await getDebrief(d1, token)).json();
+  assert.equal(payload.asked.length, 20);
+  assert.equal(payload.fix_text.length, 2000);
+});
+
+test("a tick said twice is one tick, not a refused save", { skip }, async () => {
+  // #84 L4, fixed: the cap counted rawShaky BEFORE the dedupe, so [id, id, other] on a
+  // two-competency role answered 400 too_long though every id was valid. Unreachable from the
+  // page (state.shaky is a Set) — real for any other caller of the API.
+  const d1 = d1Shape(openMigrated());
+  const { token, roleId, ids } = await seed(d1);
+
+  const res = await postDebrief(d1, token, { shaky: [ids[0], ids[0], ids[1]] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await shakyCompetencyIds(d1, roleId), [...ids].sort(), "deduped, not doubled");
+});
+
+test("a failed question insert never fails the save that succeeded", { skip }, async () => {
+  // #84 L9 — the degrade path. The words are already in the row when the inserts run, so a
+  // throw here must cost the candidate the practice, never the note: remove the route's catch
+  // and this answers 500 over a save that worked.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId, ids } = await seed(d1);
+  db.exec("DROP TABLE question");
+
+  const res = await postDebrief(d1, token, {
+    asked: [{ text: "A question the store cannot file.", competency_id: ids[0] }],
+    fix_text: "Still saved.",
+  });
+  assert.equal(res.status, 200, "the save succeeded before the insert failed, and the answer says so");
+  assert.deepEqual(await res.json(), { ok: true });
+
+  const row = await debriefByRole(d1, roleId);
+  assert.match(row.asked_json, /cannot file/, "the words are in the row");
+  assert.equal(row.fix_text, "Still saved.");
+});
+
+test("a stored asked_json that is valid JSON but not a list degrades to empty, like corrupt JSON", { skip }, async () => {
+  // #84 L9 — askedFrom's OTHER degrade branch: the parse succeeds and the shape is wrong.
+  const db = openMigrated();
+  const d1 = d1Shape(db);
+  const { token, roleId } = await seed(d1);
+
+  await postDebrief(d1, token, { fix_text: "Still readable." });
+  db.prepare("UPDATE debrief SET asked_json = ? WHERE candidate_role_id = ?").run('{"asked": true}', roleId);
+
+  const res = await getDebrief(d1, token);
+  assert.equal(res.status, 200);
+  const payload = await res.json();
+  assert.deepEqual(payload.asked, []);
+  assert.equal(payload.fix_text, "Still readable.");
 });
 
 test("a partial save is legal, and a later save adds to it without losing it", { skip }, async () => {

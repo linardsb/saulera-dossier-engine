@@ -52,16 +52,19 @@
       <p class="prep-label" id="place-label"></p>
       <p class="prep-caption" id="place-caption"></p>
       <!-- One row per non-blank line of the box above, each with its own picker. debrief.js owns
-           every element inside it. -->
-      <div id="asked-lines"></div>
+           every element inside it. role="group" with the label above as its name: without it,
+           tabbing into a picker announces a dropdown with no sign what question the group is
+           answering (#83 L2). -->
+      <div id="asked-lines" role="group" aria-labelledby="place-label"></div>
     </div>
 
     <div class="debrief-field">
       <p class="prep-label" id="shaky-label"></p>
       <p class="prep-caption" id="shaky-caption"></p>
       <!-- One checkbox per competency on this role. Empty when the handover wrote none, which is
-           a real state: the text still saves. -->
-      <div id="shaky-list"></div>
+           a real state: the text still saves. The group carries its question as its name, same
+           reasoning as #asked-lines above. -->
+      <div id="shaky-list" role="group" aria-labelledby="shaky-label"></div>
     </div>
 
     <div class="debrief-field">
@@ -79,7 +82,10 @@
 
 </main>
 
-<footer class="prep-footer">
+<!-- debrief-footer caps the shared footer at this page's own 60ch — .prep-footer is sized for
+     .brief's 72ch, so alone it would hang the privacy link past both edges of the form above
+     (#83 L3). The passport's footer makes the same move for the same reason. -->
+<footer class="prep-footer debrief-footer">
   <p><a href="/prep/privacy">What we hold about you, and when it is deleted</a></p>
 </footer>
 

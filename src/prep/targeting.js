@@ -62,6 +62,15 @@ export function rankCompetencies(competencies) {
  * until interview + 14 days precisely for second stages, so post-interview drilling is a
  * real state, not an error; a negative answer lands in the ≤ 3-day bucket below.
  * `toUtcDate` is the one reading of a SQLite stamp (dates.js's rule) — never a second one.
+ *
+ * AN UNPARSEABLE STAMP RETURNS 0, WHICH FAILS OPEN AT THE DEBRIEF (#84 L7): the debrief route
+ * reads `<= 0` as "the interview day has arrived", so garbage here would open a post-interview
+ * page before the interview — where every sibling in dates.js fails closed by explicit comment.
+ * It stays because no reachable input hits it: `invite.interview_at` is NOT NULL with a
+ * `datetime(...) IS NOT NULL` CHECK and every writer goes through `toSqliteUtc`, so the branch
+ * exists only for a caller this module cannot see. A closed-failing sentinel would be a second
+ * return convention for a state the schema already forbids; the CHECK is the fix, and
+ * test/prep-targeting.test.js pins this reading so a change to it is a decision, not a drift.
  */
 export function daysToInterview(interviewAt, now = new Date()) {
   const date = toUtcDate(interviewAt);

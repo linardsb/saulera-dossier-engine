@@ -157,7 +157,17 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
     /* Placement is kept HERE rather than read back off the <select> elements at save time. The
        rows are rebuilt every time the box is edited, so the elements are transient and this map
        is what survives a rebuild — which is how a line keeps its pick when the line above it is
-       deleted. Keyed by the trimmed line text, because that is what the server keys on too. */
+       deleted.
+
+       KEYED BY ROW INDEX, not by the line's text (#82). A text key made three states wrong at
+       once: fixing a typo in a placed line minted a new key per keystroke and silently reset the
+       pick, two identical lines collapsed to one entry so the second saved with a pick its picker
+       never showed, and a deleted-then-retyped line came back pre-placed at a pick the candidate
+       had removed. An index key is only meaningful against ONE reading of the box, so
+       `carryPlacements` re-keys the map whenever the line set changes — that diff is what keeps
+       the delete-a-sibling property the old key bought for free. The server still keys
+       `asked_json` on trimmed text; `save` builds that pairing per row, so nothing on the wire
+       changed. */
     placements: new Map(),
     shaky: new Set(), // competency ids ticked
     inFlight: false, // one save at a time
@@ -197,6 +207,46 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
      re-fetch lands was typed during the round trip and is not in the row the server handed back. */
   let sentSnapshot = null;
 
+  /* The lines as they stood at the last render — what an index into `state.placements` is an
+     index INTO. `carryPlacements` diffs against this; `render` resets it with the server's row. */
+  let renderedLines = [];
+
+  /**
+   * Re-key an index-keyed placement map from one reading of the box to the next.
+   *
+   * The alignment is common-prefix, common-suffix, and the middle rows paired in order. Between
+   * two input events an edit is confined to one region of the box, so the prefix and suffix
+   * isolate it exactly; the pairing is what makes each case come out right:
+   *
+   *   · delete a sibling — the survivors are all prefix or suffix, so their picks shift with them
+   *   · edit a line in place — same middle count both sides, so the row keeps its pick
+   *   · delete a line — its middle row pairs with nothing, so the pick goes with the line
+   *   · retype a deleted line — a fresh row, arriving unplaced, because its pick already went
+   */
+  function carryPlacements(oldLines, newLines, placements) {
+    let prefix = 0;
+    while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) {
+      prefix += 1;
+    }
+    let suffix = 0;
+    while (
+      suffix < oldLines.length - prefix &&
+      suffix < newLines.length - prefix &&
+      oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+    ) {
+      suffix += 1;
+    }
+
+    const next = new Map();
+    const shift = newLines.length - oldLines.length;
+    for (const [index, id] of placements) {
+      if (index < prefix) next.set(index, id);
+      else if (index >= oldLines.length - suffix) next.set(index + shift, id);
+      else if (index < newLines.length - suffix) next.set(index, id);
+    }
+    return next;
+  }
+
   /** The four candidate-owned values as one comparable string — the two boxes, the ticks and the
    *  picks. Everything else on the page is the server's to decide. */
   function formSnapshot() {
@@ -219,14 +269,16 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
   /**
    * One labelled picker per line, rebuilt from the box.
    *
-   * A surviving line keeps its pick because `state.placements` is keyed by the line's own text,
-   * not by its position — deleting the first of three lines must not shuffle the other two
-   * pickers up onto the wrong questions.
+   * A surviving line keeps its pick because `carryPlacements` re-keys the map before every
+   * rebuild the box's edits cause — deleting the first of three lines must not shuffle the other
+   * two pickers up onto the wrong questions, and fixing a typo in a placed line must not reset
+   * its picker to "Not sure yet" (#82).
    */
   function renderLines() {
     const lines = linesOf();
+    renderedLines = lines;
     linesMount.textContent = "";
-    for (const line of lines) {
+    for (const [index, line] of lines.entries()) {
       const row = el(doc, "div", "debrief-line");
       row.appendChild(el(doc, "span", "debrief-line-text", line));
 
@@ -242,16 +294,32 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
         option.setAttribute("value", competency.id);
         picker.appendChild(option);
       }
-      picker.value = state.placements.get(line) ?? "";
+      picker.value = state.placements.get(index) ?? "";
       picker.addEventListener("change", () => {
         const chosen = String(picker.value ?? "");
-        if (chosen) state.placements.set(line, chosen);
-        else state.placements.delete(line);
+        if (chosen) state.placements.set(index, chosen);
+        else state.placements.delete(index);
       });
 
       row.appendChild(picker);
       linesMount.appendChild(row);
     }
+  }
+
+  /**
+   * The box's two listeners land here, not on `renderLines` directly (#83 M7). `change` on a
+   * textarea fires during the blur of a focus transfer, and an unconditional rebuild at that
+   * moment destroys the node focus is moving TO — tab out of the box into a picker and the
+   * keyboard user lands back on <body>, restarting from the top of the document. By blur time
+   * `input` has already rendered every content edit, so a guard on the line set actually having
+   * changed makes that `change` a no-op — and stops edits that alter no trimmed line (a trailing
+   * space, a blank line) rebuilding N selects per keystroke.
+   */
+  function linesEdited() {
+    const lines = linesOf();
+    if (lines.join("\n") === renderedLines.join("\n")) return;
+    state.placements = carryPlacements(renderedLines, lines, state.placements);
+    renderLines();
   }
 
   /** One tick per competency on this role. An empty list is a real state — a handover that wrote
@@ -306,13 +374,18 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
     if (!keepLive) {
       state.shaky = new Set((payload.shaky ?? []).map(String));
 
+      // Row order in the box IS the index the placements are keyed by, so both are built from
+      // one walk over the payload — a second walk with its own filter could disagree by one row.
       const asked = Array.isArray(payload.asked) ? payload.asked : [];
       state.placements = new Map();
+      const lines = [];
       for (const entry of asked) {
         const text = String(entry?.text ?? "").trim();
-        if (text && entry?.competency_id) state.placements.set(text, String(entry.competency_id));
+        if (!text) continue;
+        if (entry?.competency_id) state.placements.set(lines.length, String(entry.competency_id));
+        lines.push(text);
       }
-      askedBox.value = asked.map((entry) => String(entry?.text ?? "").trim()).filter(Boolean).join("\n");
+      askedBox.value = lines.join("\n");
       fixBox.value = String(payload.fix_text ?? "");
     } else {
       /* The competency list is still the server's, even here — so a kept placement can be left
@@ -322,8 +395,8 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
          guard above exists to remove, re-entered through this exception. The route applies this
          same rule on the way out (`askedFrom`'s `known` set); this is it on the way in. */
       const known = new Set(state.competencies.map((c) => c.id));
-      for (const [text, id] of state.placements) {
-        if (!known.has(id)) state.placements.delete(text);
+      for (const [index, id] of state.placements) {
+        if (!known.has(id)) state.placements.delete(index);
       }
     }
 
@@ -364,6 +437,15 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
     unavailable.hidden = false;
     formSection.hidden = true;
     clearState();
+    /* A screen-reader user has heard "Loading…" from the live region and then, without this,
+       nothing — `clearState` empties the page's only role="status" and the answer sits in a
+       plain <p> (#83 M8). Announced by a focus move rather than by `showState`, because the
+       state line and this note are both on screen: the same copy twice, once as an answer and
+       once as a status, reads as two messages. session.js:611-615 is the precedent — negative
+       tabindex only, so the note is focusable but never in the tab order, and the focus call is
+       guarded because the suite's document double does not move focus. */
+    unavailableNote.setAttribute("tabindex", "-1");
+    if (typeof unavailableNote.focus === "function") unavailableNote.focus();
   }
 
   /** Fetch and render. `note` is what the state line says afterwards. */
@@ -424,7 +506,7 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
     showState(COPY.saving, false);
 
     const body = {
-      asked: lines.map((text) => ({ text, competency_id: state.placements.get(text) ?? null })),
+      asked: lines.map((text, index) => ({ text, competency_id: state.placements.get(index) ?? null })),
       shaky: [...state.shaky],
       fix_text: String(fixBox.value ?? ""),
     };
@@ -463,10 +545,10 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
   /* ── wiring ──────────────────────────────────────────────────────────────────────────── */
 
   // Both, because a phone keyboard's autocomplete fires `change` without an `input` on some
-  // engines, and a desktop keyboard fires `input` without a `change` until blur. Re-rendering
-  // twice is harmless — every pick survives it.
-  askedBox.addEventListener("input", () => renderLines());
-  askedBox.addEventListener("change", () => renderLines());
+  // engines, and a desktop keyboard fires `input` without a `change` until blur. `linesEdited`'s
+  // guard is what makes the pair safe — see its comment.
+  askedBox.addEventListener("input", () => linesEdited());
+  askedBox.addEventListener("change", () => linesEdited());
   saveButton.addEventListener("click", () => save());
 
   showState(COPY.loading, false);
