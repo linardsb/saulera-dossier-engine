@@ -272,6 +272,119 @@
             "in writing. It is how the tool is built, not a setting anyone can switch off."
         ]
       }
+    ],
+
+    /* ── SHOWCASE BRANCH ONLY (demo/lewis-showcase) ─────────────────────────────────────────
+       The two /prep entries below put pills on CANDIDATE pages, which the header above calls
+       the wrong audience entirely — and on main it is: a locum's portal must not carry learning
+       material for the agency. On this demo the person browsing the candidate portal IS the
+       recruiter learning the product, so here it is right. A merge to main must not carry these
+       two entries, nor the guide tags on public/prep/stories.html and debrief.html. */
+
+    "/prep/stories": [
+      {
+        anchor: ".page-head",
+        pill: "Start here",
+        title: "A bank of real stories, written once",
+        body: [
+          "You are on the candidate's side of the tool now. This page is where they write down " +
+            "a few things that actually happened to them at work, once, in their own words. In " +
+            "practice they reach for one instead of starting from nothing, and the same story " +
+            "serves again at the next interview.",
+          "Nothing here writes for them, tidies their words, or turns a story into anything " +
+            "else. It is raw material, kept where their practice can reach it."
+        ],
+        watch: "None of this is ever visible to you. <ui>Your recruiter never sees any of " +
+          "it.</ui> is the page's own promise, and it is how the tool is built rather than a " +
+          "setting. There is nothing to switch on from your side."
+      },
+      {
+        anchor: "#story-gap",
+        pill: "The line above the list",
+        title: "What to think about next",
+        body: [
+          "This line names exactly one part of the job: the one most likely to come up that " +
+            "none of their stories covers yet. It moves on as ticks cover it, and goes away " +
+            "once every part has a story behind it.",
+          "It is deliberately never a count and never a score. The candidate is not told how " +
+            "many parts are covered. They are given the one thing worth thinking about next, " +
+            "which is the whole point of it."
+        ],
+        watch: "A tick only covers a part when the story behind it has words in it. A checkbox " +
+          "is not a story, so a saved title with an empty <ui>What happened?</ui> box leaves " +
+          "this line standing."
+      },
+      {
+        anchor: "#add-story",
+        pill: "Their own ticks",
+        title: "The candidate does the mapping, not the tool",
+        body: [
+          "<ui>Add a story</ui> opens three boxes: <ui>What do you call this one?</ui>, " +
+            "<ui>What happened?</ui> and <ui>Which parts of the job does it show?</ui>. Rough " +
+            "notes are the point, and the box says so itself.",
+          "The last one is the mapping: one tick per part of this job, made by the candidate " +
+            "and nobody else. Nothing reads the story and infers what it shows. <ui>This is " +
+            "how practice knows to point you at this story.</ui> is the caption's own wording, " +
+            "and the tick is the entire mechanism."
+        ]
+      }
+    ],
+
+    "/prep/debrief": [
+      {
+        anchor: ".page-head",
+        pill: "Opens on the day",
+        title: "Nothing to write until there has been an interview",
+        body: [
+          "This page opens on the interview day, never before. Until then it carries a single " +
+            "line, <ui>This page opens after your interview.</ui>, and no form at all, because " +
+            "there is nothing to remember yet. You can see the form now because this " +
+            "candidate's interview day has arrived."
+        ],
+        watch: "The whole page stays on their side. <ui>This page is yours. Your recruiter " +
+          "never sees any of it.</ui> sits under the heading, and it is how the tool is built " +
+          "rather than a setting. What a candidate writes after an interview never crosses to " +
+          "you."
+      },
+      {
+        anchor: "#asked-label",
+        pill: "While it is fresh",
+        title: "The questions, as they remember them",
+        body: [
+          "<ui>What were you asked?</ui> takes one question per line, as close to the " +
+            "interviewer's words as the candidate can manage on the way out. " +
+            "<ui>Half-remembered is fine.</ui> is the caption's own promise: a rough line " +
+            "written today beats a perfect one forgotten by the evening."
+        ]
+      },
+      {
+        anchor: "#place-label",
+        pill: "Filed by their pick",
+        title: "Each question goes where the candidate says",
+        body: [
+          "Every line from the box gets its own picker, and the candidate files the question " +
+            "under a part of the job by choosing from the list. Nothing reads the question and " +
+            "guesses. The pick is theirs, every time.",
+          "<ui>Not sure yet</ui> is a real answer: a question left on it stays on this page " +
+            "until they place it. Once filed, a question comes back to them the next time " +
+            "practice serves that part of the job."
+        ]
+      },
+      {
+        anchor: "#shaky-label",
+        pill: "Never a score",
+        title: "Shaky ticks quietly steer their practice",
+        body: [
+          "<ui>Anything that felt shaky?</ui> is one tick per part of the job. A tick quietly " +
+            "moves that part up the queue of what their practice serves next, and that is the " +
+            "whole of what it does.",
+          "It is never shown as a mark, a number or a report, to them or to anyone else. " +
+            "<ui>Nothing here is a mark, and nobody sees it.</ui> is the caption's promise, " +
+            "and the tool keeps it.",
+          "Below it, <ui>One thing to do differently next time</ui> asks for exactly one. The " +
+            "caption's reason: <ui>It is easier to change one thing than five.</ui>"
+        ]
+      }
     ]
   };
 

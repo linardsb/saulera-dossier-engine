@@ -402,17 +402,26 @@ test("every content page is served by the one stylesheet chain, in order", () =>
     [...chain, "/prep/session.css"],
     "session.html's stylesheet chain or its order — it links the portal's four plus its own, last",
   );
+  // SHOWCASE BRANCH ONLY: the two pages below carry the temporary walkthrough layer
+  // (public/guide.css) LAST in their chains, because on this demo the person reading the
+  // candidate portal is the recruiter learning the product. The four-sheet product chain and
+  // its order are still pinned exactly, and the "no fifth" reason still holds where it was
+  // aimed: the 16px floor lives in prep.css, where the colour and size gates can see it, and
+  // guide.css cannot reach it — every selector in it is scoped under `.guide`, which
+  // test/guide.test.js asserts rather than trusts. On main the walkthrough must not be on a
+  // candidate page, and these two expectations go back to `chain` alone.
   assert.deepEqual(
     stylesheetsOf(DEBRIEF_HTML),
-    chain,
-    "debrief.html's stylesheet chain or its order — the portal's four and no fifth: the 16px " +
-      "floor its pickers need lives in prep.css, where the colour and size gates can see it",
+    [...chain, "/guide.css"],
+    "debrief.html's stylesheet chain or its order — the portal's four (the 16px floor its " +
+      "pickers need lives in prep.css, where the colour and size gates can see it), then the " +
+      "demo walkthrough last",
   );
   assert.deepEqual(
     stylesheetsOf(STORIES_HTML),
-    chain,
-    "stories.html's stylesheet chain or its order — the portal's four and no fifth, for the same " +
-      "reason: the 16px floor its title field and sketch box need lives in prep.css",
+    [...chain, "/guide.css"],
+    "stories.html's stylesheet chain or its order — the portal's four (the 16px floor its " +
+      "title field and sketch box need lives in prep.css), then the demo walkthrough last",
   );
 });
 

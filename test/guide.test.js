@@ -14,6 +14,12 @@
 // It also pins the three properties that make it safe to layer over live product screens at all:
 // the CSS cannot reach the real interface, the JS cannot reach the network or any store, and its
 // anchors are selectors those screens actually declare.
+//
+// SHOWCASE BRANCH ONLY: on demo/lewis-showcase the layer also annotates two CANDIDATE pages
+// (/prep/stories and /prep/debrief), because the person browsing the demo's candidate portal is
+// the recruiter learning the product. On main that is the wrong audience by guide.js's own
+// header, so a merge must not carry the two prep entries in guide.js's SCREENS, the tags on the
+// two prep pages, or their rows in this file's lists.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,6 +37,9 @@ const SCREENS = [
   "public/counts.html",
   "public/assignments.html",
   "public/compliance.html",
+  // Demo branch only — candidate pages annotated for the recruiter browsing the showcase.
+  "public/prep/stories.html",
+  "public/prep/debrief.html",
 ];
 
 const CSS = read("public/guide.css");
@@ -48,7 +57,7 @@ test("the layer's touchpoints exist together, or the removal was half-finished",
         found,
         1,
         `${screen} carries the walkthrough ${what} ${found} times. If the layer is being ` +
-          `removed, take BOTH tags off all five screens, delete public/guide.css and ` +
+          `removed, take BOTH tags off every page in this list, delete public/guide.css and ` +
           `public/guide.js, and delete this test file — a leftover tag is a 404 on every load ` +
           `of a working screen.`,
       );
@@ -71,7 +80,9 @@ test("the walkthrough loads AFTER the screen it annotates", () => {
       html.indexOf('href="/guide.css"') > html.indexOf('href="/app.css"'),
       `${screen}: guide.css must be last in the stylesheet chain`,
     );
-    const ownScript = html.search(/<script src="\/(?!guide)[a-z]+\.js"><\/script>/);
+    // The two prep pages boot with an inline module script rather than a classic src tag;
+    // either counts as "the screen's own script" here.
+    const ownScript = html.search(/<script src="\/(?!guide)[a-z/]+\.js"><\/script>|<script type="module">/);
     assert.ok(ownScript > -1, `${screen} has no screen script of its own`);
     assert.ok(
       html.indexOf('src="/guide.js"') > ownScript,
@@ -143,6 +154,9 @@ test("every anchor the layer points at actually exists on that screen", () => {
     "/counts": "public/counts.html",
     "/assignments": "public/assignments.html",
     "/compliance": "public/compliance.html",
+    // Demo branch only — see the header.
+    "/prep/stories": "public/prep/stories.html",
+    "/prep/debrief": "public/prep/debrief.html",
   };
 
   const anchors = [...JS.matchAll(/anchor:\s*"([^"]+)"/g)].map((m) => m[1]);
