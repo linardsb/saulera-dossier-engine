@@ -17,11 +17,12 @@
 //
 // SHOWCASE BRANCH ONLY: on demo/lewis-showcase the layer also annotates the CANDIDATE portal —
 // every page under /prep a person can reach on the demo — because the person browsing it is the
-// recruiter learning the product. Those screens wear their own accent (guide-pill--candidate /
-// guide-card--candidate) so the two sides never read as one tool. On main that is the wrong
-// audience by guide.js's own header, so a merge must not carry the prep entries in guide.js's
-// SCREENS, the candidate-side accent, the tags on the prep pages, or their rows in this file's
-// lists.
+// recruiter learning the product. On those screens the card's eyebrow says whose side the page
+// is on ("The candidate's side · step N of M"); the pills wear the one colour both sides share,
+// by the owner's decision, and the guide-pill--candidate / guide-card--candidate classes are
+// hooks with no rules behind them. On main that is the wrong audience by guide.js's own header,
+// so a merge must not carry the prep entries in guide.js's SCREENS, the candidate-side wiring,
+// the tags on the prep pages, or their rows in this file's lists.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

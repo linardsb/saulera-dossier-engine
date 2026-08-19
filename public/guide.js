@@ -280,8 +280,7 @@
        material for the agency. On this demo the person browsing the candidate portal IS the
        recruiter learning the product, so here it is right. A merge to main must not carry any
        of these entries, the guide tags on the pages under public/prep/, the candidate-side
-       accent (`candidateSide` below and the --candidate rules in guide.css), or their rows in
-       test/guide.test.js. */
+       wiring (`candidateSide` below), or their rows in test/guide.test.js. */
 
     "/prep/stories": [
       {
@@ -628,8 +627,9 @@
 
   /* SHOWCASE BRANCH ONLY (demo/lewis-showcase): which side of the tool this screen sits on.
      Everything under /prep is the candidate's portal; everything else is the recruiter's tool.
-     The pills and the card wear a different accent per side (guide.css's --candidate rules),
-     and the card's eyebrow names the side in words, so the split never rests on colour alone.
+     The card's eyebrow names the side in words; the owner chose ONE colour for both sides, so
+     the --candidate classes set below are hooks with no rules behind them in guide.css —
+     kept because the words are the split, and a later accent needs only CSS to return.
      On main the layer never loads on a candidate page, so this is always false there — delete
      with the /prep entries above. */
   var candidateSide = key.lastIndexOf("/prep", 0) === 0;
@@ -748,8 +748,8 @@
   function openCard(pill, step, number) {
     closeCard(false);
 
-    // The candidate eyebrow says whose side the page is on, so the accent never carries the
-    // split by colour alone (SHOWCASE BRANCH ONLY — see `candidateSide` above).
+    // The candidate eyebrow says whose side the page is on — the words ARE the split, since
+    // both sides wear one colour (SHOWCASE BRANCH ONLY — see `candidateSide` above).
     eyebrow.textContent = candidateSide
       ? "The candidate's side · step " + number + " of " + steps.length
       : "Step " + number + " of " + steps.length;
