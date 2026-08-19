@@ -385,12 +385,73 @@ test("arming a second row disarms the first", async () => {
     payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" })] })],
   });
   const deletes = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"));
+  const [first, second] = deletes();
 
-  deletes()[0].listeners.click[0]();
-  deletes()[1].listeners.click[0]();
+  first.listeners.click[0]();
+  second.listeners.click[0]();
+  assert.equal(deletes()[0], first, "disarmed in place — the second arm rebuilds nothing either (#86 F6)");
   assert.equal(textOf(deletes()[0]), COPY.remove, "there is never more than one primed Delete on screen");
   assert.equal(textOf(deletes()[1]), COPY.confirmRemove);
   assert.equal(s.posts().length, 0);
+});
+
+test("the first delete tap changes the button's own words in place, and the page says so out loud", async () => {
+  /* #86 F6. The first tap used to call renderList(), which clears and rebuilds every row —
+     destroying the very button the candidate just activated. Focus falls to <body> in every
+     engine, so a keyboard user's second Enter did nothing and confirming meant Tabbing back from
+     the top of the document; and the label swap was announced by no live region. The double
+     cannot model focus — node IDENTITY is the assertable half (the M7 idiom in
+     prep-debrief-ui.test.js): the same objects before and after, with only the words changed. */
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" }), STORY({ id: "b", title: "B" })] })],
+  });
+
+  const rowsBefore = rowsOf(s);
+  const buttonsBefore = buttonsOf(s);
+  const deleteA = buttonsBefore.filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
+
+  deleteA.listeners.click[0]();
+
+  const rowsAfter = rowsOf(s);
+  const buttonsAfter = buttonsOf(s);
+  assert.equal(rowsAfter.length, rowsBefore.length);
+  rowsBefore.forEach((row, i) => assert.equal(rowsAfter[i], row, "no row was rebuilt"));
+  buttonsBefore.forEach((b, i) => assert.equal(buttonsAfter[i], b, "no button was rebuilt — focus has nowhere to fall"));
+  assert.equal(textOf(deleteA), COPY.confirmRemove, "the SAME node now asks the question");
+  assert.equal(
+    textOf(s.node("stories-state")),
+    COPY.confirmRemoveNotice("A"),
+    "and the state line says it — a text swap on the control focus is sitting on is silent",
+  );
+  // The channel is real: in the actual document the state line is a polite live region, or the
+  // announcement above lands nowhere.
+  assert.match(STORIES_HTML, /id="stories-state"[^>]*role="status"[^>]*aria-live="polite"/);
+
+  // The second activation of that same, surviving node is the delete.
+  await deleteA.listeners.click[0]();
+  assert.deepEqual(JSON.parse(s.posts()[0].body), { action: "delete", id: "a" });
+});
+
+test("after a successful delete, focus is moved to Add a story rather than dropped", async () => {
+  /* #86 F6's other half. A successful delete rightly DOES rebuild — the list re-fetches — and the
+     rebuild destroys the pressed button along with its row, taking focus with it. The controller
+     parks focus on #add-story, the one control every delete leaves standing, the last story's
+     included. The double does not move focus, so the call is spied (the M8 idiom in
+     prep-debrief-ui.test.js); whether VoiceOver follows it is the manual pass. */
+  const s = await boot({
+    payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" })] }), PAYLOAD()],
+  });
+  let focused = 0;
+  s.node("add-story").focus = () => {
+    focused += 1;
+  };
+
+  const deleteA = buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
+  deleteA.listeners.click[0]();
+  await deleteA.listeners.click[0]();
+
+  assert.equal(textOf(s.node("stories-state")), COPY.deleted, "the delete happened");
+  assert.equal(focused, 1, "the rebuild took the button; focus lands somewhere real");
 });
 
 test("deleting ANOTHER story does not discard what is typed in the open editor", async () => {
@@ -598,15 +659,51 @@ test("a tick's change handler is what puts the id in the POST", async () => {
   assert.deepEqual(JSON.parse(s.posts()[1].body).competency_ids, [], "unticking is a real erasure");
 });
 
+test("with no title yet a tick carries NO aria-label, so the placeholder is never its name", async () => {
+  /* #86 F19. aria-label does not add to the <label for> text — it REPLACES it. The old fallback
+     put the placeholder question into every tick's label on a new story, so a screen reader
+     announced `Does "What do you call this one?" show Lone working?` as the control's entire
+     name, in the default state of every new story. Omitting the attribute is the fix: the
+     visible label — the competency — is what gets announced until the title box has words. */
+  const s = await boot({ payloads: [PAYLOAD()] });
+  await s.controller.openEditor(null);
+
+  const empty = ticksOf(s);
+  assert.equal(empty.length, COMPETENCIES.length, "the ticks rendered, so the absence below is real");
+  for (const tick of empty) {
+    assert.ok(!("aria-label" in tick.attrs), "an untitled story's tick must fall back to its visible label");
+  }
+  assert.ok(
+    !serialize(s.node("covers-list")).includes(COPY.titleLabel),
+    "the placeholder question reaches no tick in any attribute",
+  );
+
+  // And once the story has a name, the ticks carry it — following the box as it is typed.
+  s.node("title").value = "The escalation on nights";
+  s.node("title").listeners.input[0]();
+  assert.equal(
+    ticksOf(s)[0].attrs["aria-label"],
+    COPY.coverFor("Lone working", "The escalation on nights"),
+    "a titled story's ticks name it again",
+  );
+});
+
 test("a failed delete disarms the button and says so", async () => {
   const s = await boot({ payloads: [PAYLOAD({ stories: [STORY({ id: "a", title: "A" })] })], postStatus: 500 });
+  let focused = 0;
+  s.node("add-story").focus = () => {
+    focused += 1;
+  };
   const deleteA = () => buttonsOf(s).filter((b) => b.attrs["aria-label"].startsWith("Delete"))[0];
 
-  deleteA().listeners.click[0]();
-  await deleteA().listeners.click[0]();
+  const pressed = deleteA();
+  pressed.listeners.click[0]();
+  await pressed.listeners.click[0]();
 
   assert.equal(textOf(s.node("stories-state")), COPY.deleteFailed);
+  assert.equal(deleteA(), pressed, "the button survives its own failure — disarmed in place, so focus keeps its seat");
   assert.equal(textOf(deleteA()), COPY.remove, "a failed delete must not leave the button primed");
+  assert.equal(focused, 0, "and nothing moves focus off a button that still exists");
 });
 
 /* ── the caps, refused in the page ─────────────────────────────────────────────────────── */
@@ -786,4 +883,18 @@ test("stories.html carries every id the controller reads", () => {
   for (const id of SHELL_IDS) {
     assert.ok(STORIES_HTML.includes(`id="${id}"`), `stories.html lost #${id}`);
   }
+});
+
+test("the tick labels hold the 44px floor their comment claims", () => {
+  // #86 F23. The comment above `.story-tick` claimed the target came from the row's own padding,
+  // but the row is a div — its padding is not tappable, and the real targets measured ~16-24px.
+  // The floor is only real on the LABEL, which `for` ties to its checkbox; this is the
+  // `.debrief-tick-label` gate at the bottom of test/prep-debrief-ui.test.js, on its twin.
+  const css = read("public/prep/prep.css");
+  const tickLabel = css.match(/\.story-tick-label\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.match(
+    tickLabel,
+    /min-height:\s*var\(--tap-target\)/,
+    "#86 F23: the block must hold the floor its comment claims — the label is the tappable part",
+  );
 });

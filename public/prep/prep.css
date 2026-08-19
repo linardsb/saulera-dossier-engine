@@ -160,9 +160,12 @@
    two targets from sharing an edge on a phone, where a mis-tap on this row deletes a story. */
 .story-row-action { margin-right: var(--space-3); }
 
-/* One tick. The 44px target CRAFT asks for comes from the row's own padding rather than from the
-   box, which no browser lets you resize honestly — `.debrief-tick`'s argument, restated because
-   this page's ticks sit inside a form the candidate scrolls past rather than at the end of one. */
+/* One tick, `.debrief-tick`'s twin — see that block's comment for the full argument. The 44px
+   target lives on the LABEL's min-height, never on this row: the row is a div, so its padding is
+   not tappable, and a comment here once claimed otherwise while the real targets measured
+   ~16-24px (#86 F23). The label is tied to its checkbox by `for`, so its whole height is the
+   target. test/prep-storybank-ui.test.js holds the label to the floor, as the debrief's gate
+   does its twin. */
 .story-tick {
   display: flex;
   align-items: center;
@@ -171,8 +174,11 @@
 }
 
 .story-tick-label {
+  display: flex;
+  align-items: center;
   font-family: var(--font-body);
   font-size: var(--text-note);
+  min-height: var(--tap-target);
 }
 
 /* app.css:166 holds CRAFT's 44px floor with `min-height`, and min-height does not apply to a

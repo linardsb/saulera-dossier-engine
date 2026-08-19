@@ -97,9 +97,12 @@ export const COPY = {
   coversCaption:
     "Tick as many as fit. This is how practice knows to point you at this story. You can change " +
     "it whenever you like.",
-  /* Every tick needs a programmatic label naming its story, or a screen reader moving control to
-     control announces the same competency five times with nothing to tell the rows apart —
-     debrief.js:78-81's argument, on a page with several stories rather than one form. */
+  /* Every tick names the story it files — debrief.js:78-81's argument, on a page where the same
+     competency list renders for whichever story the editor is on. Rendered as an aria-label ONLY
+     when a title exists: aria-label REPLACES the visible <label>'s text rather than adding to it,
+     so the old placeholder fallback made every tick on a new story announce `Does "What do you
+     call this one?" show …?` as its whole name (#86 F19). With no title the attribute is omitted
+     and the label's own words — the competency — are what a screen reader says. */
   coverFor: (label, title) => `Does “${title}” show ${label}?`,
 
   /* A story with no ticks says so in words. Without this the row shows a title and an unexplained
@@ -116,6 +119,13 @@ export const COPY = {
      dispatch) and a modal a candidate taps through by reflex is not a confirmation. The button
      changes its own words and waits. */
   confirmRemove: "Really delete?",
+  /* What the state line says at the same moment. The button's words change IN PLACE (#86 F6 —
+     rebuilding the list here destroyed the button under the candidate's focus), and a text swap
+     on the control a screen reader is sitting on is announced by nothing; the state line is the
+     page's live region, so this sentence is what makes the armed state audible. It names the
+     story because the primed button's accessible name still reads `Delete “title”`. */
+  confirmRemoveNotice: (title) =>
+    `Nothing is deleted yet. Tap Delete again to really delete “${title}”.`,
   /* The same two-step, guarding the other way a story's words vanish: opening a different one over
      an editor that has unsaved words in it. Says what would be lost and exactly what a second tap
      does, because the button that triggers it ("Add a story") is full-width and a thumb's width
@@ -289,9 +299,28 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
 
   const labelOf = (id) => state.competencies.find((c) => c.id === id)?.label ?? null;
 
+  /* The button whose words currently read "Really delete?", or null. `state.confirmingId` says
+     WHICH story is primed; this says which NODE says so, and the pair move together. It exists
+     because arming and disarming used to work by rebuilding the whole list — and the rebuild
+     destroys the button the candidate just activated, dropping focus to <body> in every engine,
+     so a second Enter did nothing and confirming by keyboard meant tabbing back from the top of
+     the document (#86 F6). Reassigned inside `renderList` whenever the list genuinely does
+     rebuild, because the old node is gone. */
+  let confirmingButton = null;
+
+  /** Put a primed Delete back to rest, IN PLACE — never by rebuild, for F6's reason above. */
+  function disarmRemove() {
+    state.confirmingId = null;
+    if (confirmingButton) {
+      confirmingButton.textContent = COPY.remove;
+      confirmingButton = null;
+    }
+  }
+
   /** One row per story: its name, what it covers, and the two things you can do to it. */
   function renderList() {
     listMount.textContent = "";
+    confirmingButton = null;
 
     if (!state.stories.length) {
       listMount.appendChild(el(doc, "p", "prep-body", COPY.empty));
@@ -329,12 +358,22 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
       );
       removeButton.setAttribute("type", "button");
       removeButton.setAttribute("aria-label", COPY.deleteFor(story.title));
+      // The list is rebuilding, so if this row is the primed one, this node is now the one that
+      // says so — the old reference died with the old list.
+      if (state.confirmingId === story.id) confirmingButton = removeButton;
       removeButton.addEventListener("click", () => {
-        // Two taps, in the page. The first arms this row only — arming a second row disarms the
-        // first, so there is never more than one primed Delete on screen.
+        /* Two taps, in the page. The first arms this row only — and it arms IN PLACE: this used
+           to call renderList(), whose rebuild destroyed the very button just activated, dropped
+           focus to <body>, and left a keyboard user's second Enter doing nothing (#86 F6). The
+           same in-place write is what disarms an already-primed sibling, so there is still never
+           more than one primed Delete on screen. The state line says what just happened, because
+           a text swap on the control focus is sitting on is silent to a screen reader. */
         if (state.confirmingId !== story.id) {
+          if (confirmingButton) confirmingButton.textContent = COPY.remove;
           state.confirmingId = story.id;
-          renderList();
+          confirmingButton = removeButton;
+          removeButton.textContent = COPY.confirmRemove;
+          showState(COPY.confirmRemoveNotice(story.title), true);
           return undefined;
         }
         // Returned rather than fired and forgotten: the suite reaches this handler directly
@@ -352,13 +391,17 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
    *  stories save. */
   function renderCovers() {
     coversMount.textContent = "";
-    const title = String(titleBox.value ?? "") || COPY.titleLabel;
+    const title = String(titleBox.value ?? "");
     for (const [index, competency] of state.competencies.entries()) {
       const row = el(doc, "div", "story-tick");
       const box = doc.createElement("input");
       box.setAttribute("type", "checkbox");
       box.setAttribute("id", `cover-${index}`);
-      box.setAttribute("aria-label", COPY.coverFor(competency.label, title));
+      /* Only when the story has a name. aria-label REPLACES the <label for> text, so the old
+         fallback to the placeholder made every tick on a new story announce `Does "What do you
+         call this one?" show …?` as its entire name (#86 F19). Omitted, the visible label — the
+         competency — is the name, which is the right one until the title box has words. */
+      if (title) box.setAttribute("aria-label", COPY.coverFor(competency.label, title));
       box.checked = state.covers.has(competency.id);
       box.addEventListener("change", () => {
         if (box.checked) state.covers.add(competency.id);
@@ -428,10 +471,11 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
     }
     state.discardArmed = undefined;
 
-    /* A primed "Really delete?" was cleared here without redrawing the row that says it, so the
-       label survived on screen and lied about its state — the next tap on it deleted a story the
-       candidate believed they had backed out of. */
-    const wasConfirming = state.confirmingId !== null;
+    /* A primed "Really delete?" once had its state cleared here without the words that say it —
+       the label survived on screen and lied, and the next tap on it deleted a story the candidate
+       believed they had backed out of. `disarmRemove` puts the words back on the same node, so
+       nothing needs rebuilding to stay honest. */
+    disarmRemove();
 
     state.editingId = storyId;
     /* Pruned to the competencies the server currently knows, exactly as the keepLive branch in
@@ -440,11 +484,9 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
        so the page would offer "try again in a moment" about a request that can never succeed. */
     const known = new Set(state.competencies.map((c) => c.id));
     state.covers = new Set((story?.competency_ids ?? []).filter((id) => known.has(id)));
-    state.confirmingId = null;
     titleBox.value = story?.title ?? "";
     sketchBox.value = story?.sketch ?? "";
     renderCovers();
-    if (wasConfirming) renderList();
     editor.hidden = false;
     // The boxes now hold exactly what the server holds — a new story's blank pair included.
     editorBaseline = editorSnapshot();
@@ -691,16 +733,24 @@ export function initStories({ doc, fetchImpl, navigate } = {}) {
           return;
         }
         if (!res.ok) throw new Error(`stories: ${res.status}`);
-        state.confirmingId = null;
+        disarmRemove();
         // The editor cannot stay open on a row that no longer exists.
         if (state.editingId === storyId) closeEditor();
-        return load(COPY.deleted).then(() => busy(false));
+        return load(COPY.deleted).then(() => {
+          busy(false);
+          /* The re-fetch rebuilt the list, so the button that was pressed is gone with its row —
+             and with it, wherever focus was standing. Parked on "Add a story" explicitly: it is
+             the one control every delete leaves behind, the last story's included (#86 F6).
+             Guarded because the suite's document double does not move focus. */
+          if (typeof addButton.focus === "function") addButton.focus();
+        });
       })
       .catch((err) => {
         console.error("prep stories: could not delete", err);
         busy(false);
-        state.confirmingId = null;
-        renderList();
+        /* Disarmed IN PLACE, where a rebuild once did it: the candidate's thumb — or focus — is
+           still on this button, and destroying it under them mid-retry is F6 one branch over. */
+        disarmRemove();
         showState(COPY.deleteFailed, true);
       });
   }

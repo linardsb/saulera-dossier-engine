@@ -26,7 +26,11 @@
   <div class="page-head">
     <h1>Your stories</h1>
     <p class="page-sub" id="private-note"></p>
-    <p class="save-state" id="stories-state" role="status"></p>
+    <!-- The page's one live region, and the explicit aria-live is not decoration: the delete
+         two-step arms by changing the button's own words IN PLACE (#86 F6), and a text swap on
+         the control a screen reader is sitting on is announced by nothing — this line is what
+         says it. login.html's state lines carry the same role + aria-live pair. -->
+    <p class="save-state" id="stories-state" role="status" aria-live="polite"></p>
   </div>
 
   <!-- Shown when the handover has not been written yet. Unlike debrief.html there is no
