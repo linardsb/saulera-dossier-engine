@@ -1,0 +1,45 @@
+-- #87 (deferred from the #85 review): two interleaved tick saves must not merge.
+--
+-- Both tick stores replace the whole set per save — DELETE, then per-row INSERT … ON CONFLICT DO
+-- NOTHING, with no transaction, because D1 has none to offer. Two overlapping saves therefore
+-- interleave as r1.DELETE → r2.DELETE → r1.INSERT a → r2.INSERT b and leave the UNION [a, b] when
+-- the last writer said [b] only. Reproduced, not reasoned about. For the storybank that is the
+-- worst tick in the product to resurrect: `storyGap` reads a tick as "a story covers this", so a
+-- competency comes back marked covered at the exact moment the candidate said it is not, and the
+-- feature's only output is silently suppressed by its own bookkeeping.
+--
+-- `write_generation` is the compare-and-swap that fixes it, chosen over a transaction because no
+-- transaction exists to choose. A save first CLAIMS the row —
+--
+--   UPDATE story SET write_generation = write_generation + 1 WHERE id = ? RETURNING write_generation
+--
+-- — which is one atomic statement, so every writer gets a distinct, ordered generation. Every
+-- statement after the claim carries `AND ? = (SELECT write_generation FROM <parent> WHERE id = ?)`
+-- binding the claimed value: the moment a later save claims, every remaining statement of the
+-- earlier one no-ops, and the LAST claimer's set lands whole. src/portal/store.js's
+-- setStoryCompetencies and setShakyCompetencies carry the full argument, including the two crash
+-- windows that remain and why they are acceptable.
+--
+-- WHY `debrief` GETS THE SAME COLUMN IN THE SAME MIGRATION. setShakyCompetencies (#77) is the
+-- identical statement shape with a milder consequence — a resurrected shaky tick over-drills a
+-- competency rather than silencing a flag. The issue offered "the same treatment, or an explicit
+-- decision that the debrief keeps the union"; the decision is the same treatment, because the
+-- second ALTER costs nothing here and a deliberate divergence would be a second behaviour to
+-- explain forever.
+--
+-- WHY A GENERATION AND NOT A TIMESTAMP: `datetime('now')` is SECOND granularity, and the whole
+-- defect is two writes inside one second — a timestamp CAS would compare equal exactly when it
+-- matters. A counter incremented in the claim statement itself cannot tie.
+--
+-- ON THE "NOTHING HERE IS NUMERIC" LINE IN 0011 AND 0012, which this column appears to break:
+-- those headers keep the INTEGER-affinity trap (src/portal/store.js:144-155) out of these tables,
+-- and that trap needs a BOUND PARAMETER to spring — a caller passing 'standard' into a numeric
+-- column. No caller ever binds a value into `write_generation`: it is born 0 from the DDL default
+-- and only ever moves by `write_generation + 1` computed inside the statement, so there is no
+-- write path on which a string could arrive.
+--
+-- ADD COLUMN is the sanctioned widening form (test/schema.test.js parses exactly this shape;
+-- applied migrations are never edited), and NOT NULL with a non-NULL default is 0004's precedent —
+-- SQLite's ALTER accepts it, and every existing row backfills to 0.
+ALTER TABLE story ADD COLUMN write_generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE debrief ADD COLUMN write_generation INTEGER NOT NULL DEFAULT 0;

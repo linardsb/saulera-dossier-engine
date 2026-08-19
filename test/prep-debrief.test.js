@@ -173,6 +173,37 @@ test("setShakyCompetencies replaces the whole set, and the scope is the role", {
   assert.deepEqual(await shakyCompetencyIds(d1, theirs.roleId), [], "a role with no debrief has no ticks");
 });
 
+test("two interleaved shaky saves leave one writer's whole set, never the union", { skip }, async () => {
+  /* #87's debrief half — the identical statement shape to setStoryCompetencies, given the same
+     claim on `debrief.write_generation` (0013) in the same migration, milder consequence and all:
+     a merged set here over-drills a competency the candidate unticked, rather than silencing the
+     story gap. d1Shape's statements are sync sqlite behind async wrappers, so Promise.all
+     genuinely interleaves at every await boundary — the old DELETE-then-INSERT left the union
+     [a, b] on this exact sequence. */
+  const d1 = d1Shape(openMigrated());
+  const { roleId, ids } = await seed(d1);
+  const { id } = await upsertDebrief(d1, { roleId, asked: [], fixText: "" });
+
+  await Promise.all([
+    setShakyCompetencies(d1, { debriefId: id, competencyIds: [ids[0]] }),
+    setShakyCompetencies(d1, { debriefId: id, competencyIds: [ids[1]] }),
+  ]);
+
+  const rows = await shakyCompetencyIds(d1, roleId);
+  assert.equal(rows.length, 1, `[${rows}] is the union — both writers merged, and neither said that`);
+  assert.ok(ids.includes(rows[0]), "the survivor is one writer's whole set, verbatim");
+
+  // A follow-up sequential save still replaces wholesale — the generation must not wedge the row.
+  await setShakyCompetencies(d1, { debriefId: id, competencyIds: ids });
+  assert.deepEqual(await shakyCompetencyIds(d1, roleId), [...ids].sort());
+
+  // The claim's other answer: a debrief erased under the save reports itself, written nothing.
+  assert.deepEqual(
+    await setShakyCompetencies(d1, { debriefId: "deb-that-never-was", competencyIds: [ids[0]] }),
+    { ok: false },
+  );
+});
+
 test("a tick written twice is a no-op, not a 500 an operator reads as a missing migration", { skip }, async () => {
   // #81 M2. With no transaction, two saves interleave as DELETE, DELETE, INSERT c, INSERT c — two
   // tabs, or a client retry, since the page's in-flight guard is per page. A UNIQUE violation on

@@ -802,24 +802,35 @@ export async function upsertDebrief(db, { roleId, asked, fixText } = {}) {
 }
 
 /**
- * Replace the whole tick set.
+ * Replace the whole tick set — and under interleaving, the LAST save wins whole (#87).
  *
  * DELETE then INSERT — `issueOtp`'s idiom (:435): the newest save is the truth, and a set replaced
  * wholesale has no half-state to reconcile. Untick-then-save is therefore a real erasure, which is
- * what a candidate means by unticking a box.
+ * what a candidate means by unticking a box. Plain DELETE-then-INSERT, though, let two overlapping
+ * saves MERGE: `r1.DELETE → r2.DELETE → r1.INSERT a → r2.INSERT b` left the union `[a, b]` when
+ * the last writer said `[b]` only. Reproduced, not reasoned about.
  *
- * `ON CONFLICT DO NOTHING` because there is NO TRANSACTION here and two saves can interleave —
- * two tabs, or a client retry on a slow response; the page's in-flight guard is per page. Without
- * it, `r1.DELETE → r2.DELETE → r1.INSERT c → r2.INSERT c` raises a UNIQUE violation on the
+ * THE FIX IS A CLAIM, NOT A TRANSACTION, because D1 has none to offer. The first UPDATE below
+ * increments `write_generation` (0013) and RETURNING hands back this writer's claim — one atomic
+ * statement, so every writer's generation is distinct and ordered — and every statement after it
+ * is guarded on still holding the LATEST claim. The moment a later save claims, this save's
+ * remaining statements all no-op against the subquery, and the last claimer's set lands whole.
+ *
+ * `{ ok: false }` when the claim matches no row: the debrief has been erased under this save
+ * (delete-now, or the purge, mid-request). Nothing is written — the guards would all no-op anyway
+ * — and the caller decides what a vanished parent means for its answer.
+ *
+ * `ON CONFLICT DO NOTHING` STAYS, and removing it to "get" last-writer-wins would fix nothing
+ * (#87's explicit do-not): a pair re-sent by a retry would raise a UNIQUE violation on the
  * composite key, which is not a StoreError, so the route answers `500 internal` — the exact
  * signal DEPLOY.md's triage table reads as "migration 0011 was never applied". A candidate with
  * two tabs open would send an operator to re-run migrations.
  *
- * WHAT THIS DOES NOT CLOSE, stated rather than implied: a failure between the DELETE and the
- * INSERTs leaves the ticks EMPTY, not stale — previously-saved ones are gone. The set is small,
- * the page re-fetches it, and re-ticking is one tap per box; the alternative (INSERT the new set
- * first, then delete the complement) needs its own branch for the untick-everything case, because
- * `competency_id NOT IN ()` is a syntax error on the empty set. Not worth it for a set this size.
+ * WHAT THIS STILL DOES NOT CLOSE, stated rather than implied: there is no transaction, so a crash
+ * between the claim and the DELETE leaves the PREVIOUS set standing — stale but whole, fixed by
+ * the next save — and a crash between the DELETE and the last INSERT leaves the ticks empty or
+ * partial, exactly as before 0013. The set is small, the page re-fetches it, and re-ticking is
+ * one tap per box; what the claim bought is the ordering guarantee, not durability.
  *
  * Callers pass ids ALREADY checked against the role. This function does not re-check: the route
  * has the competency list in hand for its own 404, and a second check here would be a second
@@ -827,14 +838,28 @@ export async function upsertDebrief(db, { roleId, asked, fixText } = {}) {
  */
 export async function setShakyCompetencies(db, { debriefId, competencyIds } = {}) {
   requireFields({ debriefId });
-  await db.prepare("DELETE FROM debrief_competency WHERE debrief_id = ?").bind(debriefId).run();
+  const generation = await db
+    .prepare(
+      "UPDATE debrief SET write_generation = write_generation + 1 WHERE id = ? RETURNING write_generation",
+    )
+    .bind(debriefId)
+    .first("write_generation");
+  if (generation == null) return { ok: false }; // the debrief is gone; every guard below would no-op
+  await db
+    .prepare(
+      `DELETE FROM debrief_competency
+        WHERE debrief_id = ? AND ? = (SELECT write_generation FROM debrief WHERE id = ?)`,
+    )
+    .bind(debriefId, generation, debriefId)
+    .run();
   for (const competencyId of competencyIds ?? []) {
     await db
       .prepare(
-        `INSERT INTO debrief_competency (debrief_id, competency_id) VALUES (?, ?)
+        `INSERT INTO debrief_competency (debrief_id, competency_id)
+         SELECT ?, ? WHERE ? = (SELECT write_generation FROM debrief WHERE id = ?)
          ON CONFLICT (debrief_id, competency_id) DO NOTHING`,
       )
-      .bind(debriefId, String(competencyId))
+      .bind(debriefId, String(competencyId), generation, debriefId)
       .run();
   }
   return { ok: true };
@@ -1094,39 +1119,42 @@ export async function updateStory(db, { roleId, storyId, title, sketch } = {}) {
 }
 
 /**
- * Replace one story's whole tick set — `setShakyCompetencies`'s idiom, story-scoped.
+ * Replace one story's whole tick set — `setShakyCompetencies`'s idiom, story-scoped: under
+ * interleaving, the LAST save wins whole (#87).
  *
  * DELETE then INSERT, so a set replaced wholesale has no half-state to reconcile and unticking
- * every box is a real erasure — which is what a candidate means by it.
+ * every box is a real erasure — which is what a candidate means by it. Plain DELETE-then-INSERT,
+ * though, let two overlapping saves MERGE (two tabs, or a client retry against a slow response;
+ * the page's in-flight guard is per page): `r1.DELETE → r2.DELETE → r1.INSERT a → r2.INSERT b`
+ * left the union `[a, b]` when the last writer said `[b]` only. Reproduced, not reasoned about
+ * (#85 F11). The consequence was specific and worse here than for the debrief's version: a
+ * resurrected tick makes `storyGap` report a competency as covered at the moment the candidate
+ * said it is not, so the feature's only output is silently suppressed by its own bookkeeping.
  *
- * WHAT "THE NEWEST SAVE IS THE TRUTH" IS WORTH, stated accurately because this docstring used to
- * claim it outright. It holds for saves that do not overlap, which is every save from one page.
- * Under interleaving it is a UNION, not a replacement: `r1.DELETE → r2.DELETE → r1.INSERT a →
- * r2.INSERT b` leaves `[a, b]` when the last writer said `[b]` only. Reproduced, not reasoned
- * about. The consequence is specific and worse here than for the debrief's version of this
- * function: a resurrected tick makes `storyGap` report a competency as covered at the moment the
- * candidate said it is not, so the feature's only output is silently suppressed by its own
- * bookkeeping.
+ * THE FIX IS A CLAIM, NOT A TRANSACTION, because D1 has none to offer. The first UPDATE below
+ * increments `story.write_generation` (0013) and RETURNING hands back this writer's claim — one
+ * atomic statement, so every writer's generation is distinct and ordered — and both statements
+ * after it are guarded on still holding the LATEST claim. The moment a later save claims, this
+ * save's remaining statements all no-op against the subquery, and the last claimer's set lands
+ * whole.
  *
- * NOT FIXED HERE, deliberately. A correct fix needs a per-story write generation to compare
- * against, and the schema has no such column by design — 0012 is deliberately minimal. Adding a
- * fake one (a timestamp at second granularity) would buy nothing this comment does not. What is
- * cheap and real is that the window is two overlapping writes to the SAME story, which needs two
- * tabs or a retry against a slow response, and the page re-fetches after every save, so the union
- * is visible on screen and one tap per box corrects it. Filed rather than papered over.
+ * `{ ok: false }` when the claim matches no row: the story has been deleted under this save —
+ * almost always a second tab, the same race `updateStory` answers with `{updated: false}` a
+ * moment earlier. Nothing is written, and functions/prep/api/story.js turns it into the same 404.
  *
- * `ON CONFLICT DO NOTHING` because there is NO TRANSACTION here and two saves can interleave (two
- * tabs, or a client retry on a slow response; the page's in-flight guard is per page). Without it,
- * `r1.DELETE → r2.DELETE → r1.INSERT c → r2.INSERT c` raises a UNIQUE violation on the composite
- * key, which is not a StoreError, so the route answers `500 internal` — the exact signal
- * DEPLOY.md's triage table reads as "migration 0012 was never applied". Do not remove it to get
- * last-writer-wins: that trades a silent merge for a 500 and fixes nothing.
+ * `ON CONFLICT DO NOTHING` STAYS, and removing it to "get" last-writer-wins would fix nothing
+ * (#87's explicit do-not): a pair re-sent by a retry would raise a UNIQUE violation on the
+ * composite key, which is not a StoreError, so the route answers `500 internal` — the exact
+ * signal DEPLOY.md's triage table reads as "migration 0012 was never applied".
  *
- * WHAT THIS DOES NOT CLOSE, stated rather than implied: a failure between the DELETE and the
- * INSERTs leaves this story's ticks EMPTY, not stale. The set is small, the page re-fetches it,
- * and re-ticking is one tap per box. THE SKETCHES ARE NOT EXPOSED TO THIS AT ALL, and that is the
- * whole reason the ticks and the story are written by two different statements rather than one
- * whole-set replace: paragraphs of prose cannot be re-typed, so nothing here ever deletes them.
+ * WHAT THIS STILL DOES NOT CLOSE, stated rather than implied: there is no transaction, so a crash
+ * between the claim and the DELETE leaves the PREVIOUS set standing — stale but whole, fixed by
+ * the next save — and a crash between the DELETE and the last INSERT leaves this story's ticks
+ * empty or partial, exactly as before 0013; what the claim bought is the ordering guarantee, not
+ * durability. The set is small, the page re-fetches it, and re-ticking is one tap per box. THE
+ * SKETCHES ARE NOT EXPOSED TO ANY OF THIS, and that is the whole reason the ticks and the story
+ * are written by two different statements rather than one whole-set replace: paragraphs of prose
+ * cannot be re-typed, so nothing here ever deletes them.
  *
  * Callers pass ids ALREADY checked against the role, and pass `storyId` ALREADY confirmed to
  * belong to it — this function does not re-check either, because the route has the competency list
@@ -1134,14 +1162,28 @@ export async function updateStory(db, { roleId, storyId, title, sketch } = {}) {
  */
 export async function setStoryCompetencies(db, { storyId, competencyIds } = {}) {
   requireFields({ storyId });
-  await db.prepare("DELETE FROM story_competency WHERE story_id = ?").bind(storyId).run();
+  const generation = await db
+    .prepare(
+      "UPDATE story SET write_generation = write_generation + 1 WHERE id = ? RETURNING write_generation",
+    )
+    .bind(storyId)
+    .first("write_generation");
+  if (generation == null) return { ok: false }; // the story is gone; every guard below would no-op
+  await db
+    .prepare(
+      `DELETE FROM story_competency
+        WHERE story_id = ? AND ? = (SELECT write_generation FROM story WHERE id = ?)`,
+    )
+    .bind(storyId, generation, storyId)
+    .run();
   for (const competencyId of competencyIds ?? []) {
     await db
       .prepare(
-        `INSERT INTO story_competency (story_id, competency_id) VALUES (?, ?)
+        `INSERT INTO story_competency (story_id, competency_id)
+         SELECT ?, ? WHERE ? = (SELECT write_generation FROM story WHERE id = ?)
          ON CONFLICT (story_id, competency_id) DO NOTHING`,
       )
-      .bind(storyId, String(competencyId))
+      .bind(storyId, String(competencyId), generation, storyId)
       .run();
   }
   return { ok: true };

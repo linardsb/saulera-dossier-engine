@@ -145,15 +145,21 @@ export async function onRequestPost(context) {
     // 404 path would write into another invite's story. The early return above is what stops that,
     // and it is the reason the two writes are not reordered for symmetry with stories.js.
     try {
-      await setStoryCompetencies(env.DB, { storyId, competencyIds: [...new Set(covers)] });
-    } catch (err) {
       /* THE TWO-TAB WINDOW: another tab deletes this story between the matched UPDATE above and
-         this write, so `story_competency.story_id`'s foreign key (0012) has nothing to point at.
-         D1 raises a plain Error, not a StoreError, so `errorResponse` answered `500 internal` —
-         which is exactly the signal DEPLOY.md's triage table tells an operator to read as
-         "migration 0012 was never applied". A row that has just been deleted is not an internal
-         failure and is not a migration problem: it is 404, the same answer the UPDATE itself
-         gives when it loses the same race a moment earlier.
+         this write. The store's claim statement (#87) is what meets it now: the claim's UPDATE
+         matches no row, nothing is written, and `{ok: false}` comes back — a just-deleted row is
+         not an internal failure and not a migration problem, so the answer is 404, the same one
+         `updateStory` gives when it loses the same race a moment earlier, and not the
+         `500 internal` DEPLOY.md's triage table reads as "migration 0012 was never applied". */
+      const { ok } = await setStoryCompetencies(env.DB, { storyId, competencyIds: [...new Set(covers)] });
+      if (!ok) return json({ error: "not_found" }, 404);
+    } catch (err) {
+      /* The narrower remnant of that window: a COMPETENCY erased under a re-handover between the
+         ownership check above and the tick write. The claim cannot see that — the story row is
+         still standing — so `story_competency.competency_id`'s foreign key (0012) is what refuses
+         the row, with a plain Error rather than a StoreError, and `errorResponse` would answer
+         `500 internal`: the missing-migration signal again, for a row that has simply gone. 404,
+         like every other just-vanished row on this route.
 
          Matched on the message because that is all D1 gives back, and narrowly, so a genuine
          failure still surfaces as a 500 rather than being dressed up as a missing row. The

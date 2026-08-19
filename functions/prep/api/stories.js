@@ -243,7 +243,11 @@ export async function onRequestPost(context) {
        otherwise, which is exactly the case its own header reserves logging for. */
     let coversSaved = true;
     try {
-      await setStoryCompetencies(env.DB, { storyId: id, competencyIds: [...new Set(covers)] });
+      // `ok: false` is the store's claim (#87) finding no story row — reachable here only if
+      // delete-now or the purge erased this invite between the INSERT above and now. Nothing was
+      // written, so the response says so rather than reporting ticks a vanished story cannot carry.
+      const { ok } = await setStoryCompetencies(env.DB, { storyId: id, competencyIds: [...new Set(covers)] });
+      coversSaved = ok;
     } catch (err) {
       coversSaved = false;
       console.error("prep stories: story saved, ticks did not", err?.message ?? err);

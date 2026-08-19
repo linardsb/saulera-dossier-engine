@@ -161,6 +161,42 @@ test("setStoryCompetencies replaces the whole set, and unticking everything real
   assert.equal((await storyCompetenciesByRole(d1, roleId)).length, 1, "ON CONFLICT DO NOTHING absorbs the duplicate");
 });
 
+test("two interleaved tick saves leave one writer's whole set, never the union", { skip }, async () => {
+  /* #87, and the repro is the regression's own name. d1Shape's statements are sync sqlite behind
+     async wrappers, so Promise.all genuinely interleaves the two calls at every await boundary:
+     under plain DELETE-then-INSERT this ran r1.DELETE → r2.DELETE → r1.INSERT a → r2.INSERT b and
+     left the union [a, b] when the last writer said [b] only — a resurrected tick, which is
+     `storyGap` reporting a competency covered at the moment the candidate said it is not. The
+     claim on `story.write_generation` (0013) is what makes the loser's statements no-op instead. */
+  const d1 = d1Shape(openMigrated());
+  const { roleId, ids } = await seed(d1);
+  const { id } = await createStory(d1, { roleId, title: "A story", sketch: "" });
+
+  await Promise.all([
+    setStoryCompetencies(d1, { storyId: id, competencyIds: [ids[0]] }),
+    setStoryCompetencies(d1, { storyId: id, competencyIds: [ids[1]] }),
+  ]);
+
+  const rows = (await storyCompetenciesByRole(d1, roleId)).map((r) => r.competency_id);
+  assert.equal(rows.length, 1, `[${rows}] is the union — both writers merged, and neither said that`);
+  assert.ok(ids.includes(rows[0]), "the survivor is one writer's whole set, verbatim");
+
+  // A follow-up sequential save still replaces wholesale — the generation must not wedge the row.
+  await setStoryCompetencies(d1, { storyId: id, competencyIds: [ids[0], ids[1]] });
+  assert.deepEqual(
+    (await storyCompetenciesByRole(d1, roleId)).map((r) => r.competency_id).sort(),
+    [...ids].sort(),
+    "the next save fully replaces, so the race leaves no lasting state behind",
+  );
+
+  // The claim's other answer: a story that is gone reports itself rather than half-writing.
+  assert.deepEqual(
+    await setStoryCompetencies(d1, { storyId: "story-that-never-was", competencyIds: [ids[0]] }),
+    { ok: false },
+    "no row claimed means nothing written and the caller told — which is the route's 404",
+  );
+});
+
 test("storyTitlesByRole returns titles in the candidate's own order, and no sketch text", { skip }, async () => {
   const d1 = d1Shape(openMigrated());
   const { roleId } = await seed(d1);
@@ -638,21 +674,25 @@ test("a story saved with its ticks lost still comes back with its id, not a 500"
 
 test("saving a story another tab has just deleted answers 404, not the migration's 500", { skip }, async () => {
   /* The window is between the matched UPDATE and the tick write. The FK on
-     `story_competency.story_id` throws a plain Error, not a StoreError, so `errorResponse` said
-     `500 internal` — the exact signal DEPLOY.md's triage row tells an operator to read as "0012
-     was never applied". A row that has just been deleted is neither internal nor a migration
-     problem: it is 404, the same answer the UPDATE gives when it loses the same race. */
+     `story_competency.story_id` used to be what raised it — a plain Error, not a StoreError, so
+     `errorResponse` said `500 internal`, the exact signal DEPLOY.md's triage row tells an operator
+     to read as "0012 was never applied". Since #87 the tick write CLAIMS the story row first, so
+     it is the claim that meets the gone row: its UPDATE matches nothing, the store answers
+     `{ok: false}` having written nothing, and the route says what it always had to — 404, the
+     same answer the title UPDATE gives when it loses the same race a moment earlier. */
   const db = openMigrated();
   const d1 = d1Shape(db);
   const { token, ids } = await seed(d1);
   const { id } = await (await postStories(d1, token, full({ title: "Mine", sketch: "words" }))).json();
 
   /* The other tab, mid-request: the UPDATE has matched and the tick write has not run. Deleting
-     the row directly is the only way to open a window that is genuinely two statements wide. */
+     the row directly is the only way to open a window that is genuinely two statements wide.
+     Matched on `SET title` so the interception is `updateStory`'s statement alone — the claim
+     (#87) is also `UPDATE story`, and it must hit the real database to find the row gone. */
   const racing = {
     prepare(sql) {
       const stmt = d1.prepare(sql);
-      if (/^\s*UPDATE story\b/i.test(sql)) {
+      if (/^\s*UPDATE story SET title\b/i.test(sql)) {
         return {
           bind: (...args) => ({
             run: async () => {

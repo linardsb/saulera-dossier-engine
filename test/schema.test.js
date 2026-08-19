@@ -261,7 +261,10 @@ const EXPECTED_COLUMNS = {
   // rewrite rather than a history. No `updated_at` and no `shaky_text`: nothing renders a stamp,
   // and the shaky ticks are the join table below rather than prose, because targeting has to read
   // them deterministically with no model call.
-  debrief: ["asked_json", "candidate_role_id", "created_at", "fix_text", "id"],
+  // #87 adds `write_generation` (0013), by the sanctioned ADD COLUMN form: the compare-and-swap
+  // counter `setShakyCompetencies` claims so two interleaved tick saves replace rather than merge.
+  // Never bound from a caller, never selected by a read — it exists for the guard subqueries alone.
+  debrief: ["asked_json", "candidate_role_id", "created_at", "fix_text", "id", "write_generation"],
   // #77. Two columns and no third: the pair IS the fact, so it is the composite primary key, and
   // a duplicate tick is not a second fact worth a surrogate id or a count. No `created_at` either
   // — the whole set is replaced on every save, so a per-tick stamp would record when a set was
@@ -280,7 +283,13 @@ const EXPECTED_COLUMNS = {
   // editor's GET), and `storyTitlesByRole` exists precisely so the model-facing path has a query
   // with no sketch in it to leak. test/prep-storybank.test.js asserts all three as reachability
   // claims — named here so a future column rename reads why it is not free.
-  story: ["candidate_role_id", "created_at", "id", "sketch", "title"],
+  //
+  // #87 adds `write_generation` (0013), by the sanctioned ADD COLUMN form: the compare-and-swap
+  // counter `setStoryCompetencies` claims so two interleaved tick saves replace rather than merge
+  // — a merged set resurrects a tick, and a resurrected tick silences `storyGap` at the exact
+  // moment the candidate said a competency is not covered. Never bound from a caller, never
+  // selected by a read — it exists for the guard subqueries alone.
+  story: ["candidate_role_id", "created_at", "id", "sketch", "title", "write_generation"],
   // #78, and `debrief_competency`'s comment restated for the same shape: the pair IS the fact, so
   // it is the composite primary key and there is no surrogate id and no count. No `created_at`
   // either — the whole set is replaced on every save, so a per-tick stamp would record when a set
