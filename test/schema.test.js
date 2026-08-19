@@ -144,7 +144,36 @@ test("every ALTER TABLE in the migrations is an ADD COLUMN this test could read"
 // which is why the column is `field_key` and not `candidate_visible`. Presence is permission,
 // so an empty table is the fail-closed default for every note that already exists.
 const ENGINE_TABLES = ["agency", "clients", "events", "note_visibility"];
-const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invite", "otp", "question"];
+//
+// `debrief` and `debrief_competency` (#77) join THIS regime, and the reason is the one
+// `candidate_otp` states below in the other direction: a regime is decided by the root a row
+// cascades from, not by what the table is about. Both hang off `candidate_role`, which hangs off
+// `invite`, so the 30-day post-interview purge and delete-now govern them — not the compliance
+// cage's 12-month dormancy one. That matters here more than most: a debrief is the candidate's
+// private account of an interview that has already happened, and filing it under a retention
+// promise that outlives the invite would keep it long after the sentence on /prep/privacy says
+// it is gone.
+//
+// `story` and `story_competency` (#78) join it for the same reason and one that is sharper. Both
+// hang off `candidate_role`, so the same two erasures govern them. What makes it sharper: a
+// storybank is written BEFORE the interview and holds the candidate's own account of things that
+// happened to them in previous jobs — the most personal free text anywhere in the product, and the
+// only content here that has nothing to do with the client the invite is for. Filing it under the
+// compliance cage's 12-month dormancy rule would keep a stranger's life story eleven months after
+// /prep/privacy promised it was gone.
+const PORTAL_TABLES = [
+  "attempt",
+  "candidate_role",
+  "competency",
+  "debrief",
+  "debrief_competency",
+  "habit",
+  "invite",
+  "otp",
+  "question",
+  "story",
+  "story_competency",
+];
 
 // The third regime (#67, decided by spike #66): durable compliance METADATA, caged to a
 // `candidate` root with its own retention — a 12-month dormancy purge and delete-now, both
@@ -161,14 +190,16 @@ const PORTAL_TABLES = ["attempt", "candidate_role", "competency", "habit", "invi
 // that does not govern it.
 const COMPLIANCE_TABLES = ["assignment", "candidate", "candidate_otp", "compliance_item"];
 
-test("the schema declares exactly the engine's four, the portal's seven and the compliance cage's four", () => {
+test("the schema declares exactly the engine's four, the portal's eleven and the compliance cage's four", () => {
   assert.deepEqual(
     [...byName.keys()].sort(),
     [...ENGINE_TABLES, ...PORTAL_TABLES, ...COMPLIANCE_TABLES].sort(),
-    "a sixteenth table means a boundary moved without a decision. The engine's four carry " +
-      "no candidate data (architecture §5.6); the portal's seven are candidate data inside " +
-      "decision 13's retention cage; the compliance cage's four are durable candidate " +
-      "metadata inside spike #66's. A new table must pick a regime, in the open.",
+    "a twentieth table means a boundary moved without a decision. The engine's four carry " +
+      "no candidate data (architecture §5.6); the portal's eleven are candidate data inside " +
+      "decision 13's retention cage — the two debrief tables and the two storybank tables " +
+      "included, because they hang off candidate_role and die on the 30-day post-interview " +
+      "purge like the rest of it; the compliance cage's four are durable candidate metadata " +
+      "inside spike #66's. A new table must pick a regime, in the open.",
   );
 });
 
@@ -224,6 +255,46 @@ const EXPECTED_COLUMNS = {
   question: ["axis", "competency_id", "difficulty", "id", "text", "variant_of"],
   attempt: ["competency_id", "created_at", "id", "mode", "note", "question_id", "rating"],
   habit: ["active", "evidence_count", "first_seen", "id", "label", "role_id"],
+  // #77. The candidate's own account of an interview that has happened: the questions they were
+  // asked with the competency they placed each one under (`asked_json`), and one thing to do
+  // differently. One row per role, upserted — `candidate_role_id` is UNIQUE — so re-editing is a
+  // rewrite rather than a history. No `updated_at` and no `shaky_text`: nothing renders a stamp,
+  // and the shaky ticks are the join table below rather than prose, because targeting has to read
+  // them deterministically with no model call.
+  // #87 adds `write_generation` (0013), by the sanctioned ADD COLUMN form: the compare-and-swap
+  // counter `setShakyCompetencies` claims so two interleaved tick saves replace rather than merge.
+  // Never bound from a caller, never selected by a read — it exists for the guard subqueries alone.
+  debrief: ["asked_json", "candidate_role_id", "created_at", "fix_text", "id", "write_generation"],
+  // #77. Two columns and no third: the pair IS the fact, so it is the composite primary key, and
+  // a duplicate tick is not a second fact worth a surrogate id or a count. No `created_at` either
+  // — the whole set is replaced on every save, so a per-tick stamp would record when a set was
+  // last rewritten and nothing reads that.
+  debrief_competency: ["competency_id", "debrief_id"],
+  // #78. The candidate's own interview stories, written before the interview in their own words —
+  // SPEC Amendment 1's stated shape, implemented rather than improved. MANY rows per role, unlike
+  // `debrief`'s one, which is why `candidate_role_id` is indexed and not UNIQUE and why the routes
+  // are collection/item shaped.
+  //
+  // No `updated_at` and no `order`/`position`: nothing renders a stamp, and this is a flat capped
+  // list of twelve that nothing reorders.
+  //
+  // `sketch` is THE ONE COLUMN IN THE PORTAL CAGE THAT NO OTHER ROUTE MAY SELECT. Exactly one
+  // store function reads it (`storiesByRole`), exactly one route calls that function (the
+  // editor's GET), and `storyTitlesByRole` exists precisely so the model-facing path has a query
+  // with no sketch in it to leak. test/prep-storybank.test.js asserts all three as reachability
+  // claims — named here so a future column rename reads why it is not free.
+  //
+  // #87 adds `write_generation` (0013), by the sanctioned ADD COLUMN form: the compare-and-swap
+  // counter `setStoryCompetencies` claims so two interleaved tick saves replace rather than merge
+  // — a merged set resurrects a tick, and a resurrected tick silences `storyGap` at the exact
+  // moment the candidate said a competency is not covered. Never bound from a caller, never
+  // selected by a read — it exists for the guard subqueries alone.
+  story: ["candidate_role_id", "created_at", "id", "sketch", "title", "write_generation"],
+  // #78, and `debrief_competency`'s comment restated for the same shape: the pair IS the fact, so
+  // it is the composite primary key and there is no surrogate id and no count. No `created_at`
+  // either — the whole set is replaced on every save, so a per-tick stamp would record when a set
+  // was last rewritten and nothing reads that.
+  story_competency: ["competency_id", "story_id"],
   // #20. `attempts` is the OTP cap's whole storage: the counter rides the row it caps, and
   // dies with it. Still no `code` column and no email — the invite the row hangs off owns
   // the identity, and this table owns only the guess count.
@@ -302,6 +373,19 @@ const CASCADE_CHAIN = {
   attempt: { competency_id: "competency", question_id: "question" },
   habit: { role_id: "candidate_role" },
   otp: { invite_id: "invite" },
+  // #77. Two edges rather than one, and the second is not decoration: `debrief_competency`
+  // cascades from `debrief` so the ticks die with the debrief, AND from `competency` so a
+  // competency that goes takes its ticks rather than leaving a dangling row that would dampen
+  // targeting for a competency nobody can see.
+  debrief: { candidate_role_id: "candidate_role" },
+  debrief_competency: { debrief_id: "debrief", competency_id: "competency" },
+  // #78. The same two edges for the same two reasons, one ticket over. `story_competency` cascades
+  // from `story` so a story's ticks die with the story in one DELETE, AND from `competency` so a
+  // competency removed by a re-handover takes its ticks rather than leaving a dangling row — which
+  // here would keep reading as "a story covers this" and point the story gap at the wrong part of
+  // the job. The story itself survives that with no covers, and the editor says so in plain words.
+  story: { candidate_role_id: "candidate_role" },
+  story_competency: { story_id: "story", competency_id: "competency" },
   assignment: { candidate_id: "candidate", client_id: "clients" },
   compliance_item: { candidate_id: "candidate" },
   // #68. A live sign-in code is the one row in the cage that is a credential, so it is the one

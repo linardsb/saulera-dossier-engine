@@ -31,6 +31,17 @@
     <p class="page-sub">Built from what this agency knows about the client, not from the job
       advert. Nothing you do here is shown to your recruiter.</p>
     <p class="brief-cta"><a class="btn btn-primary btn-block" href="/prep/session">Practise for it</a></p>
+    <!-- Hidden until the interview has happened (#77): brief.js unhides it on the payload's
+         debrief_available. Plain words, and never the word "debrief" — no first-time candidate
+         uses that about themselves. Not the primary button either: practising is still the thing
+         to do here, and a second filled button beside it would make the page ask twice. -->
+    <p class="brief-cta" id="debrief-cta" hidden><a class="btn btn-block" href="/prep/debrief">How did the interview go?</a></p>
+    <!-- NOT hidden, and there is no flag to unhide it (#78) — do not "fix" this by analogy with
+         the line above. The debrief CTA waits for `debrief_available` because a debrief before the
+         interview is meaningless. A storybank is most useful BEFORE it: writing down the stories
+         you already own is the preparation. So this link is unconditional, which is why brief.js
+         needed no change at all for this ticket. -->
+    <p class="brief-cta" id="stories-cta"><a class="btn btn-block" href="/prep/stories">Your stories</a></p>
     <p class="save-state" id="brief-state" role="status"></p>
   </div>
 

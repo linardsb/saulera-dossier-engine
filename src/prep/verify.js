@@ -13,20 +13,25 @@
 // make one bad character kill a Send a recruiter is standing in front of, and a silently removed
 // claim is the failure mode they cannot see. Shape bugs are `assertBrief`'s; nothing blurs the two.
 //
-// ONE HAYSTACK. verifyPack dispatches on source_type into { cv, client_note }; there is no such
-// discriminator here, deliberately. Competencies come from the brief and only the brief
-// (SPEC.md:45 — "Extract competencies from it; do not invent them"), and a competency sourced
-// from the candidate's own CV is a category error rather than a looser check.
+// TWO HAYSTACKS, and which one a claim is checked against is decided by the BLOCK, never by a
+// field on the claim — verifyPack dispatches on `source_type`, and there is still no such
+// discriminator here. A competency is what the ROLE demands, so it comes from the brief and only
+// the brief (SPEC.md:45 — "Extract competencies from it; do not invent them"), and a competency
+// sourced from the candidate's own CV is a category error rather than a looser check. #79's
+// `LikelyConcerns.concerns[].evidence_quote` is the mirror of that: it is what the CANDIDATE has,
+// so it can only come from their own material, and a span found in the brief instead is the same
+// category error running the other way. One block discriminates them, and it is named here so the
+// next reader does not re-open the question.
 
 import { quoteAppears } from "../provenance.js";
 
 /**
  * @param payload  a payload that has passed assertBrief()
- * @param inputs   { brief, fieldKeys } — the exact brief text handed to generation, and the
- *                 `key` of every field in the candidate-visible slice
- * @returns { payload, failures } — every competency's and every panel claim's source resolved
+ * @param inputs   { brief, cv, fieldKeys } — the exact brief and CV text handed to generation,
+ *                 and the `key` of every field in the candidate-visible slice
+ * @returns { payload, failures } — every competency's, panel claim's and concern's source resolved
  */
-export function verifyBrief(payload, { brief, fieldKeys } = {}) {
+export function verifyBrief(payload, { brief, cv, fieldKeys } = {}) {
   const keys = new Set(fieldKeys ?? []);
   const failures = [];
 
@@ -73,6 +78,30 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
     return { ...entry, source_field_key: "", failed_field_key: entry.source_field_key };
   };
 
+  /**
+   * A concern's evidence (#79), checked against the CANDIDATE'S CV.
+   *
+   * THE EMPTY QUOTE IS NOT A FAILURE. SPEC Amendment 1: "if the material holds no genuine
+   * counter, say so plainly." An empty `evidence_quote` IS that plain statement, so it returns
+   * untouched and the page's own words (registry COPY) say what it means. `quoteAppears`
+   * returns false for an empty needle (src/provenance.js:37-39), so without this branch every
+   * honest gap would be recorded as a hallucination.
+   *
+   * That one branch also carries the idempotency the panel demotion needs two clauses for: a
+   * demoted concern's quote is already blank, so a re-verified payload returns here before the
+   * haystack is consulted and `failed_evidence_quote` survives intact. A forged
+   * `{evidence_quote: "x", failed_evidence_quote: null}` arriving from the browser is NOT blank
+   * and is therefore still checked, which is the guarantee :60-66 argues for.
+   */
+  const demoteConcern = (entry, failure) => {
+    if (!String(entry?.evidence_quote ?? "").trim()) return entry;
+    if (quoteAppears(entry.evidence_quote, cv)) return entry;
+
+    failures.push({ ...failure, quote: entry.evidence_quote, reason: "quote not found in the CV" });
+
+    return { ...entry, evidence_quote: "", failed_evidence_quote: entry.evidence_quote };
+  };
+
   // Cloned the whole way down rather than mutated in place: the panel claim sits three levels
   // deep (blocks[i].props.panel[j]), and an in-place blank would alter the parsed object the
   // caller still holds, quietly making "nothing was dropped" unprovable.
@@ -89,6 +118,17 @@ export function verifyBrief(payload, { brief, fieldKeys } = {}) {
         demote(entry, { kind: "primer_source", block_index: blockIndex, item_index: itemIndex }),
       );
       return { ...block, props: { ...block.props, items } };
+    }
+
+    if (block.name === "LikelyConcerns" && Array.isArray(block.props?.concerns)) {
+      const concerns = block.props.concerns.map((entry, concernIndex) =>
+        demoteConcern(entry, {
+          kind: "concern_source",
+          block_index: blockIndex,
+          concern_index: concernIndex,
+        }),
+      );
+      return { ...block, props: { ...block.props, concerns } };
     }
 
     return block;
@@ -133,6 +173,21 @@ export function briefSummary(payload) {
   );
   const primerUnsourced = primer.filter((e) => "failed_field_key" in e).length;
 
+  // #79's concerns, counted the same way and additive for the same reason — but in THREE parts
+  // rather than two, because a concern has an outcome the panel and primer halves do not: the
+  // honest gap. A blank quote with no marker is the model correctly declining to invent a
+  // counter, and folding it into `concern_sourced` would print "3 evidenced" over a brief where
+  // one concern has nothing behind it — the one number on this line worth reading.
+  //
+  //   sourced + unsourced + no_material === total, always.
+  const concerns = (payload.blocks ?? []).flatMap((b) =>
+    b?.name === "LikelyConcerns" && Array.isArray(b.props?.concerns) ? b.props.concerns : [],
+  );
+  const concernUnsourced = concerns.filter((e) => "failed_evidence_quote" in e).length;
+  const concernNoMaterial = concerns.filter(
+    (e) => !("failed_evidence_quote" in e) && !String(e?.evidence_quote ?? "").trim(),
+  ).length;
+
   return {
     sourced,
     unverified: competencies.length - sourced,
@@ -143,5 +198,9 @@ export function briefSummary(payload) {
     primer_sourced: primer.length - primerUnsourced,
     primer_unsourced: primerUnsourced,
     primer_total: primer.length,
+    concern_sourced: concerns.length - concernUnsourced - concernNoMaterial,
+    concern_unsourced: concernUnsourced,
+    concern_no_material: concernNoMaterial,
+    concern_total: concerns.length,
   };
 }

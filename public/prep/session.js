@@ -160,6 +160,7 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
   const closeButton = $("close-drill");
   const actClose = $("act-close");
   const closeMount = $("close-body");
+  const debriefCta = $("session-debrief-cta");
 
   const state = {
     phase: "loading", // loading | prime | drill | done | closed | not-ready | failed
@@ -247,6 +248,9 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
 
     state.session = payload;
     state.dayBefore = payload.day_before === true;
+    // The debrief link (#77), offered from the head so it is reachable whichever act is showing.
+    // The flag is the route's, derived from the same `interview_at` /prep/api/debrief gates on.
+    if (payload.debrief_available === true) debriefCta.hidden = false;
     state.habits = (Array.isArray(payload.habits) ? payload.habits : []).map(String);
     for (const competency of payload.competencies) {
       if (competency.covered) state.covered.push(String(competency.label));
@@ -295,14 +299,22 @@ export function initSession({ doc, fetchImpl, navigate } = {}) {
       const logistics = (brief?.blocks ?? []).find((b) => b && b.name === "LogisticsRail");
       if (logistics) blocks.push({ name: "LogisticsRail", props: logistics.props });
 
-      const groups = { client: [], competency: [], screening: [] };
+      // #79 added a fourth type. Without its own group a "concern" question would fall into
+      // the competency bucket and render under "Expect to be asked about your experience" — a
+      // silent mislabelling, which is what registry.js:22-31's "nothing vanishes in silence"
+      // rule exists to prevent.
+      const groups = { client: [], competency: [], screening: [], concern: [] };
       for (const question of Array.isArray(brief?.questions) ? brief.questions : []) {
-        const type = question?.type === "client" || question?.type === "screening"
-          ? question.type
-          : "competency";
+        // hasOwnProperty, not a truthy lookup: `type: "constructor"` resolves through the
+        // prototype and `groups[type].push` then throws. registry.js:641 makes the same move
+        // for the same reason. assertBrief blocks that value from a stored payload, so this is
+        // belt and braces — but the divergence would read as an oversight next to the line it
+        // mirrors.
+        const raw = String(question?.type ?? "");
+        const type = Object.prototype.hasOwnProperty.call(groups, raw) ? raw : "competency";
         groups[type].push(String(question?.text ?? ""));
       }
-      if (groups.client.length || groups.competency.length || groups.screening.length) {
+      if (Object.values(groups).some((list) => list.length)) {
         blocks.push({ name: "LocumQuestions", props: groups });
       }
 

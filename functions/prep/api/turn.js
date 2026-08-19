@@ -43,6 +43,8 @@ import {
   setCompetencyProgress,
   insertVariant,
   observeHabit,
+  shakyCompetencyIds,
+  storyTitlesByRole,
 } from "../../../src/portal/store.js";
 import { requireSession } from "../../../src/prep/session.js";
 import { replayProgress } from "../../../src/prep/ladder.js";
@@ -122,9 +124,45 @@ export async function onRequestPost(context) {
     if (action === "help") {
       const inputs = { question: question.text, competencyLabel: question.competency_label };
       if (body.rung === "nudge") {
-        const { nudge } = await mintNudge(client, inputs);
+        // The candidate's own story titles (#78), so the nudge may ask which of them fits rather
+        // than sending them hunting for new material under pressure. TITLES ONLY —
+        // `storyTitlesByRole` selects one column, which is what makes "their own words stay on
+        // their own page" a property of the query rather than a promise about this file. The
+        // sibling read that carries the longer half is deliberately NOT imported here, and a test
+        // forbids it. (Both names are left unwritten on purpose: the gate greps this file for
+        // them, and a gate that cries wolf at a comment gets deleted — debrief.js:14's note.)
+        //
+        // WRAPPED, and the trade is stated rather than left to be discovered. #77's shaky read
+        // below is deliberately unwrapped and takes the whole drill down when 0011 is unapplied
+        // (DEPLOY.md's triage row) — because a ticked competency changes what is DRILLED, and
+        // serving the wrong question silently is worse than serving none. A story title only
+        // changes what a nudge may point at, and a nudge without them is an ordinary good nudge.
+        // The loud signal for a missing 0012 is /prep/api/stories, which is the feature's own
+        // route and 500s plainly. Taking the drill down for an optional prompt line would be the
+        // worse trade.
+        let storyTitles = [];
+        try {
+          storyTitles = await storyTitlesByRole(env.DB, role.role_id);
+        } catch (err) {
+          /* A TypeError is NOT a missing migration, and swallowing both identically is how a
+             rename disables story titles forever behind one indistinguishable log line. The catch
+             above is scoped to "0012 is unapplied", so anything that is not a database answer is
+             re-thrown to the outer handler where a real bug belongs.
+
+             The log line carries `message`, not `code ?? name`, and the change is deliberate:
+             D1 raises plain `Error`s, so `code` and `name` were both absent and every failure
+             printed as "unknown" — the exact discrimination this line exists to give an operator.
+             A D1 error message names the table or the SQL, never a row value, so nothing the
+             candidate typed can travel in it. */
+          if (err instanceof TypeError || err instanceof ReferenceError) throw err;
+          console.error("turn: story titles unavailable:", err?.message ?? "unknown");
+        }
+        const { nudge } = await mintNudge(client, { ...inputs, storyTitles });
         return json({ nudge });
       }
+      // The reveal rung gets NOTHING, deliberately. A skeleton of headings is already the
+      // structural answer, and story titles beside it would push the model toward "use your story
+      // about X" — which is content, and the one thing this feature must never supply.
       const { skeleton } = await mintReveal(client, inputs);
       return json({ skeleton });
     }
@@ -183,7 +221,12 @@ export async function onRequestPost(context) {
     const now = new Date();
     const competencies = await competenciesByRole(env.DB, role.role_id);
     const questions = await questionsByRole(env.DB, role.role_id);
-    const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now });
+    // The debrief's shaky ticks (#77), read here with the other targeting inputs rather than at
+    // the top: a debrief saved mid-turn is picked up on the NEXT turn either way, which is the
+    // same staleness the competency cache already has and is harmless for the same reason — the
+    // ticks only reorder a queue, and the next turn reorders it again.
+    const shakyIds = await shakyCompetencyIds(env.DB, role.role_id);
+    const state = drillState({ competencies, questions, attempts, interviewAt: role.interview_at, now, shakyIds });
 
     let nextQuestion = state.demand.question
       ? { id: state.demand.question.id, text: state.demand.question.text }

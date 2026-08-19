@@ -5,6 +5,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   readiness,
@@ -23,6 +26,9 @@ import {
   DAY_BEFORE_CLOSE_TURNS,
   isDayBefore,
   confidenceQuestion,
+  drillState,
+  SHAKY_DAMPEN,
+  storyGap,
 } from "../src/prep/targeting.js";
 
 const NOW = Date.parse("2026-07-30T12:00:00Z");
@@ -75,6 +81,16 @@ test("daysToInterview is whole UTC days and may be negative", () => {
   assert.equal(daysToInterview(stamp(2 * 24 * 60), now), 2);
   assert.equal(daysToInterview(stamp(-2 * 24 * 60), now), -2, "post-interview is a real state");
   assert.equal(daysToInterview(stamp(0), now), 0);
+});
+
+test("an unparseable stamp reads as day zero — pinned, not endorsed (#84 L7)", () => {
+  // 0 is the PERMIT side of the debrief's `<= 0` gate, where dates.js's siblings fail closed.
+  // Unreachable today — invite.interview_at is NOT NULL with a datetime() CHECK and every writer
+  // goes through toSqliteUtc — so this pins the reading for the caller the schema cannot see.
+  // If this fails, someone changed the convention: go update daysToInterview's header and the
+  // debrief route's gate together, or the two will disagree about what garbage means.
+  assert.equal(daysToInterview("next Tuesday", now), 0);
+  assert.equal(daysToInterview(null, now), 0);
 });
 
 test("the cooldown buckets match SPEC's spacing table", () => {
@@ -189,6 +205,58 @@ test("confidenceQuestion ignores revealed-mode 'successes' — the honesty rule 
   assert.equal(confidenceQuestion({ ranked, questionsBy, attemptsBy }), null);
 });
 
+/* ── the debrief's dampening (#77) ─────────────────────────────────────────────────────── */
+
+test("a shaky tick moves the queue: the ticked competency becomes the target", () => {
+  // Two competencies identical in every input the ranking reads — same importance, same cached
+  // stage and rate — so the ONLY thing that can separate them is the tick. Without it the id
+  // tiebreak decides and 'p' wins; with it, 'q' does.
+  const p = { id: "p", label: "P", importance: 4, stage: "can_answer", success_rate: 0.5 };
+  const q = { id: "q", label: "Q", importance: 4, stage: "can_answer", success_rate: 0.5 };
+  const args = { competencies: [p, q], questions: [], attempts: [], interviewAt: stamp(20 * 24 * 60), now };
+
+  assert.equal(drillState(args).target.id, "p", "with no tick, the id tiebreak decides");
+  assert.equal(drillState({ ...args, shakyIds: ["q"] }).target.id, "q");
+  assert.equal(
+    drillState({ ...args, shakyIds: [] }).target.id,
+    "p",
+    "unticking puts it back — the dampening is not sticky in the ranking, only in the row",
+  );
+});
+
+test("readiness clamps at 0 — a shaky competency at the bottom never goes negative", () => {
+  assert.equal(readiness({ stage: "", success_rate: 0, shaky: true }), 0);
+  assert.equal(readiness({ stage: "can_answer", success_rate: 0, shaky: true }), 0);
+  assert.equal(
+    readiness({ stage: "can_answer", success_rate: 0.5, shaky: true }),
+    0.3 - SHAKY_DAMPEN,
+    "one rung of readiness's own five-point denominator",
+  );
+  assert.equal(readiness({ stage: "can_answer", success_rate: 0.5 }), 0.3, "no tick, no change");
+});
+
+test("confidenceQuestion inherits the dampening — a shaky competency does not open the day before", () => {
+  // Both hold a success, so both are eligible for the confidence rep. B is readier (0.3 vs 0.25)
+  // and would open the session; ticking it shaky drops it to 0.1 and D opens instead.
+  const questionsBy = new Map([
+    ["b", [{ ...core("b#0", 1), competency_id: "b" }]],
+    ["d", [{ ...core("d#0", 1), competency_id: "d" }]],
+  ]);
+  const attemptsBy = new Map([
+    ["b", [attempt({ question_id: "b#0", rating: 4 })]],
+    ["d", [attempt({ question_id: "d#0", rating: 3 })]],
+  ]);
+  const plain = confidenceQuestion({ ranked: rankCompetencies([B, D]), questionsBy, attemptsBy });
+  assert.equal(plain.id, "b#0");
+
+  const damped = confidenceQuestion({
+    ranked: rankCompetencies([{ ...B, shaky: true }, D]),
+    questionsBy,
+    attemptsBy,
+  });
+  assert.equal(damped.id, "d#0", "the competency they said felt shaky is not the one to open on");
+});
+
 /* ── variant demand ────────────────────────────────────────────────────────────────────── */
 
 const core = (id, difficulty) => ({ id, competency_id: "a", text: `Q ${id}`, axis: null, difficulty, variant_of: null });
@@ -204,6 +272,44 @@ test("no success yet -> the easiest unattempted core question", () => {
 
   const attempted = [attempt({ question_id: "a#1", rating: 1 })];
   assert.equal(nextQuestion({ questions, attempts: attempted }).question.id, "a#0");
+});
+
+test("#79: a concern counter is not the first question a candidate meets", () => {
+  // THE ONE PRODUCT REGRESSION ON THIS TICKET THAT NOTHING ELSE WOULD CATCH. A concern question
+  // reaches D1 with `axis` NULL — the tag rides brief_json and the question table is type-free —
+  // so it is an ORDINARY CORE ROW here, and step 1 serves the easiest unattempted one. A counter
+  // marked "gentle" would therefore become the first question ever served on its competency:
+  // "how do you answer never having done IV therapy?" as the opening screen, to someone SPEC
+  // describes as anxious, short on time, and ready to close the tab.
+  //
+  // Nothing in code can enforce it — `difficulty` is a free enum on every question — so it is
+  // stated in PREP_SYSTEM, repeated in the schema's description for "concern", pinned in the
+  // fixture, and asserted here on the behaviour that actually matters.
+  const questions = [core("a#0", 2), core("a#1", 3)]; // an ordinary standard, then the counter
+  assert.equal(
+    nextQuestion({ questions, attempts: [] }).question.id,
+    "a#0",
+    "probing sorts last, so the ordinary question opens and the counter comes after a win",
+  );
+
+  // And the failure it guards against, spelled out: the same bank with the counter pitched
+  // gentle opens ON the counter.
+  const mispitched = [core("a#0", 2), core("a#1", 1)];
+  assert.equal(nextQuestion({ questions: mispitched, attempts: [] }).question.id, "a#1");
+});
+
+test("#79: the fixture's own concern questions are pitched probing", () => {
+  // The prompt rule, pinned where a fixture edit would trip over it: every fixture derived from
+  // prep-payload.json feeds the drill, and a counter pitched gentle there is the regression
+  // above shipped rather than described.
+  const payload = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/prep-payload.json"), "utf8"),
+  );
+  const concerns = payload.questions.filter((q) => q.type === "concern");
+  assert.ok(concerns.length, "the fixture carries concern questions at all");
+  for (const q of concerns) {
+    assert.equal(q.difficulty, "probing", `${q.text.slice(0, 40)}… must not open a competency`);
+  }
 });
 
 test("with a success, an unattempted stored variant wins — lateral before vertical", () => {
@@ -252,6 +358,31 @@ test("at the mint cap the least-recently-attempted question is re-served, no {mi
   const served = nextQuestion({ questions, attempts });
   assert.equal(served.mint, undefined, "the cap holds decision 6's cost envelope");
   assert.equal(served.question.id, "a#0", "oldest attempt is re-served");
+});
+
+test("questions the candidate was really asked do not spend the mint budget", () => {
+  // #81 M1. `insertAskedQuestion` writes `axis = 'lateral'` so a real question is SERVED like a
+  // stored variant — which is the point. Counting it toward the cap is a different claim, and a
+  // wrong one: the cap bounds what we spend, and these cost nothing. Nine of them under one
+  // competency would otherwise stop it ever minting again, permanently, and the competency a
+  // candidate lists most questions under is the one they ticked shaky.
+  const asked = Array.from({ length: MAX_VARIANTS_PER_COMPETENCY + 1 }, (_, i) => ({
+    id: `a#asked-${i}`,
+    competency_id: "a",
+    text: `A question they really asked, number ${i}.`,
+    axis: "lateral",
+    difficulty: null,
+    variant_of: null, // what tells a real question from one of ours
+  }));
+  const questions = [core("a#0", 1), ...asked];
+  const attempts = [
+    attempt({ question_id: "a#0", rating: 4, created_at: stamp(-100) }),
+    ...asked.map((q, i) =>
+      attempt({ question_id: q.id, axis: "lateral", rating: 3, created_at: stamp(-90 + i) }),
+    ),
+  ];
+
+  assert.ok(nextQuestion({ questions, attempts }).mint, "the competency can still mint");
 });
 
 test("leastRecentlyAttempted treats unattempted as oldest", () => {
@@ -345,4 +476,47 @@ test("closePayload with a flat session improves nothing", () => {
     queued: [],
   });
   assert.equal(close.improved, null);
+});
+
+/* ── the story gap (#78) ───────────────────────────────────────────────────────────────── */
+//
+// Pure, so no `{ skip }`: this function takes ids and rows and never touches SQLite. The list it
+// walks is `rankCompetencies`' own output, which is what makes the flag agree with what the drill
+// would serve next rather than being a second opinion about the same competencies.
+
+test("with no stories at all the gap is the top-ranked competency", () => {
+  // The honest first prompt on an empty storybank, and the reason this is not special-cased: a
+  // candidate with nothing written down has no material for the thing most likely to come up,
+  // which is exactly what the flag says.
+  const ranked = rankCompetencies([A, B, C]);
+  assert.deepEqual(storyGap({ ranked, coveredIds: [] }), { id: ranked[0].id, label: ranked[0].label });
+});
+
+test("with every competency covered there is no gap", () => {
+  const ranked = rankCompetencies([A, B, C]);
+  assert.equal(storyGap({ ranked, coveredIds: ["a", "b", "c"] }), null);
+});
+
+test("a role with no competencies has no gap, and does not throw", () => {
+  // The edge the page has to survive: a handover that wrote no competencies still renders, and a
+  // title-only story still saves. `find` over an empty list is `undefined`, which must read as
+  // "nothing to flag" rather than as a missing label the page would render blank.
+  assert.equal(storyGap({ ranked: [], coveredIds: [] }), null);
+  assert.equal(storyGap({}), null, "and a caller that passes nothing gets the same answer");
+});
+
+test("the gap skips covered competencies and names the highest-ranked one left", () => {
+  const ranked = rankCompetencies([A, B, C]);
+  const gap = storyGap({ ranked, coveredIds: [ranked[0].id] });
+  assert.deepEqual(gap, { id: ranked[1].id, label: ranked[1].label });
+  assert.notEqual(gap.id, ranked[0].id, "the covered one is skipped rather than merely deprioritised");
+});
+
+test("the gap carries an id and a label and NOTHING else", () => {
+  // The assertion that stops a rank, a readiness or an importance leaking later. Every one of
+  // those is on the row this function reads, and returning the row itself would ship all three to
+  // a page whose whole copy rule is that no number appears on it (SPEC's ladder rule, twice).
+  const ranked = rankCompetencies([A, B]);
+  const gap = storyGap({ ranked, coveredIds: [] });
+  assert.deepEqual(Object.keys(gap).sort(), ["id", "label"]);
 });

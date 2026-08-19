@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:live": "node --test test/live/*.test.js",
     "pack": "node scripts/pack.mjs",
     "gen:brief": "node scripts/gen-brief.js",
     "spike": "node spike/local.js",

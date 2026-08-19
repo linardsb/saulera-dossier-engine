@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Your stories</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/prep/prep.css">
+</head>
+<body>
+
+<!-- A candidate-facing page: the topbar carries the portal's own name and no recruiter
+     navigation, same as brief.html, session.html and debrief.html. -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Interview prep</span>
+  </div>
+</header>
+
+<main class="stories">
+
+  <div class="page-head">
+    <h1>Your stories</h1>
+    <p class="page-sub" id="private-note"></p>
+    <!-- The page's one live region, and the explicit aria-live is not decoration: the delete
+         two-step arms by changing the button's own words IN PLACE (#86 F6), and a text swap on
+         the control a screen reader is sitting on is announced by nothing — this line is what
+         says it. login.html's state lines carry the same role + aria-live pair. -->
+    <p class="save-state" id="stories-state" role="status" aria-live="polite"></p>
+  </div>
+
+  <!-- Shown when the handover has not been written yet. Unlike debrief.html there is no
+       "too early" state to carry: a storybank is most useful BEFORE the interview, so this
+       page is never date-gated and this section says one thing only. -->
+  <section id="unavailable" hidden>
+    <p class="prep-body" id="unavailable-note"></p>
+    <p><a class="btn btn-block" href="/prep/brief">Back to your prep</a></p>
+  </section>
+
+  <section id="storybank" hidden>
+
+    <!-- The forward-looking line: a part of the job no story covers yet. Never a count, never
+         a score. stories.js writes it from the route's `story_gap` and hides it when null. -->
+    <p class="story-gap" id="story-gap" hidden></p>
+
+    <!-- One row per story, each with its own Edit and Delete. stories.js owns every element
+         inside it and every visible string on this page. -->
+    <div id="stories-list"></div>
+
+    <p><button type="button" class="btn btn-block" id="add-story"></button></p>
+
+    <section id="editor" hidden>
+
+      <div class="stories-field">
+        <label class="prep-label" for="title" id="title-label"></label>
+        <!-- The input class carries app.css's control styling; prep.css raises .stories .input
+             to --text-note (16px) for the same reason the textarea below already is: iOS Safari
+             zooms the whole viewport when a focused control computes under 16px.
+             test/prep-content.test.js gates both. -->
+        <input class="input" type="text" id="title" maxlength="120">
+        <p class="prep-caption" id="title-caption"></p>
+      </div>
+
+      <div class="stories-field">
+        <label class="prep-label" for="sketch" id="sketch-label"></label>
+        <!-- THE SHAPE PROMPT IS THE CAPTION BELOW AND NOTHING ELSE. No request fills this box,
+             nothing completes it, nothing rewrites it into STAR. It is the candidate's own
+             words or it is empty. maxlength mirrors SKETCH_MAX in stories.js, which mirrors the
+             route's own cap; the browser stops the paste and the JS guard answers for the rest. -->
+        <textarea class="textarea" id="sketch" rows="8" maxlength="2000"></textarea>
+        <p class="prep-caption" id="sketch-caption"></p>
+      </div>
+
+      <div class="stories-field">
+        <p class="prep-label" id="covers-label"></p>
+        <p class="prep-caption" id="covers-caption"></p>
+        <!-- One checkbox per competency on this role. Empty when the handover wrote none, which
+             is a real state: a title-only story still saves. -->
+        <div id="covers-list"></div>
+      </div>
+
+      <p><button type="button" class="btn btn-primary btn-block" id="save"></button></p>
+      <p><button type="button" class="btn btn-block" id="cancel"></button></p>
+
+    </section>
+
+  </section>
+
+</main>
+
+<footer class="prep-footer">
+  <p><a href="/prep/privacy">What we hold about you, and when it is deleted</a></p>
+</footer>
+
+<!-- A module script, deferred by the platform. The page boots the exported controller so
+     node --test can import the module with no document and drive the same code. -->
+<script type="module">
+  import { initStories } from "/prep/stories.js";
+  initStories();
+</script>
+
+</body>
+</html>

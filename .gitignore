@@ -8,3 +8,6 @@ __pycache__/
 # Generation output. Candidate-derived — a real CV, a real brief, the client's visible slice.
 out/
 brief.json
+
+# Per-run PIV gate record, not a repo artifact.
+.claude/last-gate.json

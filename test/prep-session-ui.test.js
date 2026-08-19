@@ -152,6 +152,7 @@ function bridge({ d1, client, token, urls = [], failBrief = false }) {
 // guard in group 6 is what keeps this mirror honest against the real document.
 const SHELL_IDS = [
   "session-state",
+  "session-debrief-cta",
   "act-prime",
   "prime-blocks",
   "start",
@@ -184,6 +185,7 @@ function shell() {
 
   const refs = {
     stateLine: make("p", "session-state"),
+    debriefCta: make("p", "session-debrief-cta", true),
     actPrime: make("section", "act-prime", true),
     primeBlocks: make("div", "prime-blocks"),
     startButton: make("button", "start"),
@@ -548,6 +550,24 @@ test("a double-clicked send spends one turn, and the button says so while in fli
   assert.equal(visibleYouEntries(s.log).length, 1);
 });
 
+test("the debrief link unhides on the interview day, and not before it", { skip }, async () => {
+  // #81 M3. `session-debrief-cta` was in SHELL_IDS, which only proves the element EXISTS — the
+  // one line that ever unhides it (session.js:253) had nothing asserting it. Deleting that line
+  // left the suite green and the debrief with no way in from this page.
+  for (const [interviewAt, stillHidden] of [[at(7), true], [at(0), false]]) {
+    const d1 = d1Shape(openMigrated());
+    const { token } = await seed(d1, { interviewAt });
+    const s = await boot({ d1, client: fakeClient(), token });
+
+    assert.equal(
+      s.debriefCta.hidden,
+      stillHidden,
+      `with the interview at ${interviewAt} the link should be ${stillHidden ? "hidden" : "offered"}`,
+    );
+    assert.equal(s.controller.state.session.debrief_available, !stillHidden, "the route's flag, not the page's guess");
+  }
+});
+
 /* ── group 5b: day-before mode (#25) ───────────────────────────────────────────────────── */
 
 test("day-before prime: LogisticsRail first, then DayBeforeMode, and no PrimerCard", { skip }, async () => {
@@ -644,9 +664,17 @@ test("day-of gets the day-before shape; two days out does not", { skip }, async 
 function LOCUM_PAYLOAD() {
   const payload = PAYLOAD();
   payload.engagement = "locum";
-  payload.questions.forEach((q, i) => {
-    q.type = ["client", "competency", "screening"][i % 3];
-  });
+  // #79's concern questions keep their type: they are what pairs with the fixture's
+  // LikelyConcerns block, and retyping one makes the whole payload fail assertBrief on the way
+  // out of storage — which arrives here as a blank page rather than as a type problem. The
+  // cycle therefore counts the questions it actually assigns, so all three of the original
+  // groups are still represented however many concern questions the fixture grows.
+  let n = 0;
+  for (const q of payload.questions) {
+    if (q.type === "concern") continue;
+    q.type = ["client", "competency", "screening"][n % 3];
+    n += 1;
+  }
   payload.blocks.push({
     name: "FirstDayPrimer",
     props: {
@@ -682,6 +710,10 @@ test("a locum handover renders the primer and the grouped list, and never enters
   assert.ok(primeText.includes("What this manager tends to ask"), "grouped: client");
   assert.ok(primeText.includes("Expect to be asked about your experience"), "grouped: competency");
   assert.ok(primeText.includes("Have ready"), "grouped: screening");
+  // #79's fourth group. Without it a concern question falls into the competency bucket and
+  // renders under "Expect to be asked about your experience" — a silent mislabelling, which is
+  // the failure registry.js:22-31's rule exists to prevent, arriving through a different door.
+  assert.ok(primeText.includes("Where they may push back"), "grouped: concern");
   assert.ok(primeText.includes(COPY.locumNote), "the honest one-liner renders");
 
   // The perm prime's furniture stays out: no re-priming card, no progress, no resumable note.

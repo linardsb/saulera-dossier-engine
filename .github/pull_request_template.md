@@ -1,0 +1,1 @@
+- [ ] Touched `src/prep/schema.js`? Run `npm run test:live` (or dispatch the live-gate workflow) — the grammar ceiling is invisible to the offline suite, which is how #50 killed every prep Send until #79 under 1,300 green tests.

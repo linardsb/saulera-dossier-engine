@@ -37,7 +37,8 @@
  * this file with no DOM at all.
  */
 
-/** The six #19 emits (#50 added FirstDayPrimer). Retyped rather than imported: `src/` is not
+/** The eight #19 emits (#50 added FirstDayPrimer; #79 added LikelyConcerns and QuestionsToAsk).
+ *  Retyped rather than imported: `src/` is not
  *  served to the browser (Pages' build output is `public/`), so an import of
  *  ../../src/prep/schema.js would 404 at runtime. test/prep-registry.test.js imports BOTH and
  *  asserts they match, which is where the drift is actually caught —
@@ -49,6 +50,8 @@ export const BRIEF_BLOCK_NAMES = [
   "StoryBankCard",
   "LogisticsRail",
   "FirstDayPrimer",
+  "LikelyConcerns",
+  "QuestionsToAsk",
 ];
 
 /** The six the session emits (#23/#24/#25, #50 added LocumQuestions). No schema stands behind
@@ -123,6 +126,22 @@ const COPY = {
   locumClientHead: "What this manager tends to ask",
   locumCompetencyHead: "Expect to be asked about your experience",
   locumScreeningHead: "Have ready",
+  locumConcernHead: "Where they may push back",
+
+  concernsHead: "What they may push back on",
+  concernsEvidence: "In your own words, from your CV",
+  // The hardest sentence on this page to get right, and therefore one a person wrote and
+  // reviewed once rather than one a model writes fresh per candidate (:67-69). A blank quote is
+  // the ONLY way this block can say "nothing answers this" — there is no prose counter prop for
+  // a model to fill — so this is the whole of what a candidate reads in that case.
+  concernsNoMaterial:
+    "Nothing in what you gave us answers this one. That is worth knowing before you go in — " +
+    "the honest answer is usually better received than a stretched one.",
+
+  askHead: "Questions worth asking them",
+  askNote:
+    "Raw material, not a script. Pick the one or two you actually want the answer to, and ask " +
+    "them in your own words.",
 };
 
 /* ── shared helpers ────────────────────────────────────────────────────────────────────── */
@@ -405,6 +424,56 @@ function FirstDayPrimer(doc, props, ctx, id) {
   return node;
 }
 
+/**
+ * The objections this interviewer is likeliest to raise (#79), each with the line of the
+ * candidate's OWN CV that answers it — or the honest sentence saying nothing does.
+ *
+ * NO MARK ON A CONCERN WITH NO MATERIAL. An "Unverified" pill here would read as the CONCERN
+ * being doubtful, when the concern is real and it is the counter that is missing; that is the
+ * opposite of what the page has to say. The sentence carries it instead.
+ *
+ * `failed_evidence_quote` is never printed — provenanceNode:195-202's rule, and it never
+ * arrives either (projection.js blanks it). A demoted quote and an honest gap render
+ * identically to a candidate, which is correct: in both cases their material holds nothing we
+ * could stand up, and the difference is a diagnostic for us rather than news for them.
+ */
+function LikelyConcerns(doc, props, ctx, id) {
+  const { node, body } = section(doc, id, COPY.concernsHead);
+  body.appendChild(el(doc, "p", "prep-lede", props.intro));
+
+  for (const item of Array.isArray(props.concerns) ? props.concerns : []) {
+    const entry = el(doc, "div", "claim prep-entry");
+    const head = el(doc, "div", "claim-head");
+    head.appendChild(el(doc, "p", "claim-text", item.concern));
+    entry.appendChild(head);
+
+    const quote = text(item.evidence_quote).trim();
+    if (quote) {
+      const wrap = el(doc, "div", "prep-provenance");
+      wrap.appendChild(el(doc, "p", "claim-source", `“${displayQuote(item.evidence_quote)}”`));
+      wrap.appendChild(el(doc, "p", "prep-caption", COPY.concernsEvidence));
+      entry.appendChild(wrap);
+    } else {
+      entry.appendChild(el(doc, "p", "prep-caption", COPY.concernsNoMaterial));
+    }
+
+    body.appendChild(entry);
+  }
+
+  return node;
+}
+
+/** Questions the candidate could ask, offered as raw material rather than a script (#79). No
+ *  provenance: a question asserts nothing about the client, so there is nothing to stand up.
+ *  schema.js's QuestionsToAsk comment carries the argument. */
+function QuestionsToAsk(doc, props, ctx, id) {
+  const { node, body } = section(doc, id, COPY.askHead);
+  body.appendChild(el(doc, "p", "prep-lede", props.intro));
+  body.appendChild(lines(doc, props.questions, "prep-list"));
+  body.appendChild(el(doc, "p", "prep-caption", COPY.askNote));
+  return node;
+}
+
 /* ── the six the session emits ─────────────────────────────────────────────────────────── */
 
 /**
@@ -561,6 +630,7 @@ function LocumQuestions(doc, props, ctx, id) {
     [COPY.locumClientHead, props.client],
     [COPY.locumCompetencyHead, props.competency],
     [COPY.locumScreeningHead, props.screening],
+    [COPY.locumConcernHead, props.concern],
   ];
   for (const [label, items] of groups) {
     if (!Array.isArray(items) || !items.length) continue;
@@ -574,8 +644,8 @@ function LocumQuestions(doc, props, ctx, id) {
 /* ── the registry and the walker ───────────────────────────────────────────────────────── */
 
 /**
- * The closed vocabulary, as constructors. Twelve keys: decision 22's ten names, plus #50's
- * FirstDayPrimer and LocumQuestions.
+ * The closed vocabulary, as constructors. Fourteen keys: decision 22's ten names, plus #50's
+ * FirstDayPrimer and LocumQuestions, plus #79's LikelyConcerns and QuestionsToAsk.
  *
  * `Object.freeze` is a statement rather than a security boundary. What actually enforces
  * architecture §3 is the ABSENCE of a constructor that renders a finished answer or a score —
@@ -595,6 +665,8 @@ export const REGISTRY = Object.freeze({
   DayBeforeMode,
   FirstDayPrimer,
   LocumQuestions,
+  LikelyConcerns,
+  QuestionsToAsk,
 });
 
 /**
@@ -681,7 +753,7 @@ export function renderBlocks(payload, mount, ctx = {}) {
         continue;
       }
 
-      // Eleven of the twelve constructors take no children, and `assertBrief` rejects them there — but
+      // Thirteen of the fourteen constructors take no children, and `assertBrief` rejects them there — but
       // only on the brief path. The session names (#23/#24/#25) have no schema behind them yet,
       // and a child that vanishes with no count, no warning and nothing in `skipped` is the exact
       // silence the rule above exists to prevent, arriving through a different door.

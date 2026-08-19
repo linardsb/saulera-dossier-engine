@@ -281,15 +281,99 @@ test("#50: question types ride brief_json; the question table stays type-free", 
   // only feeds the drill, which a locum candidate never enters.
   const db = openMigrated();
   const payload = PAYLOAD();
+  // #79's concern questions are left alone: they are what pairs with the fixture's
+  // LikelyConcerns block, and retyping them would make this a test of the pairing rule
+  // throwing rather than of a type surviving the round trip.
   payload.questions.forEach((q) => {
-    q.type = "client";
+    if (q.type !== "concern") q.type = "client";
   });
   await send(d1Shape(db), sendBody({ payload }));
 
   const [role] = rowsOf(db, "candidate_role");
-  assert.ok(JSON.parse(role.brief_json).questions.every((q) => q.type === "client"));
+  const stored = JSON.parse(role.brief_json).questions;
+  assert.ok(stored.some((q) => q.type === "concern"), "#79's tag rides brief_json too");
+  assert.ok(stored.filter((q) => q.type !== "concern").every((q) => q.type === "client"));
   const columns = db.prepare("PRAGMA table_info(question)").all().map((c) => c.name);
   assert.ok(!columns.includes("type"), "no 0008 rode in with this ticket");
+});
+
+test("#79: a demoted concern quote does not block a Send — the gate is competency-only", { skip }, async () => {
+  // D3, and the sharp edge of demote-don't-drop. A concern whose quote we could not stand up
+  // degrades to a BLANK quote, and a blank quote is SPEC's normal, expected state: "the material
+  // holds no genuine counter, say so plainly." Blocking here would make the honest outcome look
+  // like a fault, in front of a recruiter who can do nothing about it.
+  //
+  // PAYLOAD() is used rather than the shipped fixture for the reason recorded at :53-60: the
+  // fixture carries a deliberately unverified competency and can never pass this route, so a
+  // red test would read as this decision being wrong rather than as the gate doing its job.
+  const db = openMigrated();
+  const payload = PAYLOAD();
+  const concerns = payload.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+  concerns[0].evidence_quote = "Twelve years running an IV therapy service";
+
+  const { response } = await send(d1Shape(db), sendBody({ payload }));
+  assert.equal(response.status, 201, "every competency verified, so the send stands");
+
+  const [role] = rowsOf(db, "candidate_role");
+  const stored = JSON.parse(role.brief_json).blocks.find((b) => b.name === "LikelyConcerns");
+  assert.equal(stored.props.concerns[0].evidence_quote, "", "blanked on the way through");
+  assert.equal(
+    stored.props.concerns[0].failed_evidence_quote,
+    "Twelve years running an IV therapy service",
+    "and the diagnostic is kept in the recruiter's artefact, where it is of use",
+  );
+});
+
+test("#79: a concern quote that IS in the CV survives the send — the cv haystack is wired", { skip }, async () => {
+  // THE OTHER HALF, and the one no test held. The case above overwrites a good quote with a bad
+  // one, and the fixture's other concern is the empty-quote case — so every concern on this path
+  // was EXPECTED to blank. Remove `cv` from `verifyBrief(struck, { brief, cv, fieldKeys })` in
+  // functions/api/prep/send.js and nothing turns red: `verifyBrief` fails CLOSED without a
+  // haystack, so every evidenced concern would silently blank on the way to the candidate and
+  // the suite would stay green.
+  //
+  // The two haystacks are byte-identical today — both routes read the frozen `state.sent.cv`
+  // through the same `cleanInput` — so this pins the wiring rather than a live bug.
+  const db = openMigrated();
+  const payload = PAYLOAD();
+  const concerns = payload.blocks.find((b) => b.name === "LikelyConcerns").props.concerns;
+
+  // A VERBATIM span of the fixture CV, asserted to be one rather than assumed: a fixture edit
+  // that broke the quote would otherwise turn this into a test of the demotion path again.
+  const verbatim = "Ward link nurse for tissue viability from 2021";
+  assert.ok(CV.includes(verbatim), "the quote has to be literally in the CV, or this proves nothing");
+  concerns[0].evidence_quote = verbatim;
+
+  const { response } = await send(d1Shape(db), sendBody({ payload }));
+  assert.equal(response.status, 201);
+
+  const [role] = rowsOf(db, "candidate_role");
+  const stored = JSON.parse(role.brief_json).blocks.find((b) => b.name === "LikelyConcerns");
+  assert.equal(stored.props.concerns[0].evidence_quote, verbatim, "the sourced quote was kept");
+  assert.equal(
+    "failed_evidence_quote" in stored.props.concerns[0],
+    false,
+    "and nothing was demoted, which is what a missing cv haystack would look like",
+  );
+});
+
+test("#79: concern questions reach the queue as ordinary rows, with no type column", { skip }, async () => {
+  // AC2's "no new loop", measured at the only place it could have needed one. saveHandover
+  // writes (id, competency_id, text, axis, difficulty) — `type` is not a column and does not
+  // become one — so nextQuestion serves a concern counter as a core question and the drill
+  // learns nothing about the word.
+  const db = openMigrated();
+  await send(d1Shape(db), sendBody());
+
+  const columns = db.prepare("PRAGMA table_info(question)").all().map((c) => c.name);
+  assert.ok(!columns.includes("type"), "no migration rode in with #79 either");
+
+  const payload = PAYLOAD();
+  const concern = payload.questions.find((q) => q.type === "concern");
+  const row = rowsOf(db, "question").find((r) => r.text === concern.text);
+  assert.ok(row, "the concern question was written like any other");
+  assert.equal(row.axis, null, "axis NULL is what makes it a CORE row to targeting");
+  assert.equal(row.competency_id.endsWith(concern.competency_id), true, "under its own competency");
 });
 
 test("#50: a forged question type is refused at the door as a 400", { skip }, async () => {
@@ -1072,9 +1156,30 @@ test("AC #6: send -> click the link -> GET /prep/api/brief returns the projectio
   // THE ASSERTION THE ISSUE NAMED, measured on the actual bytes a candidate's browser receives.
   assert.ok(!wire.includes("failed_quote"), "failed_quote reached the candidate");
   assert.ok(!wire.includes("importance"), "importance reached the candidate");
-  assert.ok(!wire.includes("questions"), "the question bank reached the candidate");
+  // #79's QuestionsToAsk block carries a `questions` prop of its own — questions the candidate
+  // ASKS, which this endpoint does serve — so a bare scan for the word over the whole wire went
+  // off on legitimate output and had to change. It was NARROWED rather than replaced at first,
+  // and the two nets catch different things, so both are kept:
+  //
+  //  · by TEXT, which catches a passthrough under a renamed key, and
+  //  · by WORD, over the wire with that one block cut out — which catches a NESTED key called
+  //    `questions` (a `props.questions = payload.questions.map(...)` shipping every question's
+  //    difficulty score would pass the text scan intact) and the bank's ids, axes and
+  //    competency_ids, none of which the text scan looks at.
+  for (const q of PAYLOAD().questions) {
+    assert.ok(!wire.includes(q.text), `the question bank reached the candidate: ${q.text.slice(0, 40)}…`);
+  }
 
   const projection = JSON.parse(wire);
+  assert.ok(!("questions" in projection), "and no top-level bank key at all");
+  const withoutAsks = {
+    ...projection,
+    blocks: projection.blocks.filter((b) => b.name !== "QuestionsToAsk"),
+  };
+  assert.ok(
+    !JSON.stringify(withoutAsks).includes("questions"),
+    "the bank travelled under some key outside the one block entitled to the word",
+  );
   assert.ok(projection.blocks.length, "and there is still a brief to render");
   assert.equal(projection.competencies.length, PAYLOAD().competencies.length);
   assert.ok(projection.competencies.every((c) => c.verified === true), "all sourced against this brief");

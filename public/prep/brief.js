@@ -43,6 +43,10 @@ const SOURCE = "/prep/api/brief";
 const state = document.getElementById("brief-state");
 const mount = document.getElementById("blocks");
 const roleTitle = document.getElementById("role-title");
+// A LITERAL lookup like the three above, not a `$` helper: test/prep-content.test.js derives this
+// page's reached ids from literal getElementById calls, and a helper here would leave that gate
+// parsing nothing while still passing.
+const debriefCta = document.getElementById("debrief-cta");
 
 /** The state line, in app.js's grammar: `.is-shown` to reveal, `.is-error` for a failure. */
 function showState(message, isError) {
@@ -87,6 +91,11 @@ fetch(SOURCE, { headers: { accept: "application/json" } })
     // model output. registry.js holds the same rule for everything below it.
     const title = String(payload.role_title || "").trim();
     if (title) roleTitle.textContent = title;
+
+    // The debrief link (#77), offered only once the interview day has arrived. The flag is the
+    // route's — derived from the same `interview_at` the debrief route gates on — so the link and
+    // the page it opens can never disagree about whether there is anything to write down.
+    if (payload.debrief_available === true) debriefCta.hidden = false;
 
     const { rendered } = renderBlocks(payload, mount);
 

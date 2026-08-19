@@ -657,14 +657,15 @@ test("the digest names every candidate and item, with each one's own tense", asy
   assert.ok(body.text.includes("ran out 2026-07-14"), "and red reads as red");
 });
 
-test("WITH NO LINK THE DIGEST IS #70'S MESSAGE, UNCHANGED", async () => {
+test("WITH NO LINK THE DIGEST GROWS NO URL, NO ANCHOR AND NO PORTAL PATH", async () => {
   const { calls } = await withFetch(ok, () => sendExpiryDigestEmail(ENV, DIGEST));
   const body = bodyOf(calls);
 
   // #71 gave this message an OPTIONAL link. Optional is the whole point: the caller's two
   // configuration guards are independent, so a deployment carrying RECRUITER_EMAIL and no
-  // PREP_BASE_URL must keep receiving exactly the digest it receives today. This is that
-  // guarantee, and it is what stops the link becoming a precondition by accident.
+  // PREP_BASE_URL must not start growing link furniture. That absence is the half this test can
+  // hold (#88: it was named "#70's message, unchanged" while pinning none of #70's bytes), and
+  // it is what stops the link becoming a precondition by accident.
   assert.doesNotMatch(body.text, /https?:\/\//, "no URL in the text half");
   assert.doesNotMatch(body.html, /https?:\/\//, "nor in the html half");
   assert.ok(!body.html.includes("<a "), "and no anchor at all");

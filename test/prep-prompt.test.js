@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   PREP_SYSTEM,
   buildPrepMessages,
+  concernsTaskBlock,
   prepInputsBlock,
   visibleNoteBlock,
 } from "../src/prep/prompt.js";
@@ -176,22 +177,114 @@ test("the cached prefix is byte-identical between a locum and a perm call for th
   assert.notEqual(locum[1].text, perm[1].text, "the branch lives in the second block");
 });
 
-test("the locum branch asks for the primer and the slim mix; every other value does not", () => {
+test("the locum branch asks for the slim mix; every other value does not", () => {
   const locum = prepInputsBlock({ ...INPUTS, engagement: "locum" });
   assert.match(locum, /locum booking/);
-  assert.match(locum, /FirstDayPrimer/);
   assert.match(locum, /"client"/);
   assert.match(locum, /"screening"/);
   assert.match(locum, /Never generic clinical coaching/);
-  assert.match(locum, /omit the\s+block entirely/, "an empty primer is worse than an absent one");
 
   // #46 D2: "unknown" behaves as perm. All three non-locum values get the one-line rule.
   for (const engagement of ["permanent", "unknown", undefined]) {
     const text = prepInputsBlock({ ...INPUTS, engagement });
     assert.doesNotMatch(text, /This is a locum booking/, `${engagement} must not take the locum branch`);
-    assert.doesNotMatch(text, /FirstDayPrimer block from/, `${engagement} must not ask for the primer`);
     assert.match(text, /every question type "competency"/);
-    assert.match(text, /do not emit a\s+FirstDayPrimer/);
+  }
+});
+
+// THE RULE THAT WOULD HAVE CAUGHT #79's OWN BUG, generalised past the one block that got it.
+// Naming a block in a prompt is asking a decoder for a variant, and the first call's `anyOf`
+// carries five of the eight names. FirstDayPrimer got this assertion when it moved; LikelyConcerns
+// and QuestionsToAsk kept their PREP_SYSTEM rules and did not, so for a whole PR the first call was
+// told to emit two blocks it cannot express. Both calls are checked, and the second call is
+// checked too: CONCERNS_SCHEMA carries no `name` at all — `foldConcerns` writes all three names in
+// code — so naming a block there is the same category error one call further on.
+test("no call names a block its own schema cannot emit", () => {
+  const MOVED = /FirstDayPrimer|LikelyConcerns|QuestionsToAsk/;
+  const competencies = [{ id: "comp-x", label: "Working alone" }];
+
+  assert.doesNotMatch(PREP_SYSTEM, MOVED, "the cached prefix is read by BOTH calls");
+
+  for (const engagement of ["locum", "permanent", "unknown", undefined]) {
+    assert.doesNotMatch(
+      prepInputsBlock({ ...INPUTS, engagement }),
+      MOVED,
+      `the first call must not name a block it cannot emit (${engagement})`,
+    );
+    assert.doesNotMatch(
+      concernsTaskBlock(competencies, engagement),
+      MOVED,
+      `the second call returns bare fields; the names are minted in code (${engagement})`,
+    );
+  }
+});
+
+// The counter's `type` and `difficulty` are minted by foldConcerns and are on NEITHER schema, so
+// no call can return them. Asking for either buys tokens for a field that would be rejected — and
+// it was the perm branch's "except the concern counters" carve-out that made assertBrief's
+// question rule (schema.js, `asked`) unable to tell a real question from a counter.
+test("neither call is asked for a question type or difficulty it cannot return", () => {
+  const competencies = [{ id: "comp-x", label: "Working alone" }];
+  for (const engagement of ["locum", "permanent", "unknown", undefined]) {
+    for (const text of [
+      prepInputsBlock({ ...INPUTS, engagement }),
+      concernsTaskBlock(competencies, engagement),
+    ]) {
+      assert.doesNotMatch(text, /"concern"/, `no call mints a concern type (${engagement})`);
+      assert.doesNotMatch(text, /probing/, `no call sets a counter's difficulty (${engagement})`);
+    }
+  }
+});
+
+test("the SECOND call's task carries the primer instruction, and only for a locum", () => {
+  // Where the locum branch went. Still per-candidate and still after the cache breakpoint —
+  // `prepInputsBlock` composes both — so moving it changed which call asks, not what is cached.
+  const competencies = [{ id: "comp-x", label: "Working alone" }];
+
+  const locum = concernsTaskBlock(competencies, "locum");
+  assert.match(locum, /first_day_items from the client knowledge/);
+  assert.match(locum, /names the field it came from/, "provenance survived the move");
+  assert.match(locum, /EMPTY list/, "an empty block is still worse than an absent one");
+
+  for (const engagement of ["permanent", "unknown", undefined]) {
+    const text = concernsTaskBlock(competencies, engagement);
+    assert.match(text, /first_day_items is an EMPTY list/, `${engagement} asks for no primer`);
+    assert.doesNotMatch(text, /scanner fleet/, `${engagement} must not take the locum branch`);
+  }
+
+  // Both branches still carry the concerns work, which is the point of the call.
+  for (const engagement of ["locum", "permanent"]) {
+    assert.match(concernsTaskBlock(competencies, engagement), /EMPTY evidence_quote/);
+    assert.match(concernsTaskBlock(competencies, engagement), /comp-x/, "the ids are handed back in");
+  }
+});
+
+// Where PREP_SYSTEM's rules 7 and 8 went. Asserted as properties, not prose — the copy will be
+// tuned, but a call that is not told to derive concerns from the CV/brief GAP, or not told the
+// counter shares the concern's competency, produces something assertBrief then rejects for it.
+test("the SECOND call's task carries the two rules that left PREP_SYSTEM", () => {
+  const competencies = [{ id: "comp-x", label: "Working alone" }];
+
+  for (const engagement of ["locum", "permanent", "unknown", undefined]) {
+    const text = concernsTaskBlock(competencies, engagement);
+
+    // Rule 7: the objection, its source, its framing, and its evidence.
+    assert.match(text, /\bconcerns\b/, "the field, since the block name is minted in code");
+    assert.match(text, /GAP between the candidate's CV and the client brief/);
+    assert.match(text, /about the record, never about the person/);
+    assert.match(text, /VERBATIM span of THEIR CV/);
+
+    // The pairing assertBrief enforces. Without this the model may answer with concerns and no
+    // counters, which is F2's degrade path rather than a brief.
+    assert.match(text, /concern_questions/);
+    assert.match(text, /one question per concern/i);
+    assert.match(text, /OWN competency/i, "the counter drills the concern's own competency");
+
+    // Rule 8, including the two prohibitions that make it safe rather than merely useful.
+    assert.match(text, /questions_to_ask/);
+    assert.match(text, /never a script/);
+    assert.match(text, /answer is already in the brief/);
+    assert.match(text, /reveal what the\s+agency knows privately/);
   }
 });
 

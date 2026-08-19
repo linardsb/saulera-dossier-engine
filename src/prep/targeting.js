@@ -19,9 +19,28 @@ import { replayProgress, isSuccess, stageNumber } from "./ladder.js";
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Number(n) || 0));
 
-/** Readiness in [0, 1]: stage carries most of it, the rate refines within a stage. */
-export function readiness({ stage, success_rate }) {
-  return (stageNumber(stage) + clamp(success_rate, 0, 1)) / 5;
+/**
+ * How far a shaky competency is pushed back down the ladder: one rung of readiness's own
+ * five-point denominator (#77). SPEC Amendment 1 — "targeting treats a shaky competency as less
+ * ready" — and the unit is chosen so the effect is legible rather than tuned: a competency the
+ * candidate says went badly ranks as though it were a stage lower, which is what they just told
+ * us. Subtractive and clamped at 0, not multiplicative: at stage 0 there is nothing to multiply.
+ *
+ * The effect is on the QUEUE only. No number derived from it reaches a response — the routes build
+ * their competency literals by hand, and `shaky` is not one of the fields they name.
+ */
+export const SHAKY_DAMPEN = 0.2;
+
+/**
+ * Readiness in [0, 1]: stage carries most of it, the rate refines within a stage.
+ *
+ * `shaky` is the candidate's own tick from their debrief, decorated onto the row by `drillState`
+ * — never a column on `competency`, whose two mutable columns are recompute-then-write caches of
+ * the attempt log (ladder.js's invariant) and this is not derivable from that log.
+ */
+export function readiness({ stage, success_rate, shaky }) {
+  const raw = (stageNumber(stage) + clamp(success_rate, 0, 1)) / 5;
+  return shaky ? Math.max(0, raw - SHAKY_DAMPEN) : raw;
 }
 
 /**
@@ -43,6 +62,15 @@ export function rankCompetencies(competencies) {
  * until interview + 14 days precisely for second stages, so post-interview drilling is a
  * real state, not an error; a negative answer lands in the ≤ 3-day bucket below.
  * `toUtcDate` is the one reading of a SQLite stamp (dates.js's rule) — never a second one.
+ *
+ * AN UNPARSEABLE STAMP RETURNS 0, WHICH FAILS OPEN AT THE DEBRIEF (#84 L7): the debrief route
+ * reads `<= 0` as "the interview day has arrived", so garbage here would open a post-interview
+ * page before the interview — where every sibling in dates.js fails closed by explicit comment.
+ * It stays because no reachable input hits it: `invite.interview_at` is NOT NULL with a
+ * `datetime(...) IS NOT NULL` CHECK and every writer goes through `toSqliteUtc`, so the branch
+ * exists only for a caller this module cannot see. A closed-failing sentinel would be a second
+ * return convention for a state the schema already forbids; the CHECK is the fix, and
+ * test/prep-targeting.test.js pins this reading so a change to it is a decision, not a drift.
  */
 export function daysToInterview(interviewAt, now = new Date()) {
   const date = toUtcDate(interviewAt);
@@ -149,7 +177,15 @@ export function nextQuestion({ questions, attempts }) {
     .sort((a, b) => axisRank[a.axis] - axisRank[b.axis] || byDifficultyThenId(a, b))[0];
   if (variant) return { question: variant };
 
-  const stored = questions.filter((q) => q.axis != null);
+  /* MINTED variants only — `variant_of` is what makes a row one of ours. The cap exists to bound
+     what we SPEND on a competency, and a question the candidate was really asked cost nothing:
+     `insertAskedQuestion` (store.js:879) writes `axis = 'lateral'` with `variant_of` NULL so the
+     row is served at step 2, and counting it here would let nine questions from one debrief stop
+     that competency ever minting again. The competency they tick shaky is the one they list most
+     questions under and the one SHAKY_DAMPEN puts first — so the un-fixed version starves exactly
+     the competency the debrief exists to work on. Every minted row has a non-null `variant_of`
+     (`insertVariant` requires it, store.js:638), so this excludes nothing it should count. */
+  const stored = questions.filter((q) => q.axis != null && q.variant_of != null);
   if (stored.length >= MAX_VARIANTS_PER_COMPETENCY) {
     return { question: leastRecentlyAttempted(questions, attempts) };
   }
@@ -298,8 +334,10 @@ export function confidenceQuestion({ ranked, questionsBy, attemptsBy }) {
  * rules out helper modules under functions/, and the two Functions repeating this walk is
  * how the two would drift — so it lives here, pure and tested.
  *
- * Takes the store's rows verbatim; returns:
- *   ranked      the full ranked list (with last_attempt_at joined on)
+ * Takes the store's rows verbatim. `shakyIds` (#77) is the candidate's own debrief ticks, optional
+ * and empty for every caller that has none — a competency in that set ranks as though it were a
+ * stage lower (SHAKY_DAMPEN). Returns:
+ *   ranked      the full ranked list (with last_attempt_at and shaky joined on)
  *   open        the eligible slice of it, in rank order
  *   target      open[0] or null
  *   demand      nextQuestion() for the target — {question} or {mint}
@@ -307,7 +345,7 @@ export function confidenceQuestion({ ranked, questionsBy, attemptsBy }) {
  *   sessions    sessionsOf(attempts)
  *   questionsBy / attemptsBy   Maps keyed by competency id
  */
-export function drillState({ competencies, questions, attempts, interviewAt, now = new Date() }) {
+export function drillState({ competencies, questions, attempts, interviewAt, now = new Date(), shakyIds = [] }) {
   const questionsBy = new Map();
   for (const q of questions) {
     if (!questionsBy.has(q.competency_id)) questionsBy.set(q.competency_id, []);
@@ -321,8 +359,15 @@ export function drillState({ competencies, questions, attempts, interviewAt, now
     if (a.mode !== "revealed") lastNonRevealed.set(a.competency_id, a.created_at);
   }
 
+  // One decoration pass, not two: `shaky` rides alongside `last_attempt_at` because both are
+  // per-row facts the store rows do not carry, and `rankCompetencies` reads the result once.
+  const shaky = new Set(shakyIds);
   const ranked = rankCompetencies(
-    competencies.map((c) => ({ ...c, last_attempt_at: lastNonRevealed.get(c.id) ?? null })),
+    competencies.map((c) => ({
+      ...c,
+      shaky: shaky.has(c.id),
+      last_attempt_at: lastNonRevealed.get(c.id) ?? null,
+    })),
   );
   const days = daysToInterview(interviewAt, now);
   const open = eligible(ranked, { daysToInterview: days, now });
@@ -340,4 +385,55 @@ export function drillState({ competencies, questions, attempts, interviewAt, now
   }
 
   return { ranked, open, target, demand, queued, sessions: sessionsOf(attempts), questionsBy, attemptsBy };
+}
+
+/**
+ * SPEC Amendment 1: "targeting may flag a top-ranked competency no story covers." (#78)
+ *
+ * The highest-ranked competency with NO story mapped to it, or null. Rank order is
+ * `rankCompetencies`' own — `importance × (1 − readiness)` — which is what makes the flag
+ * FORWARD-LOOKING ("this matters and you have no raw material for it") rather than a gap score.
+ *
+ * IT IS RANK ORDER AND DELIBERATELY NOT THE DRILL QUEUE, which is a real difference worth being
+ * exact about because the two are one function apart. `drillState` serves `eligible(ranked, …)[0]`,
+ * and `eligible` keeps only the top half within three days of the interview and drops anything
+ * inside its cooldown — so the competency drilled NEXT is often not `ranked[0]`. This function
+ * ignores all of that on purpose: SPEC Amendment 1 says "a TOP-RANKED competency no story covers",
+ * and "you have nothing to say about the most important part of this job" does not stop being true
+ * because that competency was practised yesterday. A gap that went quiet during a cooldown would
+ * hide itself for exactly the two days before the interview when there is still time to act.
+ *
+ * The caller decorates `shaky` before ranking, the way `drillState` does. That is not about the
+ * queue: a shaky tick lowers `readiness`, which changes the RANK itself, so an undecorated list
+ * ranks a competency the candidate has just said went badly as though it had not.
+ *
+ * NOTHING NUMERIC LEAVES: `{id, label}`, never a rank, a position, a count of uncovered
+ * competencies, or a readiness. That is `closePayload`'s `asLabel` rule (:273) and it is load-
+ * bearing twice over — SPEC's ladder rule says show movement and not a rank, and a "3 of 5
+ * covered" is a score of the candidate's own preparation dressed as progress. The page writes the
+ * sentence; this returns the subject of it.
+ *
+ * `coveredIds` is the set of competency ids with at least one story behind them — `story_competency`
+ * rows, deduped by the caller AND filtered by it to stories that actually have a sketch.
+ *
+ * WHY THE FILTERING IS THE CALLER'S AND NOT THIS FUNCTION'S: this takes ids, not rows, so it has
+ * no sketch to test and adding one would drag the candidate's own words into the targeting module
+ * — the one place in this codebase they most certainly do not belong. The rule it depends on is
+ * stated at the only caller (functions/prep/api/stories.js): a tick without a sketch is not cover.
+ * Passing raw `story_competency` rows here is the mistake that hands back "covered" for a
+ * competency the candidate has written nothing about, and this paragraph is the warning.
+ *
+ * Three boundaries worth naming because they look like bugs and are not:
+ *   · with NO stories at all this returns the top-ranked competency, which is correct — it is the
+ *     honest first prompt on an empty storybank, and the page's copy reads the same either way.
+ *   · with every competency covered — or with a role that has none at all — it returns null.
+ *   · a story that is all ticks and no words covers NOTHING, so the flag stays up. That is the
+ *     copy being true rather than the function being strict: "nothing in your stories covers X"
+ *     has to mean a story, and one story titled "x" with every box ticked used to silence this
+ *     for a whole role, permanently.
+ */
+export function storyGap({ ranked, coveredIds = [] } = {}) {
+  const covered = new Set(coveredIds);
+  const found = (ranked ?? []).find((c) => !covered.has(c.id));
+  return found ? { id: found.id, label: found.label } : null;
 }

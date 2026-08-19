@@ -13,6 +13,80 @@ hedged, and it keeps the feature out of assessment territory (no scoring that co
 decision, no employer-visible transcript). If that ever changes, this spec needs a fairness and
 transparency pass before shipping.
 
+## Amendment 1 — 16 Aug 2026: mechanisms adopted from a review of `noamseg/interview-coach-skill`
+
+Reviewed that skill against this spec. Its drill core is a looser version of the answer loop below
+and is not adopted. Five mechanisms from the lifecycle *around* its drill loop are, each re-shaped to
+survive Decision 2 (private self-prep, no consent surface) and the two rules that never loosen.
+Where this amendment says more than the body, the amendment wins.
+
+### Storybank
+
+A small set of the candidate's real stories, each mapped to several competencies. The
+[Memorisation](#memorisation) section already argues this beats a scripted answer per question; it
+becomes state instead of advice. The candidate writes each story's title and sketch in their own
+words. The tool may prompt for a story's *shape* — situation, action, what changed — but never
+drafts its content; that is the first unloosenable rule wearing a different coat. Once stories
+exist: nudges may ask "which of your stories fits here?", and targeting may flag a top-ranked
+competency no story covers.
+
+State: `story (id, candidate_role_id, title, sketch, created_at)` and
+`story_competency (story_id, competency_id)`. Purged with everything else.
+
+### Likely concerns
+
+From the gap between the candidate's own material and the brief, name the objections an interviewer
+is most likely to raise — first post of this kind, unfamiliar kit, a gap in the record — and drill
+the counters as ordinary questions through the existing loop. Same discipline as ethos: if the
+material holds no genuine counter, say so plainly. That is structural rather than instructed: a
+concern's counter is a verbatim span of the candidate's own CV, checked literally, or it is the
+empty string — there is no prose field a fabricated answer could live in. Concerns draw only on the
+candidate's material and the shareable brief, never on unshared parts of the recruiter's note — a
+concern phrased from text the candidate cannot see leaks that text.
+
+### Questions to ask the interviewer
+
+The brief page gains a short block of questions the candidate could ask, generated with the brief
+from the same shareable inputs. Offered as raw material to make their own, not a script — a
+memorised question sounds memorised too.
+
+### Debrief — private, same-day
+
+After the real interview, a short capture on the portal: what was asked, what felt shaky, one thing
+to fix. It feeds the candidate's own next round — targeting treats a shaky competency as less ready;
+a question they faced cold becomes a variant to drill. **It never crosses the wall.** Decision 2
+stands: no consent surface, nothing candidate-entered reaches the recruiter. If the agency wants
+per-client question patterns, the recruiter captures them from their own post-interview call into
+the client-knowledge note — the recruiter-side door that already exists — and the *next* candidate's
+prep improves through that door, not this one.
+
+State: `debrief (id, candidate_role_id, asked_json, fix_text, created_at)` and
+`debrief_competency (debrief_id, competency_id)` — candidate-owned, purged with the rest. Shaky
+competencies are ticked from the role's own list rather than typed, so they are a join table and
+not a `shaky_text` column: targeting has to read them deterministically, with no model call, to
+treat a shaky competency as less ready. Same shape as the storybank's `story_competency` above.
+`asked_json` holds each question they were asked with the competency they placed it under —
+`[{text, competency_id}]`, a placement of `null` meaning still unplaced — because the placement is
+state the candidate set and re-editing it has to round-trip.
+
+### Prescriptive ending and the day-before page
+
+Every session ends by naming the next step — "next time: delegating under pressure, come back
+Tuesday" — derived from targeting and the [Spacing](#spacing) table, never a menu. The existing
+day-before reminder email links a one-page walk-in view assembled from what already exists: story
+titles, the rote-facts list from [Memorisation](#memorisation), their questions to ask. Nothing new
+is generated for it.
+
+### Explicitly not adopted
+
+- **Visible multi-dimension scores and configurable directness levels** — conflict with the ladder
+  rule: show movement, not a rank.
+- **Resume, LinkedIn, pitch, salary and negotiation coaching** — the agency's side of the desk; a
+  tool the agency provides cannot also coach the candidate against the agency's negotiation.
+- **Transcript upload and analysis** — heavy, and imports a recording-consent problem. Revisit only
+  with a concrete ask.
+- **File-based coaching state** — D1 already holds richer state.
+
 ## What loosened, and what did not
 
 The mechanisms are kept; the enforcement is not. Each row is a rule that works for a committed
