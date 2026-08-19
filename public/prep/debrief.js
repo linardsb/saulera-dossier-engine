@@ -214,14 +214,17 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
   /**
    * Re-key an index-keyed placement map from one reading of the box to the next.
    *
-   * The alignment is common-prefix, common-suffix, and the middle rows paired in order. Between
-   * two input events an edit is confined to one region of the box, so the prefix and suffix
-   * isolate it exactly; the pairing is what makes each case come out right:
+   * The alignment is common-prefix, common-suffix, and the middle carried only when it is one
+   * row on both sides — the typo fix, the only middle whose pairing is certain. A wider middle
+   * (a select-all paste, a reorder) offers no evidence which old line became which new one, so
+   * its picks are dropped rather than guessed: an unplaced picker is visible on screen, a pick
+   * carried onto the wrong question is not.
    *
    *   · delete a sibling — the survivors are all prefix or suffix, so their picks shift with them
-   *   · edit a line in place — same middle count both sides, so the row keeps its pick
+   *   · edit a line in place — a one-row middle both sides, so the row keeps its pick
    *   · delete a line — its middle row pairs with nothing, so the pick goes with the line
    *   · retype a deleted line — a fresh row, arriving unplaced, because its pick already went
+   *   · paste over several lines — every replaced row arrives unplaced, never pre-placed
    */
   function carryPlacements(oldLines, newLines, placements) {
     let prefix = 0;
@@ -239,10 +242,12 @@ export function initDebrief({ doc, fetchImpl, navigate } = {}) {
 
     const next = new Map();
     const shift = newLines.length - oldLines.length;
+    const middleIsOneForOne =
+      oldLines.length - prefix - suffix === 1 && newLines.length - prefix - suffix === 1;
     for (const [index, id] of placements) {
       if (index < prefix) next.set(index, id);
       else if (index >= oldLines.length - suffix) next.set(index + shift, id);
-      else if (index < newLines.length - suffix) next.set(index, id);
+      else if (middleIsOneForOne) next.set(index, id);
     }
     return next;
   }
