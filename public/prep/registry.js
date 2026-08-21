@@ -135,8 +135,8 @@ const COPY = {
   // the ONLY way this block can say "nothing answers this" — there is no prose counter prop for
   // a model to fill — so this is the whole of what a candidate reads in that case.
   concernsNoMaterial:
-    "Nothing in what you gave us answers this one. That is worth knowing before you go in — " +
-    "the honest answer is usually better received than a stretched one.",
+    "Nothing in what you gave us answers this one. That is worth knowing before you go in. " +
+    "The honest answer is usually better received than a stretched one.",
 
   askHead: "Questions worth asking them",
   askNote:

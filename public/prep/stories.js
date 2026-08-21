@@ -75,7 +75,7 @@ export const COPY = {
   /* The forward-looking sentence. Never a count, never "0 of 5 covered", and never the words gap,
      missing or weakness — this is a thing to go and think about before Thursday, not a mark. */
   gap: (label) =>
-    `Nothing in your stories covers ${label} yet — and it is one of the things most likely to ` +
+    `Nothing in your stories covers ${label} yet, and it is one of the things most likely to ` +
     `come up. Worth thinking of one before the interview.`,
 
   empty: "Nothing here yet. Start with one thing that went well, or badly, and stuck with you.",
@@ -83,14 +83,14 @@ export const COPY = {
 
   titleLabel: "What do you call this one?",
   titleCaption:
-    "Something short you would recognise — “the escalation on nights” is plenty. Nobody else " +
+    "Something short you would recognise: “the escalation on nights” is plenty. Nobody else " +
     "reads it.",
 
   sketchLabel: "What happened?",
   /* THE SHAPE PROMPT. A static string: it names the three parts of a story worth telling and then
      stops. Nothing on this page offers to write any of them. */
   sketchCaption:
-    "Rough notes are fine — this is for you, not for them. What was going on, what you actually " +
+    "Rough notes are fine. This is for you, not for them. What was going on, what you actually " +
     "did, and what was different afterwards.",
 
   coversLabel: "Which parts of the job does it show?",
@@ -143,7 +143,7 @@ export const COPY = {
      browser storage to reload from. Says what happened, and says the words are still there,
      because that is the question being asked. */
   saveGone:
-    "That story is no longer there — it may have been deleted in another tab. Your words are " +
+    "That story is no longer there. It may have been deleted in another tab. Your words are " +
     "still below: tap Save this story again to keep them as a new one.",
   cancel: "Cancel",
 
@@ -154,14 +154,14 @@ export const COPY = {
   /* The three refusals. Each names the box and the actual limit, because "try again" is the one
      thing that cannot help — and each says the words are safe, because on this page that is the
      question the candidate is really asking. */
-  titleMissing: "Give this story a name first — anything you would recognise it by.",
+  titleMissing: "Give this story a name first. Anything you would recognise it by.",
   titleTooLong: `That name is longer than this box can save. Keep it under ${TITLE_MAX} characters.`,
   sketchTooLong:
-    `That is longer than this box can save. Keep it under ${SKETCH_MAX} characters — rough notes ` +
+    `That is longer than this box can save. Keep it under ${SKETCH_MAX} characters. Rough notes ` +
     "are the point, and your words are still below.",
   tooMany: (max) =>
     `There is room for ${max} stories here, and you have them all. Delete one you need least, ` +
-    "then add this one — nothing goes anywhere until you do.",
+    "then add this one. Nothing goes anywhere until you do.",
 };
 
 /** An element with its text set — debrief.js:110's helper, retyped for the same reason. */

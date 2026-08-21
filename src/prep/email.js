@@ -88,7 +88,7 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
     `Type it into the interview prep page to get back in. It works once and expires in 10 minutes.`,
     "",
     `You are getting this because ${agency} invited you to prepare for an interview.`,
-    "If that wasn't you, ignore this message — nobody can use the code but you.",
+    "If that wasn't you, ignore this message. Nobody can use the code but you.",
   ].join("\n");
 
   // Inline styles and a literal colour, which is the one place in this repo that is right:
@@ -100,7 +100,7 @@ export async function sendOtpEmail(env, { to, code, agencyName } = {}) {
     `<p style="font-size:28px;letter-spacing:4px;font-weight:700;margin:16px 0">${digits}</p>`,
     `<p>Type it into the interview prep page to get back in. It works once and expires in 10 minutes.</p>`,
     `<p style="color:#666666;font-size:13px">You are getting this because ${escapeHtml(agency)} invited`,
-    `you to prepare for an interview. If that wasn't you, ignore this message — nobody can use the code but you.</p>`,
+    `you to prepare for an interview. If that wasn't you, ignore this message. Nobody can use the code but you.</p>`,
   ].join("\n");
 
   return sendEmail(env, { to, subject: "Your interview-prep sign-in code", text, html });
@@ -292,23 +292,23 @@ export async function sendReminderEmail(env, { to, agencyName, link } = {}) {
   const text = [
     "Hello,",
     "",
-    "Your interview is tomorrow. Your day-before session is ready — a short run through",
+    "Your interview is tomorrow. Your day-before session is ready: a short run through",
     "what you already have, and the practical details for the day.",
     "",
     "Open it here:",
     url,
     "",
-    `— ${agency}`,
+    agency,
   ].join("\n");
 
   // Inline styles, as ever: mail clients strip <style> blocks and resolve no custom
   // property, so public/tokens.css cannot reach here (sendOtpEmail's note).
   const html = [
     `<p>Hello,</p>`,
-    `<p>Your interview is tomorrow. Your day-before session is ready — a short run through`,
+    `<p>Your interview is tomorrow. Your day-before session is ready: a short run through`,
     `what you already have, and the practical details for the day.</p>`,
     `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your day-before session</a></p>`,
-    `<p style="color:#666666;font-size:13px">— ${escapeHtml(agency)}</p>`,
+    `<p style="color:#666666;font-size:13px">${escapeHtml(agency)}</p>`,
   ].join("\n");
 
   return sendEmail(env, {
@@ -367,7 +367,7 @@ export async function sendExtensionNudgeEmail(
     "",
     `${name}'s booking at ${client} ends on ${when}.`,
     "",
-    "Extend it or redeploy them — whichever, it is easier to do now than after it lapses.",
+    "Extend the booking or redeploy the candidate. Either is easier to do now than after it lapses.",
     "",
     "Your bookings:",
     url,
@@ -378,7 +378,7 @@ export async function sendExtensionNudgeEmail(
   const html = [
     `<p>Hello,</p>`,
     `<p>${escapeHtml(name)}'s booking at ${escapeHtml(client)} ends on ${escapeHtml(when)}.</p>`,
-    `<p>Extend it or redeploy them — whichever, it is easier to do now than after it lapses.</p>`,
+    `<p>Extend the booking or redeploy the candidate. Either is easier to do now than after it lapses.</p>`,
     `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your bookings</a></p>`,
   ].join("\n");
 
@@ -422,7 +422,7 @@ export async function sendExpiryNudgeEmail(env, { to, agencyName, items = [], li
   // Labels come from the catalogue and are ours, but they reach a body a mail client renders,
   // so they take the same escape every other value in this file does.
   const line = (item) =>
-    `${item.label} — ${item.status === "expired" ? "ran out" : "runs out"} ` +
+    `${item.label}: ${item.status === "expired" ? "ran out" : "runs out"} ` +
     `${String(item.expiryDate ?? "").slice(0, 10)}`;
 
   const subject = anyExpired
@@ -442,7 +442,7 @@ export async function sendExpiryNudgeEmail(env, { to, agencyName, items = [], li
     "",
     url,
     "",
-    "We do not store your documents — only the reference number and the date it runs out.",
+    "We do not store your documents, only the reference number and the date it runs out.",
   ].join("\n");
 
   // Inline styles and literal colours, as ever: mail clients strip <style> blocks and resolve
@@ -457,7 +457,7 @@ export async function sendExpiryNudgeEmail(env, { to, agencyName, items = [], li
     `<p>Send the new one to ${escapeHtml(agency)} the way you always have. Then open your`,
     `checklist and update the reference number and the date.</p>`,
     `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your checklist</a></p>`,
-    `<p style="color:#666666;font-size:13px">We do not store your documents — only the`,
+    `<p style="color:#666666;font-size:13px">We do not store your documents, only the`,
     `reference number and the date it runs out.</p>`,
   ].join("\n");
 
@@ -507,11 +507,11 @@ export async function sendExpiryDigestEmail(env, { to, agencyName, rows = [], li
       .trim();
 
   const line = (row) =>
-    `${header(row.candidateName) || "A candidate"} — ${row.label} — ` +
+    `${header(row.candidateName) || "A candidate"} · ${row.label} · ` +
     `${row.status === "expired" ? "ran out" : "runs out"} ` +
     `${String(row.expiryDate ?? "").slice(0, 10)}`;
 
-  const subject = `Compliance expiries — ${rows.length} to chase`;
+  const subject = `Compliance expiries: ${rows.length} to chase`;
 
   // The link clauses are spread in rather than written with a conditional inside the template,
   // so a digest sent without one is the #70 message unchanged down to the trailing newline —
@@ -610,7 +610,7 @@ export async function sendRejectionEmail(env, { to, agencyName, label, reason, l
     "",
     url,
     "",
-    "We do not store your documents — only the reference number and the date it runs out.",
+    "We do not store your documents, only the reference number and the date it runs out.",
   ].join("\n");
 
   // Inline styles and literal colours, as ever: mail clients strip <style> blocks and resolve
@@ -625,7 +625,7 @@ export async function sendRejectionEmail(env, { to, agencyName, label, reason, l
     `<p>Send the new one to ${escapeHtml(agency)} the way you always have. Then open your`,
     `checklist and fill that item in again.</p>`,
     `<p style="margin:24px 0"><a href="${escapeHtml(url)}">Open your checklist</a></p>`,
-    `<p style="color:#666666;font-size:13px">We do not store your documents — only the`,
+    `<p style="color:#666666;font-size:13px">We do not store your documents, only the`,
     `reference number and the date it runs out.</p>`,
   ].join("\n");
 
