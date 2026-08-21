@@ -288,45 +288,36 @@
         pill: "Start here",
         title: "A bank of real stories, written once",
         body: [
-          "You are on the candidate's side of the tool now. This page is where they write down " +
-            "a few things that actually happened to them at work, once, in their own words. In " +
-            "practice they reach for one instead of starting from nothing, and the same story " +
-            "serves again at the next interview.",
-          "Nothing here writes for them, tidies their words, or turns a story into anything " +
-            "else. It is raw material, kept where their practice can reach it."
+          "Here the candidate writes down a few things that actually happened to them at " +
+            "work, once, in their own words. In practice they reach for one instead of " +
+            "starting from nothing, and the same story serves again at the next interview.",
+          "Nothing here writes for them or tidies their words. It is raw material, kept " +
+            "where their practice can reach it."
         ],
-        watch: "None of this is ever visible to you. <ui>Your recruiter never sees any of " +
-          "it.</ui> is the page's own promise, and it is how the tool is built rather than a " +
-          "setting. There is nothing to switch on from your side."
+        watch: "None of it is ever visible to you. That is how the tool is built, not a " +
+          "setting."
       },
       {
         anchor: "#story-gap",
         pill: "The line above the list",
         title: "What to think about next",
         body: [
-          "This line names exactly one part of the job: the one most likely to come up that " +
-            "none of their stories covers yet. It moves on as ticks cover it, and goes away " +
-            "once every part has a story behind it.",
-          "It is deliberately never a count and never a score. The candidate is not told how " +
-            "many parts are covered. They are given the one thing worth thinking about next, " +
-            "which is the whole point of it."
+          "This line names one part of the job: the one most likely to come up that no story " +
+            "covers yet. It moves on as ticks cover it and goes away once every part has a " +
+            "story behind it. Never a count, never a score."
         ],
-        watch: "A tick only covers a part when the story behind it has words in it. A checkbox " +
-          "is not a story, so a saved title with an empty <ui>What happened?</ui> box leaves " +
-          "this line standing."
+        watch: "A tick only covers a part when the story has words in it. A saved title over " +
+          "an empty <ui>What happened?</ui> box leaves this line standing."
       },
       {
         anchor: "#add-story",
         pill: "Their own ticks",
         title: "The candidate does the mapping, not the tool",
         body: [
-          "<ui>Add a story</ui> opens three boxes: <ui>What do you call this one?</ui>, " +
-            "<ui>What happened?</ui> and <ui>Which parts of the job does it show?</ui>. Rough " +
-            "notes are the point, and the box says so itself.",
-          "The last one is the mapping: one tick per part of this job, made by the candidate " +
-            "and nobody else. Nothing reads the story and infers what it shows. <ui>This is " +
-            "how practice knows to point you at this story.</ui> is the caption's own wording, " +
-            "and the tick is the entire mechanism."
+          "<ui>Add a story</ui> opens three boxes: a name, <ui>What happened?</ui> and " +
+            "<ui>Which parts of the job does it show?</ui>. The ticks are the mapping, made " +
+            "by the candidate and nobody else. Nothing reads the story and guesses; a tick " +
+            "is the entire mechanism."
         ]
       }
     ],
@@ -337,15 +328,12 @@
         pill: "Opens on the day",
         title: "Nothing to write until there has been an interview",
         body: [
-          "This page opens on the interview day, never before. Until then it carries a single " +
-            "line, <ui>This page opens after your interview.</ui>, and no form at all, because " +
-            "there is nothing to remember yet. You can see the form now because this " +
-            "candidate's interview day has arrived."
+          "This page opens on the interview day, never before. Until then it is one line and " +
+            "no form, because there is nothing to remember yet. You can see the form because " +
+            "the demo candidate's day has arrived."
         ],
-        watch: "The whole page stays on their side. <ui>This page is yours. Your recruiter " +
-          "never sees any of it.</ui> sits under the heading, and it is how the tool is built " +
-          "rather than a setting. What a candidate writes after an interview never crosses to " +
-          "you."
+        watch: "The whole page stays on their side. What a candidate writes after an " +
+          "interview never crosses to you."
       },
       {
         anchor: "#asked-label",
@@ -353,9 +341,8 @@
         title: "The questions, as they remember them",
         body: [
           "<ui>What were you asked?</ui> takes one question per line, as close to the " +
-            "interviewer's words as the candidate can manage on the way out. " +
-            "<ui>Half-remembered is fine.</ui> is the caption's own promise: a rough line " +
-            "written today beats a perfect one forgotten by the evening."
+            "interviewer's words as they can manage on the way out. Half-remembered is fine: " +
+            "a rough line written today beats a perfect one forgotten by the evening."
         ]
       },
       {
@@ -363,12 +350,10 @@
         pill: "Filed by their pick",
         title: "Each question goes where the candidate says",
         body: [
-          "Every line from the box gets its own picker, and the candidate files the question " +
-            "under a part of the job by choosing from the list. Nothing reads the question and " +
-            "guesses. The pick is theirs, every time.",
-          "<ui>Not sure yet</ui> is a real answer: a question left on it stays on this page " +
-            "until they place it. Once filed, a question comes back to them the next time " +
-            "practice serves that part of the job."
+          "Every line gets its own picker and the candidate files it under a part of the " +
+            "job. Nothing reads the question and guesses. <ui>Not sure yet</ui> is a real " +
+            "answer; once filed, a question comes back the next time practice serves that " +
+            "part."
         ]
       },
       {
@@ -376,14 +361,11 @@
         pill: "Never a score",
         title: "Shaky ticks quietly steer their practice",
         body: [
-          "<ui>Anything that felt shaky?</ui> is one tick per part of the job. A tick quietly " +
-            "moves that part up the queue of what their practice serves next, and that is the " +
-            "whole of what it does.",
-          "It is never shown as a mark, a number or a report, to them or to anyone else. " +
-            "<ui>Nothing here is a mark, and nobody sees it.</ui> is the caption's promise, " +
-            "and the tool keeps it.",
-          "Below it, <ui>One thing to do differently next time</ui> asks for exactly one. The " +
-            "caption's reason: <ui>It is easier to change one thing than five.</ui>"
+          "<ui>Anything that felt shaky?</ui> is one tick per part of the job. A tick moves " +
+            "that part up the practice queue, and that is all it does: never a mark, never a " +
+            "report, to them or to anyone.",
+          "Under it, <ui>One thing to do differently next time</ui> asks for exactly one, " +
+            "because it is easier to change one thing than five."
         ]
       }
     ],
@@ -394,41 +376,27 @@
         pill: "Their front door",
         title: "What their invite opens",
         body: [
-          "The page a candidate's invite opens: their prep for one interview. The line under " +
-            "the title says where it comes from: <ui>Built from what this agency knows about " +
-            "the client, not from the job advert.</ui> That means your client note and the " +
-            "brief you pasted, nothing else.",
-          "<ui>Practise for it</ui> opens their drill, and <ui>Your stories</ui> their " +
-            "storybank; both are theirs from day one."
+          "The page a candidate's invite opens: their prep for one interview, built from the " +
+            "brief you pasted and the note sections you ticked as shareable, nothing else. " +
+            "<ui>Practise for it</ui> opens their drill; <ui>Your stories</ui> their " +
+            "storybank."
         ],
-        watch: "The third button, <ui>How did the interview go?</ui>, stays hidden until the " +
-          "interview day arrives, because a debrief before the interview is meaningless. You " +
-          "can see it because the demo candidate's day has come."
-      },
-      {
-        anchor: "#blocks",
-        pill: "The five blocks",
-        title: "What fills the page, in pack order",
-        body: [
-          "Everything below renders from the pack: <ui>What this role is really about</ui>, " +
-            "<ui>What they keep coming back to</ui>, <ui>Who you are likely to meet</ui>, " +
-            "<ui>A story worth bringing</ui>, then <ui>The practical details</ui>.",
-          "It is a projection of the stored pack, not the pack itself. The model's failed " +
-            "guesses, the importance scores and the question bank never leave the server, so " +
-            "this page could not show them even by mistake."
-        ]
+        watch: "<ui>How did the interview go?</ui> stays hidden until the interview day, " +
+          "because a debrief before the interview is meaningless. You can see it because the " +
+          "demo candidate's day has come."
       },
       {
         anchor: "#blocks",
         pill: "The marks travel",
-        title: "Claims name their source on this side too",
+        title: "The pack's blocks, with their sources",
         body: [
-          "The rule your pack lives by follows the candidate here. A claim they can lean on " +
-            "carries the quoted line and where it came from: <ui>From the client's brief</ui> " +
-            "or <ui>From our notes on this client</ui>.",
-          "A guess stays on the page and wears <ui>Unverified</ui>, with a caption saying " +
-            "what to do with it: <ui>Do not quote it back to them.</ui> The candidate gets " +
-            "the same honesty about sources that you do."
+          "Everything below renders from the pack, in pack order: the role, what they keep " +
+            "coming back to, who they are likely to meet, a story worth bringing, the " +
+            "practical details.",
+          "Claims name their source on this side too: a quoted line from the brief or your " +
+            "note, or <ui>Unverified</ui> with plain advice not to quote it. The model's " +
+            "failed guesses, the importance scores and the question bank never leave the " +
+            "server."
         ]
       }
     ],
@@ -439,25 +407,9 @@
         pill: "Never a mark",
         title: "Practice, on their side only",
         body: [
-          "The drill that <ui>Practise for it</ui> opens. The promise under the heading is " +
-            "the page's whole posture: <ui>You are preparing here, never being marked, and " +
-            "nothing you do is shown to your recruiter.</ui>",
-          "Their answers are read to write feedback and to decide what to serve next, and " +
-            "that is all. No mark is ever shown, to them or to you, and nothing they type " +
-            "ever reaches your side."
-        ]
-      },
-      {
-        anchor: "#act-prime",
-        pill: "Before you start",
-        title: "Where they pick up from",
-        body: [
-          "<ui>Before you start</ui> is what returning makes useful: the role primer again, " +
-            "then <ui>Where you have got to</ui>, listing <ui>Covered so far</ui> and " +
-            "<ui>Still to come</ui>, so no session starts from nothing.",
-          "<ui>Start practising</ui> is the only button. A session already under way skips " +
-            "this act entirely and reopens the drill where it stopped, which is what the page " +
-            "means by <ui>This page brings you back to where you stopped.</ui>"
+          "The drill <ui>Practise for it</ui> opens. Their answers are read to write " +
+            "feedback and to pick what comes next, and that is all: no mark is ever shown, " +
+            "to them or to you, and nothing they type reaches your side."
         ]
       },
       {
@@ -465,15 +417,13 @@
         pill: "How the queue thinks",
         title: "What gets served, and when",
         body: [
-          "One question at a time, chosen rather than listed: the part of the job most in " +
-            "need of work is served first. A part the candidate ticked under <ui>Anything " +
-            "that felt shaky?</ui> after an interview sinks in readiness, so it comes round " +
-            "sooner.",
+          "A session opens with the primer and where they got to, then serves one question " +
+            "at a time: the part of the job most in need of work first. A part ticked as " +
+            "shaky after an interview comes round sooner, and a session already under way " +
+            "reopens the drill where it stopped.",
           "The interview date sets the pace. Weeks out, each part rests a few days between " +
-            "goes; inside the final three days the resting stops and only the most pressing " +
-            "half of the list stays in play, trading depth for coverage. The day before, the " +
-            "session becomes a short run-through: <ui>Your interview is tomorrow. This is a " +
-            "short run through what you already have, not new practice.</ui>"
+            "goes. Inside the final three days only the most pressing half stays in play, " +
+            "and the day before becomes a short run through what they already have."
         ]
       },
       {
@@ -481,20 +431,15 @@
         pill: "Help, then the close",
         title: "Two rungs of help, and an honest ending",
         body: [
-          "<ui>If you get stuck</ui> sits under every question with two rungs: <ui>A " +
-            "nudge</ui>, then <ui>A structure to follow</ui>. Opening one is never held " +
-            "against them; it changes only what a later session serves. With the structure " +
-            "open, sending an empty answer is a legal way to move on.",
-          "<ui>Wrap up for now</ui> appears once there is something worth closing on, and " +
-            "ends at <ui>Where you got to</ui>: <ui>What improved today</ui> when something " +
-            "moved, <ui>Queued for next time</ui> naming the next thing, and when nothing " +
-            "moved, the honest line instead: <ui>It will not always feel like progress while " +
-            "you are doing it.</ui>"
+          "<ui>If you get stuck</ui> sits under every question: <ui>A nudge</ui>, then " +
+            "<ui>A structure to follow</ui>. Opening one is never held against them; it only " +
+            "shapes what later sessions serve. With the structure open, sending an empty " +
+            "answer is a legal way to move on.",
+          "<ui>Wrap up for now</ui> ends at an honest close: what improved, what is queued, " +
+            "and when nothing moved, it says so rather than inventing praise."
         ],
-        watch: "An empty send with no help open is refused: <ui>Type your answer first.</ui> " +
-          "That is the guard working, not a fault. And an empty send after opening the " +
-          "structure earns no invented praise; <ui>Nothing to look at this time.</ui> is all " +
-          "that comes back."
+        watch: "An empty send with no help open is refused. That is the guard working, not " +
+          "a fault."
       }
     ],
 
@@ -504,27 +449,13 @@
         pill: "The whole promise",
         title: "What is held, why, and when it goes",
         body: [
-          "Every page in the portal ends with a link here. Two tables carry the substance: " +
-            "what is held, why, and when it is deleted. Prep data is erased 30 days after " +
-            "the interview date; the compliance record, kept separately, goes 12 months " +
-            "after the last booking ends. Both deletions are automatic and permanent: " +
-            "<ui>there is no archive and no copy kept</ui>.",
-          "One line under the first table answers the question a candidate is most likely " +
-            "to ask you: <ui>Your recruiter sees whether the invite was sent and opened. " +
-            "That is all.</ui>"
-        ]
-      },
-      {
-        anchor: "#delete-now",
-        pill: "The delete-now door",
-        title: "Sooner than the timetable, no reason needed",
-        body: [
-          "<ui>Delete it now</ui> is the early exit: the same data the automatic deletion " +
-            "would take, removed the moment the candidate asks. The compliance checklist " +
-            "carries its own control at its foot, and the two records are separate, so " +
-            "deleting one leaves the other standing.",
-          "The page states the terms plainly: <ui>You do not have to give a reason, and " +
-            "nobody is told you pressed it.</ui>"
+          "Every page in the portal ends with a link here. Two tables carry it: what is " +
+            "held, why, and when it is deleted. Prep data goes 30 days after the interview; " +
+            "the compliance record, kept separately, 12 months after the last booking ends. " +
+            "Both deletions are automatic and permanent, and <ui>Delete it now</ui> is the " +
+            "early exit: no reason needed, and nobody is told.",
+          "The line candidates ask about most: <ui>Your recruiter sees whether the invite " +
+            "was sent and opened. That is all.</ui>"
         ]
       }
     ],
@@ -536,13 +467,10 @@
         title: "The same eight items, in their words",
         body: [
           "A locum's own view of what your <ui>Compliance</ui> screen tracks: the eight " +
-            "things the agency needs on file before a booking. The page asks for exactly two " +
-            "facts per item and says so up front: <ui>Send us the reference number and the " +
-            "date each one runs out.</ui>",
-          "The count line reads like <ui>3 of 8 done</ui>: a list with items left on it, " +
-            "never a mark out of eight. When something is sent in and unchecked, <ui>1 is " +
-            "with the agency to check</ui> joins it, and that item is the one your side " +
-            "lists as <ui>Waiting for you</ui>."
+            "things the agency needs on file before a booking, two facts per item, the " +
+            "reference number and the date it runs out. The count reads like <ui>3 of 8 " +
+            "done</ui>: a list with items left on it, never a mark. An item sent in and " +
+            "unchecked here is the one your side lists as <ui>Waiting for you</ui>."
         ]
       },
       {
@@ -550,31 +478,14 @@
         pill: "A word and a sentence",
         title: "Where each item stands",
         body: [
-          "Each card carries a short word for the state: <ui>Not started</ui>, <ui>Sent " +
-            "in</ui>, <ui>Checked</ui>, and when a date presses, <ui>Expiring</ui> or " +
-            "<ui>Out of date</ui>. The sentence under it says the same thing properly, like " +
-            "<ui>We do not have this yet.</ui>",
-          "Anything not yet <ui>Checked</ui> keeps a form: <ui>Reference or certificate " +
-            "number</ui> for all of them, <ui>Date it runs out</ui> for the six that lapse. " +
-            "References and the 48-hour week choice never ask for a date, because neither " +
-            "expires. <ui>Send this</ui> hands the item over."
-        ],
-        watch: "A card already <ui>Sent in</ui> keeps its form too. That is deliberate: a " +
-          "reference typed wrongly is fixed by typing it again, and the newest send is what " +
-          "the agency checks."
-      },
-      {
-        anchor: "#items",
-        pill: "Never a document",
-        title: "Reference numbers, never the documents",
-        body: [
-          "Under every form sits the same caption: <ui>We do not store your documents.</ui> " +
-            "There is no upload control on this page at all, which is structural rather than " +
-            "polite: what is stored is a reference, a date, and whether it has been checked. " +
-            "The documents keep going to the agency the way they always have.",
-          "At the very foot, <ui>Delete everything you hold about me</ui> erases the whole " +
-            "compliance record after one confirmation. It is a button rather than a link so " +
-            "that nothing, scanner or browser, can fire it by fetching a URL."
+          "Each card wears a short state, <ui>Not started</ui>, <ui>Sent in</ui>, " +
+            "<ui>Checked</ui>, <ui>Expiring</ui> or <ui>Out of date</ui>, with a plain " +
+            "sentence under it. Anything unchecked keeps its form, so a wrongly typed " +
+            "reference is fixed by sending it again; the newest send is what you check.",
+          "There is no upload control anywhere, and <ui>We do not store your documents.</ui> " +
+            "sits under every form. Documents keep going to the agency the way they always " +
+            "have. At the foot, <ui>Delete everything you hold about me</ui> erases the " +
+            "whole record after one confirmation."
         ]
       }
     ],
@@ -585,28 +496,14 @@
         pill: "The real door",
         title: "How a locum signs in when it is not a demo",
         body: [
-          "Every compliance email the tool sends, the expiry nudges included, points at this " +
-            "page. The demo never showed it to you because the demo door signs you straight " +
-            "in; a real locum lands here, types the email address the agency has for them, " +
-            "and presses <ui>Send me a code</ui>.",
-          "One task at a time: the <ui>6-digit code</ui> box appears only after a code has " +
-            "been asked for, and the cursor is put in it."
-        ]
-      },
-      {
-        anchor: "#act-email",
-        pill: "Codes, never links",
-        title: "Six digits, and deliberately no link",
-        body: [
-          "The lede carries the promise: <ui>We will not send you a link to click.</ui> The " +
-            "email that arrives holds a 6-digit code and no link, so a locum never learns to " +
-            "trust one.",
-          "The code box is built for a phone: it offers the code straight from the " +
-            "notification, and a pasted code survives a stray space in the middle."
+          "Every compliance email points here. The demo door signs you straight in, so you " +
+            "never saw it: a real locum types the email address the agency has for them and " +
+            "presses <ui>Send me a code</ui>. Six digits arrive and there is deliberately " +
+            "no link to click, so a locum never learns to trust one."
         ],
-        watch: "The code email is titled <ui>Your interview-prep sign-in code</ui> even when " +
-          "it is asked for from this page. There is one code email, worded for the prep " +
-          "side; a locum who says they got the wrong email did not."
+        watch: "The code email is titled <ui>Your interview-prep sign-in code</ui> even " +
+          "when it is asked for from this page. There is one code email, worded for the " +
+          "prep side; a locum who says they got the wrong email did not."
       }
     ]
   };
