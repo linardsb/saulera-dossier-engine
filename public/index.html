@@ -109,6 +109,18 @@
           </div>
         </div>
 
+        <!-- SHOWCASE BRANCH ONLY: the worked example. One button that fills the two boxes
+             above with an invented brief and CV for the Manchester MSK client (both live in
+             public/example.js) so a first look can go straight to Generate. It only fills the
+             boxes: the client it picks, the generation and every provenance mark stay the
+             product's own. A merge to main must not carry this block, the example.js script
+             tag below, public/example.js, or test/example.test.js. -->
+        <div class="act-row">
+          <button class="btn" type="button" id="load-example">Load a worked example</button>
+          <span class="file-label">Fills both boxes with an invented brief and CV for the
+            Manchester MSK client. Generate stays yours to press.</span>
+        </div>
+
         <!-- Two routes to the same pack, primary first. Generate runs the model from this
              deployment; the ghost button is the fallback through the recruiter's own Claude
              session, kept visible rather than hidden behind a failure because a deployment
@@ -249,5 +261,8 @@
 <script src="/extract.js"></script>
 <script src="/guide.js"></script>
 <script src="/app.js"></script>
+<!-- SHOWCASE BRANCH ONLY: the worked example's wiring, after app.js so the rail rows it
+     clicks are the product's own. See the block beside the inputs. -->
+<script src="/example.js"></script>
 </body>
 </html>
