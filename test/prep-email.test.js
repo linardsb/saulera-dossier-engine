@@ -695,7 +695,7 @@ test("the digest's subject carries a COUNT and no name", async () => {
 
   // An inbox preview naming a locum's compliance problem on a shared desk is a disclosure
   // nobody chose.
-  assert.equal(subject, "Compliance expiries — 2 to chase");
+  assert.equal(subject, "Compliance expiries: 2 to chase");
   assert.ok(!subject.includes("Priya"));
   assert.ok(!subject.includes("Nair"));
 });
