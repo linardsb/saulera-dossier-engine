@@ -68,5 +68,5 @@ Built to cover the widest slice of the live board. Fictional; seed into the demo
 
 ## Memory files touched this session
 
-- Created `lewis-is-louis-groves-ttr.md` (+ MEMORY.md index line) — the identification above.
-- Pre-existing and still current: `workflow-deck-pages-project.md`, `lewis-demo-preview-deployment.md` (demo at demo-lewis-showcase.saulera-dossier-engine.pages.dev, DEMO_MODE=1, tear down after the demo).
+- Created `louis-is-louis-groves-ttr.md` (+ MEMORY.md index line) — the identification above.
+- Pre-existing and still current: `workflow-deck-pages-project.md`, `louis-demo-preview-deployment.md` (demo at demo-louis-showcase.saulera-dossier-engine.pages.dev, DEMO_MODE=1, tear down after the demo).

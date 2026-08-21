@@ -1,4 +1,4 @@
-// The worked-example layer's contract — SHOWCASE BRANCH ONLY (demo/lewis-showcase).
+// The worked-example layer's contract — SHOWCASE BRANCH ONLY (demo/louis-showcase).
 //
 // public/example.js is demo chrome: one button that fills the two input boxes with an invented
 // brief and CV so the Louis walkthrough can go straight to Generate. This file pins the three
@@ -83,7 +83,7 @@ test("the fixtures fit the pipeline they are fed into", () => {
   assert.ok(briefLength > 1200 && briefLength < 4000, `brief source is ${briefLength} chars`);
   assert.ok(cvLength > 1600 && cvLength < 5000, `cv source is ${cvLength} chars`);
 
-  // The example belongs to the seeded Manchester client — scripts/seed-lewis-demo-notes.sql
+  // The example belongs to the seeded Manchester client — scripts/seed-louis-demo-notes.sql
   // wrote the note whose sections the pack's "Our note" marks point at.
   assert.ok(
     JS.includes('var CLIENT_ID = "client-manchester-msk"'),

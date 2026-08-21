@@ -274,7 +274,7 @@
       }
     ],
 
-    /* ── SHOWCASE BRANCH ONLY (demo/lewis-showcase) ─────────────────────────────────────────
+    /* ── SHOWCASE BRANCH ONLY (demo/louis-showcase) ─────────────────────────────────────────
        Every /prep entry below puts pills on CANDIDATE pages, which the header above calls
        the wrong audience entirely — and on main it is: a locum's portal must not carry learning
        material for the agency. On this demo the person browsing the candidate portal IS the
@@ -522,7 +522,7 @@
   var steps = SCREENS[key];
   if (!steps || !steps.length) return;
 
-  /* SHOWCASE BRANCH ONLY (demo/lewis-showcase): which side of the tool this screen sits on.
+  /* SHOWCASE BRANCH ONLY (demo/louis-showcase): which side of the tool this screen sits on.
      Everything under /prep is the candidate's portal; everything else is the recruiter's tool.
      The card's eyebrow names the side in words; the owner chose ONE colour for both sides, so
      the --candidate classes set below are hooks with no rules behind them in guide.css —

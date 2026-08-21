@@ -1,7 +1,7 @@
--- Seed for the Louis demo preview (demo/lewis-showcase, D1 database dossier-engine-preview).
+-- Seed for the Louis demo preview (demo/louis-showcase, D1 database dossier-engine-preview).
 -- DATA ONLY, no schema. Run from the repo root:
 --
---   npx wrangler d1 execute dossier-engine-preview --remote --file scripts/seed-lewis-demo.sql
+--   npx wrangler d1 execute dossier-engine-preview --remote --file scripts/seed-louis-demo.sql
 --
 -- Written 21 Aug 2026 against that day's state of the preview database; it is a one-shot
 -- record, not an idempotent fixture. It assumes the five TTR-board clients, the `inv-demo`

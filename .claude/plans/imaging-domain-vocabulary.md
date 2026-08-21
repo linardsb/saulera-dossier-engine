@@ -45,7 +45,7 @@ The engine's vocabulary is shaped for permanent nursing hires. An imaging-locum 
 - **Not** adding `brief_profile` to any HTTP response (decision D1; `test/seam.test.js:94` would fail, and vocabulary nothing reads is what the repo's guards exist to stop).
 - **Not** touching `spike/schema.js` or `spike/pack.json` — the spike is a frozen historical artifact (the evidence the prompt was validated against); its schema diverging from `PACK_SCHEMA` by the new field is expected and harmless.
 - **Not** touching `test/schema.test.js` — that file is the **D1 migration lockfile** (it parses `migrations/*.sql`), not pack-schema tests, and this ticket adds no migration.
-- **Not** changing the demo fixtures/seed — slice 0 was done directly on `demo/lewis-showcase`.
+- **Not** changing the demo fixtures/seed — slice 0 was done directly on `demo/louis-showcase`.
 - **Not** persisting anything new. The profile lives for the life of a request. Guardrail: no candidate data persisted beyond the current schema.
 - **Not** mapping scanner *model* names (Aera, Vida, Aquilion…) to makes — makes only. Models can be a follow-up if slice 2 needs a matrix.
 
@@ -137,7 +137,7 @@ Written alongside each phase (house style is test-per-module); listed as tasks u
 
 ### Task 1 — CREATE branch `feat/imaging-domain-vocabulary` off `main`
 
-- **IMPLEMENT**: the worktree currently sits on `demo/lewis-showcase` and is **shared between parallel sessions** (HEAD can move under you). Branch off up-to-date `main`, and re-verify the branch before every commit.
+- **IMPLEMENT**: the worktree currently sits on `demo/louis-showcase` and is **shared between parallel sessions** (HEAD can move under you). Branch off up-to-date `main`, and re-verify the branch before every commit.
 - **VALIDATE**: `git fetch origin && git switch -c feat/imaging-domain-vocabulary origin/main && git branch --show-current` → prints `feat/imaging-domain-vocabulary`
 - **SATISFIES**: epic constraint "perm flow stays working" (demo branch stays demo); PR hygiene
 

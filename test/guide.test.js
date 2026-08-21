@@ -15,7 +15,7 @@
 // the CSS cannot reach the real interface, the JS cannot reach the network or any store, and its
 // anchors are selectors those screens actually declare.
 //
-// SHOWCASE BRANCH ONLY: on demo/lewis-showcase the layer also annotates the CANDIDATE portal —
+// SHOWCASE BRANCH ONLY: on demo/louis-showcase the layer also annotates the CANDIDATE portal —
 // every page under /prep a person can reach on the demo — because the person browsing it is the
 // recruiter learning the product. On those screens the card's eyebrow says whose side the page
 // is on ("The candidate's side · step N of M"); the pills wear the one colour both sides share,

@@ -20,7 +20,7 @@ The engine's artefacts are shaped for permanent hires: an interview-prep dossier
 
 ## Proposed slices
 
-**Slice 0 — demo reseed (NOT a ticket; do directly on `demo/lewis-showcase` before the meeting).** Replace the nursing brief fixture and D1 demo seed with the two imaging personas in `docs/handover-louis-meeting.md` (Priya Nair, MRI/CT radiographer; Marcus Adeyemi, general/MSK sonographer with a deliberate training-expiry amber). Touches `public/prep/brief.fixture.json`, demo D1 seed, and any perm-nursing vocabulary in visible demo strings.
+**Slice 0 — demo reseed (NOT a ticket; do directly on `demo/louis-showcase` before the meeting).** Replace the nursing brief fixture and D1 demo seed with the two imaging personas in `docs/handover-louis-meeting.md` (Priya Nair, MRI/CT radiographer; Marcus Adeyemi, general/MSK sonographer with a deliberate training-expiry amber). Touches `public/prep/brief.fixture.json`, demo D1 seed, and any perm-nursing vocabulary in visible demo strings.
 
 **Slice 1 — imaging domain vocabulary.** Teach the brief parser and generation prompts the imaging-locum taxonomy: modality (MRI/CT/US), specialism (MSK, obstetric, general), scanner makes, HCPC (not NMC) registration language, locum vs permanent role shape. Touches `src/prompt.js`, `src/generate.js`, brief parsing. *Foundation for everything below.*
 

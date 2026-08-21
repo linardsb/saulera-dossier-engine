@@ -1,8 +1,8 @@
--- Client knowledge notes for the four TTR-board clients that had none (demo/lewis-showcase,
--- D1 database dossier-engine-preview). Companion to seed-lewis-demo.sql, same rules: DATA ONLY,
+-- Client knowledge notes for the four TTR-board clients that had none (demo/louis-showcase,
+-- D1 database dossier-engine-preview). Companion to seed-louis-demo.sql, same rules: DATA ONLY,
 -- a one-shot record written 21 Aug 2026, not an idempotent fixture. Run from the repo root:
 --
---   npx wrangler d1 execute dossier-engine-preview --remote --file scripts/seed-lewis-demo-notes.sql
+--   npx wrangler d1 execute dossier-engine-preview --remote --file scripts/seed-louis-demo-notes.sql
 --
 -- Each note mirrors the shape its production writer would leave: updateClient saves the whole
 -- note into clients.note (markdown, '## ' headings are the tickable sections) and stamps

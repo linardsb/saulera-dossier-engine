@@ -1,6 +1,6 @@
 /* The worked example (SHOWCASE BRANCH ONLY) — one button that fills the two input boxes.
  *
- * demo/lewis-showcase carries this so a first look at the tool does not stall on "I have no
+ * demo/louis-showcase carries this so a first look at the tool does not stall on "I have no
  * brief to hand": press the button, the two boxes fill with an invented brief and CV for the
  * Manchester MSK client, and Generate is one click away. THE BUTTON ONLY FILLS THE BOXES.
  * The client row it picks, the model call, the quote checks and every provenance mark are the
