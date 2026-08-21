@@ -47,7 +47,6 @@ const SCREENS = [
   "public/prep/session.html",
   "public/prep/privacy.html",
   "public/prep/compliance/index.html",
-  "public/prep/compliance/login.html",
 ];
 
 /** Demo branch only — screens with no script of their own. privacy.html is static prose on
@@ -185,7 +184,6 @@ test("every anchor the layer points at actually exists on that screen", () => {
     "/prep/session": "public/prep/session.html",
     "/prep/privacy": "public/prep/privacy.html",
     "/prep/compliance": "public/prep/compliance/index.html",
-    "/prep/compliance/login": "public/prep/compliance/login.html",
   };
 
   const anchors = [...JS.matchAll(/anchor:\s*"([^"]+)"/g)].map((m) => m[1]);

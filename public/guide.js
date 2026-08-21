@@ -97,9 +97,8 @@
             "the tool cannot find word for word in the brief you pasted is left out rather than " +
             "sent, so a candidate never walks into a room quoting something nobody wrote."
         ],
-        theirSide: "They get an email with a private link that works once. After that they type " +
-          "their email and we send a six-digit code. We never send them a link to click, so they " +
-          "never learn to trust one.",
+        theirSide: "They get an email with a private link of their own that opens their prep. " +
+          "Nothing to set up and nothing to install.",
         watch: "Their practice answers are never shown to you. <ui>Prep sent</ui> counts how many " +
           "opened their prep and nothing else, and that limit is not configurable."
       }
@@ -173,8 +172,8 @@
             "same address reuses the person you already have and leaves the checklist they have " +
             "already filled in alone."
         ],
-        theirSide: "They cannot sign in to their compliance checklist until a booking exists for " +
-          "that exact address. If a locum says the code never arrives, check this screen first.",
+        theirSide: "Their compliance checklist does not exist until a booking does, for that " +
+          "exact address. If a locum says they cannot open theirs, check this screen first.",
         watch: "An end date is optional, but a booking with no end date never produces the " +
           "fourteen-day email, because there is no deadline to count back from."
       },
@@ -243,16 +242,13 @@
         pill: "Their half",
         title: "What the candidate does",
         body: [
-          "They sign in at their own compliance door with a six-digit code, and see the same eight " +
-            "items in plainer words: <ui>Not started</ui>, <ui>Sent in</ui>, <ui>Checked</ui>.",
+          "They open their own compliance checklist and see the same eight items in plainer " +
+            "words: <ui>Not started</ui>, <ui>Sent in</ui>, <ui>Checked</ui>.",
           "Each one asks for a <ui>Reference or certificate number</ui>, and the six that expire " +
             "also ask for <ui>Date it runs out</ui>. References and the 48-hour week choice do not.",
           "The documents themselves keep travelling the way they always have. This tool never " +
             "accepts an upload, and their page says so."
         ],
-        theirSide: "Their sign-in code email is titled \"Your interview-prep sign-in code\" even " +
-          "when they asked for it here. There is one code email and it is worded for the prep " +
-          "side. If a locum says they got the wrong email, they did not.",
         watch: "<ui>Send back</ui> needs the tool to be able to send email. If it cannot, you " +
           "are told so and nothing changes: the item stays waiting for you, because your reason " +
           "lives only in that email. <ui>Verify</ui> sends nothing and always works."
@@ -487,23 +483,6 @@
             "have. At the foot, <ui>Delete everything you hold about me</ui> erases the " +
             "whole record after one confirmation."
         ]
-      }
-    ],
-
-    "/prep/compliance/login": [
-      {
-        anchor: ".page-head",
-        pill: "The real door",
-        title: "How a locum signs in when it is not a demo",
-        body: [
-          "Every compliance email points here. The demo door signs you straight in, so you " +
-            "never saw it: a real locum types the email address the agency has for them and " +
-            "presses <ui>Send me a code</ui>. Six digits arrive and there is deliberately " +
-            "no link to click, so a locum never learns to trust one."
-        ],
-        watch: "The code email is titled <ui>Your interview-prep sign-in code</ui> even " +
-          "when it is asked for from this page. There is one code email, worded for the " +
-          "prep side; a locum who says they got the wrong email did not."
       }
     ]
   };

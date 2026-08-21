@@ -175,15 +175,21 @@ test("both pages are served by the one stylesheet chain, in order", () => {
   // section relies on winning the cascade against it. Swap two links and the chips lose their
   // ground while every other test stays green.
   //
-  // SHOWCASE BRANCH ONLY: both pages carry the temporary walkthrough layer (public/guide.css)
-  // LAST in their chains, because on this demo the person reading the candidate portal is the
-  // recruiter learning the product. The four-sheet product chain and its order are still pinned
-  // exactly; guide.css cannot reach these pages' own rules — every selector in it is scoped
-  // under `.guide`, which test/guide.test.js asserts rather than trusts. On main the walkthrough
-  // must not be on a candidate page, and this expectation goes back to `chain` alone.
-  const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css", "/guide.css"];
+  // SHOWCASE BRANCH ONLY: the checklist carries the temporary walkthrough layer
+  // (public/guide.css) LAST in its chain, because on this demo the person reading the candidate
+  // portal is the recruiter learning the product. The sign-in page does NOT: the owner pulled the
+  // logon out of the showcase (the demo door signs straight in, so the walkthrough never routes
+  // here), so it keeps the plain product chain. The four-sheet product chain and its order are
+  // still pinned exactly; guide.css cannot reach the checklist's own rules — every selector in it
+  // is scoped under `.guide`, which test/guide.test.js asserts rather than trusts. On main the
+  // walkthrough must not be on a candidate page, and both expectations go back to `chain` alone.
+  const chain = ["/fonts.css", "/tokens.css", "/app.css", "/prep/prep.css"];
+  const chains = {
+    "public/prep/compliance/login.html": chain,
+    "public/prep/compliance/index.html": [...chain, "/guide.css"],
+  };
   for (const [page, html] of Object.entries(PAGES)) {
-    assert.deepEqual(stylesheetsOf(html), chain, `${page}'s stylesheet chain or its order`);
+    assert.deepEqual(stylesheetsOf(html), chains[page], `${page}'s stylesheet chain or its order`);
   }
 });
 
