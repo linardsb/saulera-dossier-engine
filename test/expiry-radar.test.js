@@ -416,7 +416,7 @@ test("two candidates, three crossings → two candidate emails and ONE digest", 
   // The digest is the whole answer, so it names everyone.
   assert.ok(digest.text.includes("Candidate cand-1"), "the digest names the first candidate");
   assert.ok(digest.text.includes("Candidate cand-2"), "and the second");
-  assert.equal(digest.subject, "Compliance expiries — 3 to chase", "a count, never a name");
+  assert.equal(digest.subject, "Compliance expiries: 3 to chase", "a count, never a name");
 
   // A locum whose two items lapse the same week gets ONE email listing both, and nothing about
   // anyone else's paperwork.

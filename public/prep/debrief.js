@@ -97,9 +97,9 @@ export const COPY = {
      the question the candidate is really asking. */
   tooManyAsked:
     `There is room for ${MAX_ASKED} questions here, and there are more than that below. Take out ` +
-    "the ones you need least, then save again — nothing goes anywhere until you do.",
+    "the ones you need least, then save again. Nothing goes anywhere until you do.",
   lineTooLong:
-    `One of those lines is very long. Keep each question under ${LINE_MAX} characters — it is ` +
+    `One of those lines is very long. Keep each question under ${LINE_MAX} characters. It is ` +
     "meant to be roughly what they said, not word for word.",
   fixTooLong: `That is longer than this box can save. Keep it under ${FIX_MAX} characters.`,
 
