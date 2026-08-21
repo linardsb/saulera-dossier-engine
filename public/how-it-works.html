@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>How it works · TTR dossier engine</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/how-it-works.css">
+</head>
+<body>
+
+<!-- SHOWCASE PAGE: the whole workflow on one static page, so the demo link in an email can
+     land somewhere that explains itself. No scripts: app.js is the tool's logic and would
+     look for the tool's DOM; this page is prose and doors into the real screens. The chip
+     and mark grammar come from app.css so the map and the product read as one thing. -->
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">TTR dossier engine</span>
+    <nav class="topbar-nav" aria-label="Screens">
+      <a href="/">Submission pack</a>
+      <a href="/clients">Client knowledge</a>
+      <a href="/counts">Prep sent</a>
+      <a href="/assignments">Bookings</a>
+      <a href="/compliance">Compliance</a>
+      <a href="/how-it-works" aria-current="page">How it works</a>
+      <a href="/prep/demo" target="_blank" rel="noopener">Candidate portal ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main class="flow-wrap">
+
+  <div class="page-head">
+    <h1>How it works</h1>
+    <p class="page-sub">Seven steps from a client's brief to a prepared candidate. The first
+      happens once per client; the rest repeat with every submission.</p>
+  </div>
+
+  <section class="flow-group" aria-labelledby="group-once">
+    <h2 class="flow-group-label" id="group-once">Once per client</h2>
+    <ol class="flow">
+      <li>
+        <h3><span class="act-num" aria-hidden="true">1</span>Write down how the client hires</h3>
+        <div class="flow-body">
+          <p>Open <a href="/clients">Client knowledge</a> and file what you know about the
+            department: who interviews, what they ask, what has sunk a submission before, what
+            they actually care about. Every pack for that client is built from this note, so
+            the more you file, the better the packs get. You write it once and add to it as
+            you learn.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="flow-group" aria-labelledby="group-every">
+    <h2 class="flow-group-label" id="group-every">Every submission</h2>
+    <ol class="flow" start="2">
+      <li>
+        <h3><span class="act-num" aria-hidden="true">2</span>Pick the client, add the brief and the CV</h3>
+        <div class="flow-body">
+          <p>On the <a href="/">Submission pack</a> screen, choose the client, then paste the
+            brief and the candidate's CV, or drop them in as PDF or Word files. Nothing you
+            paste is stored: the CV and the brief live on your screen and nowhere else.</p>
+          <p class="flow-aside">On this demo, Load a worked example fills both boxes for you.</p>
+        </div>
+      </li>
+      <li>
+        <h3><span class="act-num" aria-hidden="true">3</span>Generate, and leave the page open</h3>
+        <div class="flow-body">
+          <p>One press. The engine writes the pack and checks every claim in it word for word
+            against the CV and your client note. It takes a minute or two, and the page shows
+            an honest clock while you wait.</p>
+        </div>
+      </li>
+      <li>
+        <h3><span class="act-num" aria-hidden="true">4</span>Check the claims</h3>
+        <div class="flow-body">
+          <p>Every line of the finished pack carries a mark saying where it came from. Lines
+            drawn from the CV or from your note arrive checked; anything unverified is yours
+            to confirm or cut before a client sees it.</p>
+          <div class="claim-sample" aria-label="Example of a checked pack">
+            <p class="sample-claim"><span class="sample-text">Eight years reporting CT and MRI
+              across two NHS trusts.</span> <span class="mark mark-cv">CV</span></p>
+            <p class="sample-claim"><span class="sample-text">Comfortable with the on call
+              pattern this department runs.</span> <span class="mark mark-note">Client note</span></p>
+            <p class="sample-claim claim-unverified"><span class="sample-text">Holds a full UK
+              driving licence.</span> <span class="mark mark-unverified">Unverified</span></p>
+          </div>
+        </div>
+      </li>
+      <li>
+        <h3><span class="act-num" aria-hidden="true">5</span>Copy the pack into your email</h3>
+        <div class="flow-body">
+          <p>One press puts the whole pack on your clipboard, formatted. Paste it into the
+            email you were already writing to the client and send. That is the submission
+            done.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="flow-group" aria-labelledby="group-after">
+    <h2 class="flow-group-label" id="group-after">Once the interview is booked</h2>
+    <ol class="flow" start="6">
+      <li>
+        <h3><span class="act-num" aria-hidden="true">6</span>Send the candidate their prep</h3>
+        <div class="flow-body">
+          <p>Enter the interview date and the candidate's email address. They get a private
+            preparation page of their own, built from the brief, their CV, and only the parts
+            of your client note you ticked as shareable. It never sends the pack. The
+            candidate walks in knowing what the client will ask.</p>
+          <p class="flow-aside">The candidate's side of this demo opens from the top bar.</p>
+        </div>
+      </li>
+      <li>
+        <h3><span class="act-num" aria-hidden="true">7</span>Let the boards keep watch</h3>
+        <div class="flow-body">
+          <p>Three screens carry the follow-up so you do not have to.</p>
+          <ul class="flow-boards">
+            <li><a href="/counts">Prep sent</a> shows how many candidates opened their prep,
+              and nothing about what they did inside.</li>
+            <li><a href="/assignments">Bookings</a> emails you fourteen days before a booking
+              runs out, in time to extend it or redeploy the candidate.</li>
+            <li><a href="/compliance">Compliance</a> tracks what every candidate still owes
+              you and what is about to expire. It keeps the reference number and the date,
+              never the document.</li>
+          </ul>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="flow-close" aria-label="Where the loop restarts">
+    <p>From the second role onward the flow starts at step 2. The note is already written,
+      and each pack you check shows you another line worth adding to it.</p>
+    <a class="btn btn-primary" href="/">Open the tool and build a pack</a>
+  </section>
+
+</main>
+
+</body>
+</html>

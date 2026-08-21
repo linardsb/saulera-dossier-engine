@@ -1,0 +1,137 @@
+/* The workflow page's own layer. Everything shared (top bar, buttons, .act-num chips, the
+   provenance .mark chips, page head, links) comes from app.css; this file only draws the
+   spine the steps hang off and the one worked sample. No motion is defined here: the page
+   is prose, and the only movement it needs is the hover and press it inherits.
+
+   One literal: the 65ch measure. CRAFT.md asks 65 to 75ch for body prose and the token set
+   carries no measure token; ch is the unit the rule is stated in, so a token would just
+   rename it. */
+
+.flow-wrap { max-width: 65ch; }
+
+/* The chapter label. Mono caps at caption size, the register row meta already uses, because
+   a chapter name is metadata about the steps rather than a step. The once/every split is the
+   page's real information: it is what makes the note an asset rather than admin. */
+.flow-group { margin-bottom: var(--space-12); }
+
+.flow-group-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-6);
+}
+
+.flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Each step: the chip sits in the heading exactly as it does in the tool's act heads, and a
+   hairline drops from the chip to the next step so the column reads as one route rather than
+   as a stack of cards. The line is drawn per step and switched off on the last one, so each
+   chapter's spine ends where the chapter does and the whitespace between chapters stays a
+   real pause. */
+.flow > li {
+  position: relative;
+  padding-bottom: var(--space-8);
+}
+
+.flow > li::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--space-3) - var(--hairline));
+  top: calc(var(--space-6) + var(--space-2));
+  bottom: var(--space-2);
+  width: var(--hairline);
+  background: var(--border-hairline);
+}
+
+.flow > li:last-child { padding-bottom: 0; }
+.flow > li:last-child::before { display: none; }
+
+/* Same flex grammar as .act-head, one size down: seven step names on one page at --text-h3
+   would shout. 24px line height keeps the first text line centred on the 24px chip. */
+.flow h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-h4);
+  font-weight: 600;
+  line-height: var(--space-6);
+  margin: 0 0 var(--space-2);
+}
+
+/* The body hangs under the heading's words, clear of the chip column the spine runs down. */
+.flow-body {
+  min-width: 0;
+  margin-left: calc(var(--space-6) + var(--space-3));
+}
+
+.flow-body p { margin: 0 0 var(--space-2); }
+
+.flow-aside {
+  font-size: var(--text-body);
+  color: var(--text-muted);
+}
+
+/* The one place the page spends colour: a pack claim beside its mark, borrowed whole from
+   act 3 (.mark and .claim-unverified are app.css's). --background rather than --surface for
+   the ground: the sample is a picture of the pack, and the pack renders on the page ground;
+   the hairline edge is what says "exhibit". */
+.claim-sample {
+  display: grid;
+  gap: var(--space-3);
+  background: var(--background);
+  border: var(--hairline) solid var(--border-hairline);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.sample-claim {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--text-body);
+}
+
+/* app.css gives .claim-unverified its --space-4 of padding against the pack's wide column;
+   inside this small exhibit that read as an indent, so the padding steps down one. The
+   border it pairs with is the point and stays as app.css draws it. */
+.claim-sample .claim-unverified { padding-left: var(--space-3); }
+
+.sample-text { min-width: 0; }
+
+/* Under 480px the mark drops below its claim, same move and same reason as the pack's own
+   claims at 600px: "Client note" is unbreakable and the claim was down to a few words a
+   line. The sample's break point is lower because its column is narrower than the pack's. */
+@media (max-width: 480px) {
+  .sample-claim { display: block; }
+  .sample-claim .mark { display: inline-block; margin-top: var(--space-1); }
+}
+
+.flow-boards {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+/* The close: where the loop restarts, and one door back into the tool. The .btn grammar is
+   app.css's; an anchor needs the flex display and the underline switched off, which a
+   button gets for free. */
+.flow-close p { margin: 0 0 var(--space-4); }
+
+.flow-close .btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
