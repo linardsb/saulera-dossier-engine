@@ -38,12 +38,15 @@
 /* ── the pill ─────────────────────────────────────────────────────────────────────────── */
 
 /* The row a pill sits in, injected directly above the thing it explains. `gap` so several pills
-   on one anchor read as a set rather than as a run-on. */
+   on one anchor read as a set rather than as a run-on. The top margin is what keeps a row off
+   the element ABOVE it — injected rows land wherever the page put the previous block, and
+   without it a pill sits flush against (on the index screen, overlapping) the buttons before
+   it. It also holds stacked rows apart when several anchors sit together. */
 .guide-pins {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 0 0 10px;
+  margin: 14px 0 10px;
 }
 
 /* Rounded, which is the one place this file borrows a shape rather than refusing one: the
