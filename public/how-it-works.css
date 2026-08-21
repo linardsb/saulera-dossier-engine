@@ -1,13 +1,146 @@
 /* The workflow page's own layer. Everything shared (top bar, buttons, .act-num chips, the
-   provenance .mark chips, page head, links) comes from app.css; this file only draws the
-   spine the steps hang off and the one worked sample. No motion is defined here: the page
-   is prose, and the only movement it needs is the hover and press it inherits.
+   provenance .mark chips, page head, links) comes from app.css; this file draws the two
+   flowcharts at the top, the spine the steps hang off, and the one worked sample. No motion
+   is defined here: the page is prose, and the only movement it needs is the hover and press
+   it inherits.
 
-   One literal: the 65ch measure. CRAFT.md asks 65 to 75ch for body prose and the token set
-   carries no measure token; ch is the unit the rule is stated in, so a token would just
-   rename it. */
+   Two literals: the 50rem page cap (wide enough for the two chart lanes side by side, well
+   under --max-width) and the 65ch measure on prose sections (CRAFT.md asks 65 to 75ch for
+   body prose; the token set carries no measure token, and ch is the unit the rule is stated
+   in, so a token would just rename it). */
 
-.flow-wrap { max-width: 65ch; }
+.flow-wrap { max-width: 50rem; }
+
+.page-head,
+.flow-group,
+.flow-close { max-width: 65ch; }
+
+/* ── the map: two flowcharts, one per side ─────────────────────────────────────────────────
+   Boxes and connectors, drawn from the token set. Connector lines take --border rather than
+   the hairline: sequence is meaning here, and --border is the token held to the 3:1 non-text
+   floor. Down is the only direction, so each connector carries one small arrowhead. */
+
+.map {
+  display: grid;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
+@media (min-width: 760px) {
+  .map { grid-template-columns: 1fr 1fr; align-items: start; }
+  .map-note { grid-column: 1 / -1; }
+}
+
+/* Two-part selector on purpose: .flow-group-label sets its margin in shorthand later in the
+   file, and this override must win regardless of rule order. */
+.map .lane-head { margin-bottom: var(--space-4); }
+
+.chart {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chart > li {
+  position: relative;
+  min-width: 0;
+}
+
+.chart > li + li { margin-top: var(--space-6); }
+
+/* The connector: a line filling the gap above the box, and a 8×4 arrowhead sitting on the
+   box's top edge. Sized from --space-1 so the triangle is the one shape in the file and
+   still on the grid. */
+.chart > li + li::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(-1 * var(--space-6));
+  height: calc(var(--space-6) - var(--space-1));
+  width: var(--hairline);
+  transform: translateX(-50%);
+  background: var(--border);
+}
+
+.chart > li + li::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(-1 * var(--space-1));
+  transform: translateX(-50%);
+  border-left: var(--space-1) solid transparent;
+  border-right: var(--space-1) solid transparent;
+  border-top: var(--space-1) solid var(--border);
+}
+
+.node {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-body);
+  min-width: 0;
+}
+
+/* The handoff pair: the recruiter lane's last box and the candidate lane's first are the
+   same email, so they share the signature tint the candidate pages already own. The border
+   is decorative on its own ground (tokens.css licences the pair), and the colour never
+   carries the link alone: .map-note says it in words. */
+.node-handoff {
+  background: var(--surface-signature);
+  border: var(--hairline) solid var(--border-signature);
+}
+
+/* The fork. The incoming arrow lands on a bar; a stub drops from the bar to each of the two
+   outcomes; the next connector resumes centred beneath them. The bar spans the two halves'
+   centres (25% to 75% of the row), which is what makes it read as a split rather than as a
+   rule. */
+.fork-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+}
+
+.fork-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 25%;
+  right: 25%;
+  height: var(--hairline);
+  background: var(--border);
+}
+
+.node-half { position: relative; }
+
+.node-half::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--space-4));
+  left: 50%;
+  height: var(--space-4);
+  width: var(--hairline);
+  transform: translateX(-50%);
+  background: var(--border);
+}
+
+.map-note {
+  color: var(--text-muted);
+  font-size: var(--text-body);
+  margin: 0;
+}
+
+/* ── the two step sections ───────────────────────────────────────────────────────────── */
+
+.flow-side { margin-bottom: var(--space-12); }
+
+.flow-side-head {
+  font-family: var(--font-ui);
+  font-size: var(--text-h3);
+  font-weight: 600;
+  margin: 0 0 var(--space-8);
+}
 
 /* The chapter label. Mono caps at caption size, the register row meta already uses, because
    a chapter name is metadata about the steps rather than a step. The once/every split is the
@@ -53,9 +186,9 @@
 .flow > li:last-child { padding-bottom: 0; }
 .flow > li:last-child::before { display: none; }
 
-/* Same flex grammar as .act-head, one size down: seven step names on one page at --text-h3
+/* Same flex grammar as .act-head, one size down: twelve step names on one page at --text-h3
    would shout. 24px line height keeps the first text line centred on the 24px chip. */
-.flow h3 {
+.flow h4 {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -79,10 +212,10 @@
   color: var(--text-muted);
 }
 
-/* The one place the page spends colour: a pack claim beside its mark, borrowed whole from
-   act 3 (.mark and .claim-unverified are app.css's). --background rather than --surface for
-   the ground: the sample is a picture of the pack, and the pack renders on the page ground;
-   the hairline edge is what says "exhibit". */
+/* One of two places the page spends colour: a pack claim beside its mark, borrowed whole
+   from act 3 (.mark and .claim-unverified are app.css's). --background rather than --surface
+   for the ground: the sample is a picture of the pack, and the pack renders on the page
+   ground; the hairline edge is what says "exhibit". */
 .claim-sample {
   display: grid;
   gap: var(--space-3);
